@@ -82,7 +82,8 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            // The transaction editor has its own header with close and save.
+            if (!route.startsWith("transaction")) TopAppBar(
                 title = {
                     Text(
                         when {
