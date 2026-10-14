@@ -157,6 +157,8 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("reconcile-finish").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Reconciled and locked")).fetchSemanticsNodes().isNotEmpty() }
         compose.waitOrCapture("reconcile-adjustment-row") { compose.onAllNodes(hasText("Reconciliation balance adjustment", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        // The header reloads too: the cleared balance now equals the statement balance.
+        compose.waitOrCapture("reconcile-cleared-header") { compose.onAllNodes(hasText("$20,000.00")).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("13-after-reconcile")
     }
 

@@ -83,12 +83,15 @@ private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) 
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                // Actual shows an approximate amount as "~$X" and only a between-amount as a range.
                 when {
-                    item.amountLower != null && item.amountUpper != null -> Text("${money(item.amountLower!!)} – ${money(item.amountUpper!!)}")
-                    item.amountMinorUnits != null -> Row {
-                        if (item.isApproximate) Text("~", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    item.isApproximate && item.amountMinorUnits != null -> Row {
+                        Text("~", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         MoneyText(item.amountMinorUnits!!, colored = true)
                     }
+                    item.amountLower != null && item.amountUpper != null && item.amountLower != item.amountUpper ->
+                        Text("${money(item.amountLower!!)} – ${money(item.amountUpper!!)}")
+                    item.amountMinorUnits != null -> MoneyText(item.amountMinorUnits!!, colored = true)
                 }
             }
             Text(
