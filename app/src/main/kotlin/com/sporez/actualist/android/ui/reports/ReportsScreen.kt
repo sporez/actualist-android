@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +24,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -46,6 +50,7 @@ import com.sporez.actualist.android.ui.reloading
 import com.sporez.actualist.android.ui.theme.LocalMoneyColors
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.reports.MonthComparisonReport
+import com.sporez.actualist.core.reports.ReportCardOrder
 import com.sporez.actualist.core.reports.ReportCardReads
 import com.sporez.actualist.core.reports.ReportsDashboard
 import com.sporez.actualist.core.reports.ThreeMonthAverageReport
@@ -93,6 +98,24 @@ fun ReportsScreen(viewModel: ReportsViewModel, onExplore: () -> Unit = {}, onOpe
     val month by viewModel.month.collectAsState()
     val cardsState by viewModel.cards.collectAsState()
     val cards = (cardsState as? Loadable.Ready)?.value
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val orderStore = remember { ReportOrderStore(context) }
+    var order by remember { mutableStateOf(orderStore.load()) }
+    var editingOrder by remember { mutableStateOf(false) }
+    if (editingOrder) {
+        ReportOrderDialog(
+            order = order,
+            onMove = { id, delta ->
+                order = ReportCardOrder.move(order, id, delta)
+                orderStore.save(order)
+            },
+            onReset = {
+                orderStore.reset()
+                order = orderStore.load()
+            },
+            onDismiss = { editingOrder = false },
+        )
+    }
     Box(Modifier.fillMaxSize().testTag("reports-screen")) {
         when (val current = state) {
             Loadable.Loading -> LoadingBox()
@@ -115,20 +138,59 @@ fun ReportsScreen(viewModel: ReportsViewModel, onExplore: () -> Unit = {}, onOpe
                                 Text("Explore: any range, accounts and categories")
                             }
                         }
-                        item { NetWorthCard(dashboard) }
-                        item { CashFlowCard(dashboard) }
-                        if (cards != null) item { MonthComparisonCard(cards.comparison) }
-                        item { SpendingCard(dashboard, onOpenCategory) }
-                        item { BudgetComparisonCard(dashboard, onOpenCategory) }
-                        if (cards != null) {
-                            item { ThreeMonthAverageCard(cards.average) }
-                            item { TransactionCalendarCard(cards.calendar) }
+                        item {
+                            androidx.compose.material3.TextButton(onClick = { editingOrder = true }, modifier = Modifier.testTag("report-order-edit")) {
+                                Text("Edit card order")
+                            }
+                        }
+                        for (id in order) {
+                            when (id) {
+                                "net-worth" -> item(key = id) { NetWorthCard(dashboard) }
+                                "cash-flow" -> item(key = id) { CashFlowCard(dashboard) }
+                                "month-comparison" -> if (cards != null) item(key = id) { MonthComparisonCard(cards.comparison) }
+                                "spending" -> item(key = id) { SpendingCard(dashboard, onOpenCategory) }
+                                "budget-comparison" -> item(key = id) { BudgetComparisonCard(dashboard, onOpenCategory) }
+                                "three-month-average" -> if (cards != null) item(key = id) { ThreeMonthAverageCard(cards.average) }
+                                "transaction-calendar" -> if (cards != null) item(key = id) { TransactionCalendarCard(cards.calendar) }
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+private val cardTitles = mapOf(
+    "net-worth" to "Net Worth",
+    "cash-flow" to "Cash Flow",
+    "month-comparison" to "This Month",
+    "spending" to "Spending by Category",
+    "budget-comparison" to "Budget vs Spent",
+    "three-month-average" to "3-Month Average",
+    "transaction-calendar" to "Transaction Calendar",
+)
+
+/** Move cards up or down; the order is saved as it changes. "Reset Report Order" restores the default. */
+@Composable
+private fun ReportOrderDialog(order: List<String>, onMove: (String, Int) -> Unit, onReset: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Report order") },
+        text = {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()).testTag("report-order-list")) {
+                order.forEachIndexed { index, id ->
+                    Row(Modifier.fillMaxWidth().testTag("report-order-row-$id"), verticalAlignment = Alignment.CenterVertically) {
+                        Text(cardTitles[id] ?: id, Modifier.weight(1f))
+                        androidx.compose.material3.TextButton(onClick = { onMove(id, -1) }, enabled = index > 0, modifier = Modifier.testTag("report-order-up-$id")) { Text("Up") }
+                        androidx.compose.material3.TextButton(onClick = { onMove(id, 1) }, enabled = index < order.lastIndex, modifier = Modifier.testTag("report-order-down-$id")) { Text("Down") }
+                    }
+                }
+                androidx.compose.material3.TextButton(onClick = onReset, modifier = Modifier.testTag("report-order-reset")) { Text("Reset Report Order") }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss, modifier = Modifier.testTag("report-order-done")) { Text("Done") } },
+    )
 }
 
 @Composable
