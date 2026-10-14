@@ -46,6 +46,11 @@ class TemplateEditorWritesTest {
             val shopping = planned.categories.single { it.categoryId == "shopping" }
             assertTrue("$shopping", shopping.proposed > 0 && shopping.proposed < 600_000L)
 
+            // A schedule template budgets the schedule's amount for its next date.
+            writes.save("entertainment", TemplateEditorDraft(listOf(TemplateDraftEntry.schedule(name = "StreamFlix", scheduleId = "demo-schedule-streaming"))))
+            val streaming = BudgetTemplates(db, clock).preview("2026-11", today = day, categoryIds = setOf("entertainment"))
+            assertTrue("${streaming.errors} ${streaming.categories}", streaming.isReady && streaming.categories.single { it.categoryId == "entertainment" }.proposed > 0)
+
             // Saving an unchanged draft writes nothing; an empty draft clears the template.
             val unchanged = writes.load("dining")!!
             assertTrue(writes.save("dining", unchanged).isEmpty())
