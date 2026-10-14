@@ -80,6 +80,9 @@ class ActualServerClient(
     private val maximumDownloadBytes: Long = 256L * 1024 * 1024,
 ) : SyncTransport {
     val baseUrl: HttpUrl = validatedUrl(serverUrl)
+
+    /** The normalized server URL, for storing in settings. */
+    val url: String get() = baseUrl.toString()
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Login methods the server offers (`password`, `openid`, `header`). */

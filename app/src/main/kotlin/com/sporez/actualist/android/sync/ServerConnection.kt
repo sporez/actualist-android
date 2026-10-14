@@ -43,7 +43,7 @@ class ServerConnection(
         if ("password" !in methods) throw ServerException.HttpStatus(501)
         val token = client.login(password)
         secrets.putString(SecretStore.SERVER_TOKEN, token)
-        settings.update { it.copy(serverUrl = client.baseUrl.toString()) }
+        settings.update { it.copy(serverUrl = client.url) }
     }
 
     fun signOut() {
