@@ -29,7 +29,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Demo budget (no server, no credentials) | Done | — (JVM + emulator UI tests) |
 | Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
-| Budget templates: preview and apply | Done (no template editor) | TemplateApply 135 ×2, editor normalization family |
+| Budget templates: preview, apply, edit monthly templates | Done (other template kinds read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
 | Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge | Done | Transactions 21, TransactionCommand 39 |
 | Split transactions: create, edit, delete | Done | Splits 23 |
 | Search, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
@@ -41,9 +41,12 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Payees: rename, merge | Done | unit tests |
 | Reports: net worth, cash flow, spending | Done | UI screenshots |
 | Undo / redo of every local edit | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
+| SimpleFIN bank sync (through the Actual server, as Actualist) | Done: link, sync, unlink | 5 provider-mapping cases; unit tests; real-server status check |
+| Background sync (WorkManager, hourly, shared session) | Done | device test |
+| Server: OpenID sign-in (browser redirect) | Done | unit + device tests |
 | Server: password sign-in, (encrypted) download, sync with confirmation, merkle repair | Done | multi-device tests; JVM and on-device loopback server |
 | New budget creation and registration (plain or end-to-end encrypted) | Done | real actual-server 26.10.0 in CI |
-| Bank sync network fetch, OpenID login, account groups, widgets | Not ported | — |
+| GoCardless, direct SimpleFIN bridge, account groups, widgets, History screen | Not ported | — |
 
 ## Building
 

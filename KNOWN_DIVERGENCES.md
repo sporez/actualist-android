@@ -52,8 +52,9 @@ excused here by exactly the same cases and paths as Actualist's own replays.
 
 Oracle-only cases named by each manifest, exactly as Actualist does not replay
 them: budget month 1 (tracking move money), rules 24, schedules 2, transaction
-queries 13, import reconcile 19, splits 2, account lifecycle 6 (forced delete,
-GoCardless).
+queries 13, import reconcile 19 (5 of them, the provider field-mapping cases, are
+replayed by the SimpleFIN package instead), splits 2, account lifecycle 6 (forced
+delete, GoCardless).
 
 ## Undo
 
