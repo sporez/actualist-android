@@ -51,6 +51,13 @@ class TemplateEditorWritesTest {
             val streaming = BudgetTemplates(db, clock).preview("2026-11", today = day, categoryIds = setOf("entertainment"))
             assertTrue("${streaming.errors} ${streaming.categories}", streaming.isReady && streaming.categories.single { it.categoryId == "entertainment" }.proposed > 0)
 
+            // "Up to": a monthly balance limit plus a refill, as Actual's editor writes it.
+            writes.save("personal_care", TemplateEditorDraft(listOf(TemplateDraftEntry.balanceLimit(amount = 75.0), TemplateDraftEntry.refill())))
+            val stored = db.sql.queryString("SELECT goal_def FROM categories WHERE id = 'personal_care'")!!
+            assertTrue(stored, stored.contains("\"type\":\"limit\"") && stored.contains("\"type\":\"refill\""))
+            val upTo = BudgetTemplates(db, clock).preview("2026-11", today = day, categoryIds = setOf("personal_care"))
+            assertTrue("${upTo.errors} ${upTo.categories}", upTo.isReady && upTo.categories.single { it.categoryId == "personal_care" }.proposed in 0L..7_500L)
+
             // Saving an unchanged draft writes nothing; an empty draft clears the template.
             val unchanged = writes.load("dining")!!
             assertTrue(writes.save("dining", unchanged).isEmpty())
