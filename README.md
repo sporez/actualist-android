@@ -34,19 +34,19 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Split transactions: create, edit, delete | Done | Splits 23 |
 | Search, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
 | Rules: engine, editor, preview in the transaction editor, on import and reconciliation | Done | Rules 245 |
-| Schedules: recurrence, status, add, post, skip, complete, delete | Done (no full editor) | Schedules 136 + 49 + 66 |
+| Schedules: recurrence, status, add, edit (name, amount, auto-post), post, skip, complete, delete | Done (date rule edits in Actual) | Schedules 136 + 49 + 66 |
 | Accounts: add, rename, close (with balance transfer), reopen, SimpleFIN unlink | Done | AccountLifecycle 16 |
 | Reconciliation | Done | from Actualist's Reconciliation cases |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
 | Payees: rename, merge | Done | unit tests |
 | Reports: net worth, cash flow, spending | Done | UI screenshots |
-| Undo / redo of every local edit | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
+| Undo / redo of every local edit, History screen | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
 | SimpleFIN bank sync (through the Actual server, as Actualist) | Done: link, sync, unlink | 5 provider-mapping cases; unit tests; real-server status check |
 | Background sync (WorkManager, hourly, shared session) | Done | device test |
 | Server: OpenID sign-in (browser redirect) | Done | unit + device tests |
 | Server: password sign-in, (encrypted) download, sync with confirmation, merkle repair | Done | multi-device tests; JVM and on-device loopback server |
 | New budget creation and registration (plain or end-to-end encrypted) | Done | real actual-server 26.10.0 in CI |
-| GoCardless, direct SimpleFIN bridge, account groups, widgets, History screen | Not ported | — |
+| GoCardless, direct SimpleFIN bridge, account groups, widgets | Not ported | — |
 
 ## Building
 
