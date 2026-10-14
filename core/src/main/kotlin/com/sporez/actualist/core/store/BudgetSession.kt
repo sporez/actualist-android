@@ -79,6 +79,9 @@ class BudgetSession(
         }.also { changed() }
     }
 
+    /** The session's recorded gestures, newest first. */
+    suspend fun historyItems(): List<UndoHistory.Item> = withContext(io) { history.items() }
+
     /** Undoes the latest write; false when there was nothing to undo. Throws when it was edited since. */
     suspend fun undo(): Boolean = historyStep { history.undo() != null }
 

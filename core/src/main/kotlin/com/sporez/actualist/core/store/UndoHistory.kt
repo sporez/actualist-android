@@ -30,10 +30,17 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
         database.undoListener = { batch -> recording?.add(batch) }
     }
 
-    val canUndo: Boolean get() = cursor > 0
-    val canRedo: Boolean get() = cursor < entries.size
+    val canUndo: Boolean @Synchronized get() = cursor > 0
+    val canRedo: Boolean @Synchronized get() = cursor < entries.size
+
+    data class Item(val summary: String, val undone: Boolean)
+
+    /** Recorded gestures, newest first, for a History screen. */
+    @Synchronized
+    fun items(): List<Item> = entries.mapIndexed { index, entry -> Item(describe(entry.batches), index >= cursor) }.reversed()
 
     /** Runs [block], recording everything it commits as one gesture. Nested calls join the outer one. */
+    @Synchronized
     fun <T> record(block: () -> T): T {
         if (recording != null) return block()
         val batches = mutableListOf<UndoBatch>()
@@ -53,6 +60,7 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     }
 
     /** Reverses the latest gesture and returns the cells written; null when there is nothing to undo. */
+    @Synchronized
     fun undo(): List<SyncMessage>? {
         if (!canUndo) return null
         val entry = entries[cursor - 1]
@@ -63,6 +71,7 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     }
 
     /** Re-applies the gesture undone last and returns the cells written; null when there is nothing to redo. */
+    @Synchronized
     fun redo(): List<SyncMessage>? {
         if (!canRedo) return null
         val entry = entries[cursor]
@@ -85,6 +94,7 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
         return written
     }
 
+    @Synchronized
     fun clear() {
         entries.clear()
         cursor = 0
@@ -97,6 +107,44 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     }
 
     private companion object {
+        private val alwaysChanged = setOf("zero_budgets", "reflect_budgets", "zero_budget_months", "notes")
+
+        private val labels = mapOf(
+            "transactions" to ("transaction" to "transactions"),
+            "zero_budgets" to ("budget amount" to "budget amounts"),
+            "reflect_budgets" to ("budget amount" to "budget amounts"),
+            "zero_budget_months" to ("month" to "months"),
+            "categories" to ("category" to "categories"),
+            "category_groups" to ("category group" to "category groups"),
+            "payees" to ("payee" to "payees"),
+            "accounts" to ("account" to "accounts"),
+            "rules" to ("rule" to "rules"),
+            "schedules" to ("schedule" to "schedules"),
+            "notes" to ("note" to "notes"),
+            "transaction_filters" to ("saved filter" to "saved filters"),
+        )
+
+        /** "Added 1 transaction, 1 payee; changed 1 budget amount", from the rows the gesture touched. */
+        fun describe(batches: List<UndoBatch>): String {
+            // A budget cell or note row appearing for the first time reads as a change, not an addition.
+            val created = batches.flatMap { it.createdRows }.filter { it.first !in alwaysChanged }.toSet()
+            val deleted = batches.flatMap { it.deletedRows }.toSet() - created
+            val touched = batches.flatMap { batch -> batch.messages.map { it.dataset to it.row } }.toSet()
+            val changed = touched - created - deleted
+            fun phrase(verb: String, rows: Set<Pair<String, String>>): String? {
+                val counts = rows.filter { it.first in labels }.groupingBy { it.first }.eachCount()
+                if (counts.isEmpty()) return null
+                return verb + " " + counts.entries.joinToString(", ") { (dataset, n) ->
+                    val (one, many) = labels.getValue(dataset)
+                    "$n ${if (n == 1) one else many}"
+                }
+            }
+            val parts = listOfNotNull(phrase("Added", created), phrase("Deleted", deleted), phrase("Changed", changed))
+            return if (parts.isEmpty()) "Changed the budget" else parts.joinToString("; ").let { first ->
+                first.substring(0, 1) + first.substring(1).replace("; Deleted", "; deleted").replace("; Changed", "; changed")
+            }
+        }
+
         fun merged(batches: List<UndoBatch>): Map<Pair<String, String>, Map<String, String>?> {
             val rows = LinkedHashMap<Pair<String, String>, Map<String, String>?>()
             for (batch in batches) rows.putAll(batch.rowsAfter)

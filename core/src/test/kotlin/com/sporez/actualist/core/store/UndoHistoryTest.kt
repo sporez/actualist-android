@@ -38,6 +38,7 @@ class UndoHistoryTest {
         val before = db.budgeted("groceries")
         history.record { BudgetWrites(db).assign("2026-10", "groceries", before + 12_300) }
         assertTrue(history.canUndo)
+        assertEquals(UndoHistory.Item("Changed 1 budget amount", undone = false), history.items().single())
         val undone = history.undo()!!
         assertEquals(before, db.budgeted("groceries"))
         assertTrue(undone.all { it.dataset == "zero_budgets" && it.column == "amount" })
@@ -57,7 +58,9 @@ class UndoHistoryTest {
         }
         fun visible() = LedgerReads(db).transactions(TransactionQuery(accountId = "checking")).any { it.id == id }
         assertTrue(visible())
+        assertEquals("Added 1 transaction, 1 payee", history.items().single().summary)
         val undone = history.undo()!!
+        assertTrue(history.items().single().undone)
         assertFalse(visible())
         // Every cell of the new row becomes a tombstone cell, in reverse order, as Actual emits.
         assertTrue(undone.filter { it.row == id }.all { it.column == "tombstone" && it.serializedValue == "N:1" })

@@ -101,6 +101,12 @@ class DemoBudgetFlowTest {
         compose.waitForTag("redo")
         compose.onNodeWithTag("redo").performClick()
         compose.waitUntil(30_000) { toBudgetText() == assigned }
+        // History lists the gesture.
+        compose.onNodeWithTag("open-settings").performClick()
+        compose.waitForTag("show-history")
+        compose.onNodeWithTag("show-history").performClick()
+        compose.waitOrCapture("history") { compose.onAllNodes(hasText("Changed 1 budget amount")).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("09-history")
     }
 
     @Test

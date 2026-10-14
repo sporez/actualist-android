@@ -17,7 +17,13 @@ class UndoBatch(
     val redoCells: List<CellDraft>,
     /** Every touched row as the batch left it; undo and redo require these rows unchanged. */
     val rowsAfter: Map<Pair<String, String>, Map<String, String>?> = emptyMap(),
+    /** Rows the batch created. */
+    val createdRows: Set<Pair<String, String>> = emptySet(),
 ) {
+    /** Rows the batch tombstoned. */
+    val deletedRows: Set<Pair<String, String>>
+        get() = messages.filter { it.column == "tombstone" && it.serializedValue == "N:1" }.map { it.dataset to it.row }.toSet()
+
     companion object {
         private val budgetTables = setOf("zero_budget_months", "zero_budgets", "reflect_budgets")
         private val reversibleBudgetColumns = setOf("buffered", "amount", "carryover")
@@ -38,7 +44,8 @@ class UndoBatch(
                 }
             }
             val redo = drafts + resurrect.map { (dataset, row) -> CellDraft(dataset, row, "tombstone", SyncValue.int(0)) }
-            return UndoBatch(messages, undo, redo, rowsAfter)
+            val created = drafts.map { it.dataset to it.row }.filter { oldRows.containsKey(it) && oldRows[it] == null }.toSet()
+            return UndoBatch(messages, undo, redo, rowsAfter, created)
         }
 
         fun undoCell(draft: CellDraft, oldRow: SqlRow?): CellDraft? {

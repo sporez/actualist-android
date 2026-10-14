@@ -123,6 +123,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                             route.startsWith("rule-edit") -> "Rule"
                             route == "payees" -> "Payees"
                             route == "schedules" -> "Schedules"
+                            route == "history" -> "History"
                             route.startsWith("account/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Account"
                             route.startsWith("category/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Category"
                             route == "server" -> "Server"
@@ -213,7 +214,11 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                     onShowRules = { navController.navigate("rules") },
                     onShowPayees = { navController.navigate("payees") },
                     onShowSchedules = { navController.navigate("schedules") },
+                    onShowHistory = { navController.navigate("history") },
                 )
+            }
+            composable("history") {
+                com.sporez.actualist.android.ui.settings.HistoryScreen(session)
             }
             composable("schedules") {
                 val vm = viewModel(key = "schedules-$key") { com.sporez.actualist.android.ui.settings.SchedulesViewModel(session) }
