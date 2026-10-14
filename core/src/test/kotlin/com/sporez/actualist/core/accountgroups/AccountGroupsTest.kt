@@ -28,7 +28,8 @@ class AccountGroupsTest {
     @Test
     fun createAppendsSortOrderAndRejectsDuplicates() {
         starterWithAccounts().use { database ->
-            val groups = groupsOf(database, listOf("cash", "cash-2").iterator())
+            // create() takes an id before validating, as Actualist's command does: one per attempt.
+            val groups = groupsOf(database, listOf("cash", "cash-2", "cash-3").iterator())
             groups.create("Cash")
             val listed = groups.groups()
             assertEquals(listOf("cash"), listed.map { it.id })
@@ -192,12 +193,12 @@ class AccountGroupsTest {
             groups.moveAccount("checking", everyday)
             groups.moveAccount("savings", everyday)
             groups.moveAccount("credit", debt)
-            assertEquals(mapOf("checking" to everyday, "savings" to everyday, "credit" to debt), groups.accountGroupIds())
+            assertEquals(mapOf("carloan" to null, "checking" to everyday, "savings" to everyday, "credit" to debt), groups.accountGroupIds())
             groups.moveGroup(debt, everyday)
             assertEquals(listOf("Debt", "Everyday"), groups.groups().map { it.name })
             groups.delete(everyday)
             assertEquals(listOf("Debt"), groups.groups().map { it.name })
-            assertEquals(mapOf("checking" to null, "savings" to null, "credit" to debt), groups.accountGroupIds())
+            assertEquals(mapOf("carloan" to null, "checking" to null, "savings" to null, "credit" to debt), groups.accountGroupIds())
             assertTrue(database.pendingLocalMessageCount() > 0)
         }
     }
