@@ -1,0 +1,17 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+emulator-output/
+*.keystore
+*.jks
+# Never commit budget data or credentials.
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+!core/src/test/resources/**/*.sqlite
