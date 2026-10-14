@@ -303,6 +303,18 @@ class TransactionsViewModel(
         server!!.simpleFin(database, clock).link(it, remote)
     }
 
+    val hasSimpleFinBridge: Boolean get() = server?.hasSimpleFinBridge == true
+
+    /** Connects SimpleFIN on this device when the server does not host it (Actualist's direct bridge). */
+    suspend fun connectSimpleFinBridge(setupToken: String) {
+        server?.connectSimpleFinBridge(setupToken)
+    }
+
+    fun disconnectSimpleFinBridge() {
+        server?.disconnectSimpleFinBridge()
+        viewModelScope.launch { messages.show("SimpleFIN disconnected from this device") }
+    }
+
     fun unlinkBank() = accountWrite("Unlinked from the bank") { server!!.simpleFin(database, clock).unlink(it) }
 
     /** Downloads and imports this account's bank transactions (not an undoable edit, like a server sync). */
@@ -787,6 +799,37 @@ private fun BankSyncSection(viewModel: TransactionsViewModel, onDismiss: () -> U
             ) { Text("Link to a SimpleFIN account…") }
         }
         problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        // When the server does not host SimpleFIN, connect it on this device with a setup token.
+        if (problem != null && !viewModel.hasSimpleFinBridge) {
+            var setupToken by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            androidx.compose.material3.OutlinedTextField(
+                setupToken,
+                { setupToken = it },
+                label = { Text("SimpleFIN setup token") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("simplefin-setup-token"),
+            )
+            TextButton(
+                enabled = setupToken.isNotBlank(),
+                onClick = {
+                    scope.launch {
+                        problem = try {
+                            viewModel.connectSimpleFinBridge(setupToken)
+                            remotes = viewModel.simpleFinAccounts()
+                            null
+                        } catch (error: Exception) {
+                            error.message ?: "SimpleFIN could not be connected."
+                        }
+                    }
+                },
+                modifier = Modifier.testTag("simplefin-connect-device"),
+            ) { Text("Connect SimpleFIN on this device") }
+        }
+        if (viewModel.hasSimpleFinBridge) {
+            TextButton(onClick = { viewModel.disconnectSimpleFinBridge(); onDismiss() }, modifier = Modifier.testTag("simplefin-disconnect-device")) {
+                Text("Disconnect SimpleFIN on this device")
+            }
+        }
     }
     remotes?.let { list ->
         com.sporez.actualist.android.ui.components.PickerDialog(

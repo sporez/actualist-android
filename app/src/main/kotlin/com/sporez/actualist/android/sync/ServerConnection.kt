@@ -204,15 +204,26 @@ class ServerConnection(
         createBudget(name, encryptionPassword, importArchive = zip)
 
     /** SimpleFIN bank sync for [database] through this server, which holds the SimpleFIN token (as in Actualist). */
-    fun simpleFin(database: com.sporez.actualist.core.db.BudgetDatabase, clock: com.sporez.actualist.core.db.Clock): com.sporez.actualist.core.banksync.SimpleFinSync =
-        com.sporez.actualist.core.banksync.SimpleFinSync(
-            database,
-            (settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()).let { url ->
-                com.sporez.actualist.core.server.ServerClients.simpleFin(url, customHeaders(url))
-            },
-            token(),
-            clock,
-        )
+    fun simpleFin(database: com.sporez.actualist.core.db.BudgetDatabase, clock: com.sporez.actualist.core.db.Clock): com.sporez.actualist.core.banksync.SimpleFinSync {
+        val url = settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()
+        val server = com.sporez.actualist.core.server.ServerClients.simpleFin(url, customHeaders(url))
+        val token = token()
+        // Actualist's provider choice: the server's SimpleFIN when configured, else this device's bridge key.
+        val transport = com.sporez.actualist.core.banksync.bridge.SimpleFinBridge.choose(server, token, secrets.getString(SIMPLEFIN_BRIDGE))
+        return com.sporez.actualist.core.banksync.SimpleFinSync(database, transport, token, clock)
+    }
+
+    /** Whether this device holds its own SimpleFIN access key (the direct bridge). */
+    val hasSimpleFinBridge: Boolean get() = secrets.getString(SIMPLEFIN_BRIDGE) != null
+
+    /** Claims a SimpleFIN setup token on this device; the access key stays in the Keystore-backed store. */
+    suspend fun connectSimpleFinBridge(setupToken: String) = withContext(Dispatchers.IO) {
+        secrets.putString(SIMPLEFIN_BRIDGE, com.sporez.actualist.core.banksync.bridge.SimpleFinBridge.claimToStoredKey(setupToken))
+    }
+
+    fun disconnectSimpleFinBridge() {
+        secrets.remove(SIMPLEFIN_BRIDGE)
+    }
 
     /** One sync pass for an open (non-demo) session. Never reports success early. */
     suspend fun sync(session: BudgetSession): SyncStatus {
@@ -260,5 +271,6 @@ class ServerConnection(
     private companion object {
         const val OPENID_PENDING = "openid.pending"
         const val CUSTOM_HEADERS = "server.custom_headers"
+        const val SIMPLEFIN_BRIDGE = "simplefin.bridge_access_key"
     }
 }
