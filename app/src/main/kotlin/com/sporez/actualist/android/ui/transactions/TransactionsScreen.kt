@@ -70,6 +70,12 @@ data class TransactionListState(
     val filterProblem: String? = null,
 )
 
+/** Conditions applied to the feed, saved or not. */
+data class AppliedFilter(
+    val conditions: List<com.sporez.actualist.core.query.QueryCondition>,
+    val join: com.sporez.actualist.core.query.QueryJoin,
+)
+
 /** A transaction list, optionally scoped to one account or category. */
 class TransactionsViewModel(
     private val session: BudgetSession,
@@ -84,19 +90,28 @@ class TransactionsViewModel(
     private val _filterId = MutableStateFlow<String?>(null)
     val filterId: StateFlow<String?> = _filterId.asStateFlow()
 
-    val state = reloading(session, kotlinx.coroutines.flow.combine(_query, _filterId) { q, f -> q to f }) { (q, filterId) ->
+    /** The conditions currently applied (a saved filter's, or ones applied from the sheet without saving). */
+    private val _adhoc = MutableStateFlow<AppliedFilter?>(null)
+    val adhoc: StateFlow<AppliedFilter?> = _adhoc.asStateFlow()
+
+    val state = reloading(session, kotlinx.coroutines.flow.combine(_query, _filterId, _adhoc) { q, f, a -> Triple(q, f, a) }) { (q, filterId, applied) ->
         val queries = com.sporez.actualist.core.query.TransactionQueries(database)
         val filters = runCatching { queries.savedFilters() }.getOrDefault(emptyList())
         val filter = filterId?.let { id -> filters.firstOrNull { it.id == id } }
         var problem: String? = null
-        val rows = if (filter == null) {
+        val rows = if (applied == null && filterId == null) {
             ledger.transactions(q)
         } else {
             // The ported query engine decides membership (split families group to their parent);
             // rows render through the same ledger read as the unfiltered list.
-            val page = queries.query(filter, accountId = q.accountId, text = q.search?.takeIf { it.isNotBlank() })
+            val text = q.search?.takeIf { it.isNotBlank() }
+            val page = if (applied != null) {
+                queries.query(accountId = q.accountId, conditions = applied.conditions, join = applied.join, text = text)
+            } else {
+                filter?.let { queries.query(it, accountId = q.accountId, text = text) }
+            }
             if (page == null) {
-                problem = "\"${filter.name}\" uses a condition this app cannot run yet."
+                problem = "\"${filter?.name ?: "This filter"}\" uses a condition this app cannot run yet."
                 emptyList()
             } else {
                 val ids = page.transactions.mapNotNull { it.id }.toSet()
@@ -112,33 +127,88 @@ class TransactionsViewModel(
         )
     }
 
+    /** Picks a saved filter (a second tap clears it); its conditions become the applied ones. */
     fun selectFilter(id: String?) {
-        _filterId.value = if (_filterId.value == id) null else id
+        if (id == null || _filterId.value == id) {
+            _filterId.value = null
+            _adhoc.value = null
+            return
+        }
+        _filterId.value = id
+        val filter = state.value.let { (it as? Loadable.Ready)?.value?.savedFilters }?.firstOrNull { it.id == id }
+        val conditions = filter?.queryConditions
+        val join = filter?.queryJoin
+        _adhoc.value = if (conditions != null && join != null) AppliedFilter(conditions, join) else null
     }
 
-    suspend fun filterChoices(field: String): List<com.sporez.actualist.android.ui.components.PickerOption> = session.read {
-        when (field) {
-            "payee" -> ledger.payees().filter { !it.isTransfer }.map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name) }
-            "category" -> ledger.categories(includeHidden = true).map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name, it.groupName) }
-            else -> ledger.accounts().map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name) }
+    /** Applies conditions from the filter sheet without saving them. */
+    fun applyFilter(conditions: List<com.sporez.actualist.core.query.QueryCondition>, join: com.sporez.actualist.core.query.QueryJoin) {
+        _filterId.value = null
+        _adhoc.value = if (conditions.isEmpty()) null else AppliedFilter(conditions, join)
+    }
+
+    fun resetFilter() {
+        _filterId.value = null
+        _adhoc.value = null
+    }
+
+    /** Every account, payee and category the filter sheet can pick, keyed by field. */
+    suspend fun filterOptions(): Map<com.sporez.actualist.core.query.TransactionFilterField, List<com.sporez.actualist.android.ui.components.PickerOption>> = session.read {
+        mapOf(
+            com.sporez.actualist.core.query.TransactionFilterField.ACCOUNT to ledger.accounts().map {
+                com.sporez.actualist.android.ui.components.PickerOption(it.id, if (it.closed) "${it.name} (Closed)" else it.name)
+            },
+            com.sporez.actualist.core.query.TransactionFilterField.PAYEE to ledger.payees().filter { !it.isTransfer }.map {
+                com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name)
+            },
+            com.sporez.actualist.core.query.TransactionFilterField.CATEGORY to ledger.categories(includeHidden = true).map {
+                com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name, it.groupName)
+            },
+        )
+    }
+
+    private fun failure(error: Exception, fallback: String): String =
+        (error as? com.sporez.actualist.core.LocalFirstException.InvalidLocalWrite)?.reason ?: error.message ?: fallback
+
+    /** Saves conditions as an Actual saved filter and applies it (duplicate names and conditions are refused). */
+    fun saveFilter(
+        name: String,
+        conditions: List<com.sporez.actualist.core.query.QueryCondition>,
+        join: com.sporez.actualist.core.query.QueryJoin,
+    ) {
+        viewModelScope.launch {
+            try {
+                val id = session.write { com.sporez.actualist.core.query.TransactionQueries(database).createFilter(name, conditions, join) }
+                _adhoc.value = AppliedFilter(conditions, join)
+                _filterId.value = id
+                messages.show("Saved filter ${name.trim()}")
+            } catch (error: Exception) {
+                messages.show(failure(error, "The filter could not be saved."))
+            }
         }
     }
 
-    /** Saves "<field> is <value>" as an Actual saved filter (duplicate names and conditions are refused). */
-    fun createFilter(name: String, field: String, valueId: String) {
+    fun renameFilter(id: String, name: String) {
         viewModelScope.launch {
             try {
-                val id = session.write {
-                    com.sporez.actualist.core.query.TransactionQueries(database).createFilter(
-                        name,
-                        listOf(com.sporez.actualist.core.rules.RuleCondition(field, "is", com.sporez.actualist.core.rules.RuleValue.Text(valueId), "id")),
-                        com.sporez.actualist.core.rules.RuleConditionJoin.AND,
-                    )
-                }
-                _filterId.value = id
-                messages.show("Saved filter $name")
+                session.write { com.sporez.actualist.core.query.TransactionQueries(database).renameFilter(id, name) }
+                messages.show("Renamed to ${name.trim()}")
             } catch (error: Exception) {
-                messages.show(error.message ?: "The filter could not be saved.")
+                messages.show(failure(error, "The filter could not be renamed."))
+            }
+        }
+    }
+
+    /** Replaces a saved filter's conditions with the ones currently applied. */
+    fun updateFilterWithCurrent(id: String) {
+        val applied = _adhoc.value ?: return
+        viewModelScope.launch {
+            try {
+                session.write { com.sporez.actualist.core.query.TransactionQueries(database).updateFilter(id, applied.conditions, applied.join) }
+                _filterId.value = id
+                messages.show("Filter updated")
+            } catch (error: Exception) {
+                messages.show(failure(error, "The filter could not be updated."))
             }
         }
     }
@@ -147,10 +217,13 @@ class TransactionsViewModel(
         viewModelScope.launch {
             try {
                 session.write { com.sporez.actualist.core.query.TransactionQueries(database).deleteFilter(id) }
-                if (_filterId.value == id) _filterId.value = null
+                if (_filterId.value == id) {
+                    _filterId.value = null
+                    _adhoc.value = null
+                }
                 messages.show("Filter deleted")
             } catch (error: Exception) {
-                messages.show(error.message ?: "The filter could not be deleted.")
+                messages.show(failure(error, "The filter could not be deleted."))
             }
         }
     }
@@ -690,12 +763,22 @@ private fun AccountDialog(account: Account, viewModel: TransactionsViewModel, on
 @Composable
 private fun FilterChipsRow(list: TransactionListState, viewModel: TransactionsViewModel) {
     val active by viewModel.filterId.collectAsState()
-    var creating by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val applied by viewModel.adhoc.collectAsState()
+    var sheet by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var managing by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.foundation.lazy.LazyRow(
         Modifier.fillMaxWidth().testTag("saved-filters"),
         contentPadding = PaddingValues(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        item {
+            FilterChip(
+                selected = applied != null && active == null,
+                onClick = { sheet = true },
+                label = { Text(if (applied != null) "Filters (${applied?.conditions?.size ?: 0})" else "More Filters") },
+                modifier = Modifier.testTag("filter-new"),
+            )
+        }
         items(list.savedFilters, key = { it.id }) { filter ->
             FilterChip(
                 selected = active == filter.id,
@@ -704,64 +787,16 @@ private fun FilterChipsRow(list: TransactionListState, viewModel: TransactionsVi
                 modifier = Modifier.testTag("filter-${filter.id}"),
             )
         }
-        item {
-            FilterChip(selected = false, onClick = { creating = true }, label = { Text("+ Filter") }, modifier = Modifier.testTag("filter-new"))
+        if (applied != null || active != null) {
+            item { TextButton(onClick = viewModel::resetFilter, modifier = Modifier.testTag("filter-reset-chip")) { Text("Reset Filters") } }
         }
-        active?.let { id ->
-            item { TextButton(onClick = { viewModel.deleteFilter(id) }, modifier = Modifier.testTag("filter-delete")) { Text("Delete filter") } }
+        if (list.savedFilters.isNotEmpty()) {
+            item { TextButton(onClick = { managing = true }, modifier = Modifier.testTag("filter-manage")) { Text("Saved Filters") } }
         }
     }
-    if (creating) NewFilterDialog(viewModel) { creating = false }
+    if (sheet) TransactionFilterSheet(viewModel, onDismiss = { sheet = false })
+    if (managing) SavedFiltersDialog(list.savedFilters, active, applied != null, viewModel, onDismiss = { managing = false })
 }
-
-@Composable
-private fun NewFilterDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
-    var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
-    var field by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("payee") }
-    var value by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.sporez.actualist.android.ui.components.PickerOption?>(null) }
-    var choices by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<com.sporez.actualist.android.ui.components.PickerOption>?>(null) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New filter") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("filter-name"))
-                Row {
-                    for (option in listOf("payee", "category", "account")) {
-                        FilterChip(
-                            selected = field == option,
-                            onClick = { field = option; value = null },
-                            label = { Text(option.replaceFirstChar { it.uppercase() }) },
-                            modifier = Modifier.padding(end = 6.dp).testTag("filter-field-$option"),
-                        )
-                    }
-                }
-                TextButton(onClick = { scope.launch { choices = viewModel.filterChoices(field) } }, modifier = Modifier.testTag("filter-value")) {
-                    Text(value?.let { "is ${it.title}" } ?: "Choose a ${field}")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank() && value != null,
-                onClick = { value?.id?.let { viewModel.createFilter(name.trim(), field, it) }; onDismiss() },
-                modifier = Modifier.testTag("filter-save"),
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-    choices?.let { options ->
-        com.sporez.actualist.android.ui.components.PickerDialog(
-            title = field.replaceFirstChar { it.uppercase() },
-            options = options,
-            searchable = true,
-            onPick = { value = it; choices = null },
-            onDismiss = { choices = null },
-        )
-    }
-}
-
 
 /** Link this account to a SimpleFIN account on the server, sync it, or unlink it. */
 @Composable

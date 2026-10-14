@@ -66,6 +66,38 @@ internal class SavedFilterStore(private val database: BudgetDatabase) {
         return id
     }
 
+    /**
+     * Renames and/or replaces the conditions of a live, supported filter (Actualist
+     * `updateSavedTransactionFilter`). Null [name] or null [conditions] leave that part alone.
+     * Throws `InvalidLocalWrite` for a missing or unsupported filter, a blank or duplicate name,
+     * or empty or duplicate conditions.
+     */
+    fun update(id: String, name: String?, conditions: List<RuleCondition>?, join: RuleConditionJoin?) {
+        database.commitLocal {
+            val columns = writableColumns()
+            val peers = liveFilters()
+            val existing = peers.firstOrNull { it.id == id } ?: throw SavedFilterMutationError.MissingFilter.exception()
+            if (!existing.isSupported) throw SavedFilterMutationError.UnsupportedFilter.exception()
+            val newName = name?.let { validatedName(it) }
+            if (newName != null) {
+                SavedFilterComparator.duplicateName(newName, id, peers)?.let {
+                    throw SavedFilterMutationError.DuplicateName(it.name).exception()
+                }
+            }
+            var raw: String? = null
+            var newJoin: RuleConditionJoin? = null
+            if (conditions != null) {
+                if (conditions.isEmpty()) throw SavedFilterMutationError.MissingConditions.exception()
+                newJoin = join ?: RuleConditionJoin.fromRaw(existing.conditionsOperation ?: "and") ?: RuleConditionJoin.AND
+                SavedFilterComparator.duplicateConditions(conditions, newJoin, id, peers)?.let {
+                    throw SavedFilterMutationError.DuplicateConditions(it.name).exception()
+                }
+                raw = encodedSupportedConditions(conditions, newJoin)
+            }
+            messages(id, newName, raw, newJoin, null, columns) to Unit
+        }
+    }
+
     /** Marks the filter deleted. Throws `InvalidLocalWrite` when no live filter has the id. */
     fun delete(id: String) {
         database.commitLocal {

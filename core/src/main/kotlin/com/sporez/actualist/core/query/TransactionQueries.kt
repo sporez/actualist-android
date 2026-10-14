@@ -84,6 +84,16 @@ class TransactionQueries(
         return createFilter(name, stored, storedJoin)
     }
 
+    /** Renames a live saved filter; throws `InvalidLocalWrite` for a blank or duplicate name or an unsupported filter. */
+    fun renameFilter(id: String, name: String) = filterStore.update(id, name, null, null)
+
+    /** Replaces a saved filter's conditions (and join) with [conditions]; a transfer condition is refused. */
+    fun updateFilter(id: String, conditions: List<QueryCondition>, join: QueryJoin) {
+        val stored = conditions.map { SavedFilter.ruleCondition(it) ?: throw SavedFilterMutationError.UnsupportedFilter.exception() }
+        val storedJoin = if (join == QueryJoin.AND) RuleConditionJoin.AND else RuleConditionJoin.OR
+        filterStore.update(id, null, stored, storedJoin)
+    }
+
     /** Marks a saved filter deleted. Throws `InvalidLocalWrite` when it is not a live filter. */
     fun deleteFilter(id: String) = filterStore.delete(id)
 }
