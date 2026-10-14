@@ -33,12 +33,38 @@ class ServerConnection(
 
     val isSignedIn: Boolean get() = settings.settings.value.serverUrl != null && secrets.getString(SecretStore.SERVER_TOKEN) != null
 
-    private fun client(url: String = settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()) = ActualServerClient(url)
+    private fun client(url: String = settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()) =
+        ActualServerClient(url, com.sporez.actualist.core.server.httpClientWithHeaders(customHeaders(url)))
+
+    /** The saved custom headers, as `Name: value` lines, and the server they belong to. */
+    fun savedCustomHeaders(): Pair<String, String>? =
+        secrets.getString(CUSTOM_HEADERS)?.let { it.substringBefore('\u0000') to it.substringAfter('\u0000') }
+
+    /** Headers for [url]'s origin only (Actualist scopes them to the server they were saved for). */
+    private fun customHeaders(url: String): com.sporez.actualist.core.server.EndpointHeaders? {
+        val (savedUrl, text) = savedCustomHeaders() ?: return null
+        val endpoint = runCatching { com.sporez.actualist.core.server.EndpointHeaders(savedUrl, com.sporez.actualist.core.server.EndpointHeaders.parse(text)) }.getOrNull()
+        val target = url.toHttpUrlOrNullSafe() ?: return null
+        return endpoint?.takeIf { it.appliesTo(target) }
+    }
+
+    private fun String.toHttpUrlOrNullSafe(): okhttp3.HttpUrl? = runCatching { ActualServerClient(this).baseUrl }.getOrNull()
+
+    /** Validates and stores custom headers for [serverUrl] (blank removes them). Throws with a readable reason. */
+    fun saveCustomHeaders(serverUrl: String, text: String) {
+        if (text.isBlank()) {
+            secrets.remove(CUSTOM_HEADERS)
+            return
+        }
+        val url = ActualServerClient(serverUrl).url
+        com.sporez.actualist.core.server.EndpointHeaders(url, com.sporez.actualist.core.server.EndpointHeaders.parse(text))
+        secrets.putString(CUSTOM_HEADERS, url + "\u0000" + text.trim())
+    }
 
     private fun token(): String = secrets.getString(SecretStore.SERVER_TOKEN) ?: throw ServerException.AuthenticationFailed()
 
     suspend fun signIn(serverUrl: String, password: String) = withContext(Dispatchers.IO) {
-        val client = ActualServerClient(serverUrl)
+        val client = client(serverUrl)
         val methods = client.loginMethods()
         if ("password" !in methods) throw ServerException.HttpStatus(501)
         val token = client.login(password)
@@ -61,7 +87,7 @@ class ServerConnection(
      * process restart).
      */
     suspend fun beginOpenId(serverUrl: String, scheme: String): String = withContext(Dispatchers.IO) {
-        val client = ActualServerClient(serverUrl)
+        val client = client(serverUrl)
         if ("openid" !in client.loginMethods()) throw com.sporez.actualist.core.server.OpenIdException("This server does not offer OpenID sign-in.")
         val nonce = com.sporez.actualist.core.server.OpenIdLogin.makeNonce()
         val authorize = client.beginOpenIdLogin(com.sporez.actualist.core.server.OpenIdLogin.returnUrl(scheme, nonce))
@@ -184,7 +210,9 @@ class ServerConnection(
     fun simpleFin(database: com.sporez.actualist.core.db.BudgetDatabase, clock: com.sporez.actualist.core.db.Clock): com.sporez.actualist.core.banksync.SimpleFinSync =
         com.sporez.actualist.core.banksync.SimpleFinSync(
             database,
-            com.sporez.actualist.core.banksync.SimpleFinServerClient(settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()),
+            (settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()).let { url ->
+                com.sporez.actualist.core.banksync.SimpleFinServerClient(url, com.sporez.actualist.core.server.httpClientWithHeaders(customHeaders(url)))
+            },
             token(),
             clock,
         )
@@ -234,5 +262,6 @@ class ServerConnection(
 
     private companion object {
         const val OPENID_PENDING = "openid.pending"
+        const val CUSTOM_HEADERS = "server.custom_headers"
     }
 }

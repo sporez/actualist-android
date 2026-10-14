@@ -84,6 +84,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
     var files by remember { mutableStateOf<List<RemoteFile>?>(null) }
     var encrypted by remember { mutableStateOf<RemoteFile?>(null) }
     var budgetPassword by remember { mutableStateOf("") }
+    var headersText by remember { mutableStateOf(server.savedCustomHeaders()?.second.orEmpty()) }
 
     fun load() {
         scope.launch {
@@ -134,6 +135,14 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
         error?.let { ErrorBanner(it, Modifier.testTag("server-error")) }
         if (!server.isSignedIn) {
             OutlinedTextField(url, { url = it }, label = { Text("Server URL") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth().testTag("server-url-field"))
+            OutlinedTextField(
+                headersText,
+                { headersText = it },
+                label = { Text("Custom headers (optional), Name: value per line") },
+                minLines = 1,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth().testTag("server-custom-headers"),
+            )
             OutlinedTextField(password, { password = it }, label = { Text("Server password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth().testTag("server-password-field"))
             Button(
                 enabled = !busy && url.length > 8 && password.isNotEmpty(),
@@ -142,6 +151,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                         busy = true
                         error = null
                         try {
+                            server.saveCustomHeaders(url, headersText)
                             server.signIn(url, password)
                             password = ""
                             busy = false
@@ -160,6 +170,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                     scope.launch {
                         error = null
                         try {
+                            server.saveCustomHeaders(url, headersText)
                             val authorize = server.beginOpenId(url, context.packageName)
                             context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(authorize)))
                         } catch (e: android.content.ActivityNotFoundException) {
