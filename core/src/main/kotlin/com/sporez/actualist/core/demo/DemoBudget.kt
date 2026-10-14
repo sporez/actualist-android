@@ -200,6 +200,17 @@ object DemoBudget {
         }
         cell("notes", "budget-$anchorKey", "note", SyncValue.text("Demo month. Every number here is synthetic."))
 
+        // Two rules in Actual's stored JSON shape, so the rule preview has something to do.
+        fun rule(id: String, payee: String, category: String) {
+            cell("rules", id, "stage", SyncValue.Null)
+            cell("rules", id, "conditions_op", SyncValue.text("and"))
+            cell("rules", id, "conditions", SyncValue.text("""[{"op":"is","field":"payee","value":"$payee","type":"id"}]"""))
+            cell("rules", id, "actions", SyncValue.text("""[{"op":"set","field":"category","value":"$category","type":"id"}]"""))
+            cell("rules", id, "tombstone", SyncValue.bool(false))
+        }
+        rule("demo-rule-cafe", "cafe", "dining")
+        rule("demo-rule-fuel", "gasstation", "transportation")
+
         database.commitLocal(drafts)
         database.drainAllPendingLocalMessages()
     }

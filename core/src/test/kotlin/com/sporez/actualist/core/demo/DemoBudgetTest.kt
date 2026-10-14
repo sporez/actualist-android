@@ -58,6 +58,14 @@ class DemoBudgetTest {
             assertTrue(vacation.carryover)
             assertEquals(7 * 20_000L, vacation.balance)
             assertEquals("Demo month. Every number here is synthetic.", database.sql.queryString("SELECT note FROM notes WHERE id = 'budget-2026-10'"))
+
+            // The demo's rules run through the ported engine: a cafe purchase is categorized as dining.
+            val result = com.sporez.actualist.core.rules.RuleEngine(database).run(
+                com.sporez.actualist.core.rules.RuleTransactionInput(accountId = "credit", date = anchor, amount = -450, payeeId = "cafe", payeeName = "Daily Grind"),
+                anchor,
+            )
+            assertEquals("dining", result.categoryId)
+            assertEquals(listOf("demo-rule-cafe"), result.appliedRuleIds)
         }
     }
 }

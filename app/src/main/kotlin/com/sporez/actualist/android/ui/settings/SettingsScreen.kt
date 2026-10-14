@@ -42,6 +42,7 @@ fun SettingsScreen(
     onConnectServer: () -> Unit,
     onCloseBudget: () -> Unit,
     onResetDemo: () -> Unit,
+    onShowRules: () -> Unit,
 ) {
     val current by settings.settings.collectAsState()
     val syncStatus by session.syncStatus.collectAsState()
@@ -58,7 +59,10 @@ fun SettingsScreen(
                     Text("Demo data is synthetic and never leaves this device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedButton(onClick = onResetDemo, modifier = Modifier.testTag("reset-demo")) { Text("Reset demo budget") }
                 }
-                TextButton(onClick = onCloseBudget, modifier = Modifier.testTag("close-budget")) { Text("Close budget") }
+                Row {
+                    TextButton(onClick = onShowRules, modifier = Modifier.testTag("show-rules")) { Text("Rules") }
+                    TextButton(onClick = onCloseBudget, modifier = Modifier.testTag("close-budget")) { Text("Close budget") }
+                }
             }
         }
         SectionCard {
