@@ -508,12 +508,15 @@ class BudgetDatabase private constructor(
         /** Opens an existing budget file. */
         fun open(driver: SQLiteDriver, path: String, localNodeId: String?, clock: Clock = Clock.SYSTEM): BudgetDatabase {
             val sql = Sql(driver.open(path))
+            // Budget files can come from elsewhere: never run SQL functions their schema references.
+            sql.execute("PRAGMA trusted_schema = OFF")
             return BudgetDatabase(sql, localNodeId, clock)
         }
 
         /** Creates a new budget file with Actual v26.10.0's starter schema. */
         fun createStarter(driver: SQLiteDriver, path: String, localNodeId: String?, clock: Clock = Clock.SYSTEM): BudgetDatabase {
             val sql = Sql(driver.open(path))
+            sql.execute("PRAGMA trusted_schema = OFF")
             sql.transaction { sql.executeScript(starterSchemaSql()) }
             return BudgetDatabase(sql, localNodeId, clock)
         }

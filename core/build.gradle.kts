@@ -25,7 +25,6 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.androidx.sqlite.bundled)
     testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.okhttp.mockwebserver)
 }
 
 tasks.test {
