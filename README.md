@@ -29,13 +29,13 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Demo budget (no server, no credentials) | Done | — (JVM + emulator UI tests) |
 | Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
-| Budget templates: preview, apply, edit (monthly, by date, average, copy, goal) | Done (percentage, schedule, limit and multi-entry templates read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
+| Budget templates: preview, apply, edit (monthly, by date, % of income, average, copy, goal) | Done (schedule, limit/refill and multi-entry templates read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
 | Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge, make a schedule | Done | Transactions 21, TransactionCommand 39 |
 | Multi-select: clear, unclear, categorize, duplicate, delete together (atomic, one undo) | Done | unit + device tests |
 | Split transactions: create, edit, delete | Done | Splits 23 |
 | Search, Uncleared/Cleared/Reconciled status filters, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
-| Rules: engine, editor, preview in the transaction editor, on import and reconciliation | Done | Rules 245 |
-| Schedules: recurrence, status, add, edit (name, amount, auto-post, first date and frequency of simple rules), post, skip, complete, delete | Done (patterns and end rules edited in Actual) | Schedules 136 + 49 + 66 |
+| Rules: engine, editor, preview in the transaction editor, on import and reconciliation; category learning (Actual's updateCategoryRules) with budget and per-payee switches | Done | Rules 245; learning unit tests |
+| Schedules: recurrence, status, add, edit (name, amount, auto-post, first date, frequency, every-N interval, end after N times or on a date), post, skip, complete, delete | Done (patterns and end rules edited in Actual) | Schedules 136 + 49 + 66 |
 | Accounts: add, rename, notes, close (with balance transfer), reopen, SimpleFIN unlink, account groups | Done | AccountLifecycle 16; account-group tests ported from Actualist |
 | Reconciliation | Done | from Actualist's Reconciliation cases |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
