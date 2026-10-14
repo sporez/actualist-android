@@ -134,7 +134,9 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
             fun phrase(verb: String, rows: Set<Pair<String, String>>): String? {
                 val counts = rows.filter { it.first in labels }.groupingBy { it.first }.eachCount()
                 if (counts.isEmpty()) return null
-                return verb + " " + counts.entries.joinToString(", ") { (dataset, n) ->
+                // In the label table's order, so the summary does not depend on write order.
+                return verb + " " + labels.keys.filter { it in counts }.joinToString(", ") { dataset ->
+                    val n = counts.getValue(dataset)
                     val (one, many) = labels.getValue(dataset)
                     "$n ${if (n == 1) one else many}"
                 }
