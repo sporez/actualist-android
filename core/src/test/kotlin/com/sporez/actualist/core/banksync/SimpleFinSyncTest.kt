@@ -373,12 +373,14 @@ class SimpleFinSyncTest {
             assertNull(cell(database, "last_sync"))
             assertNull(cell(database, "bank_sync_status"))
 
-            transactionsBody = DOWNLOAD.replace("\"currency\":\"USD\"", "\"currency\":\"EUR\"")
+            // A budget without a currency accepts any code of the same scale (as Actualist's
+            // BudgetCurrency.accepts); a zero-decimal currency is a mismatch.
+            transactionsBody = DOWNLOAD.replace("\"currency\":\"USD\"", "\"currency\":\"JPY\"")
             try {
                 sync.sync("acc", today)
                 fail("expected UnresolvedProblems")
             } catch (error: SimpleFinException.UnresolvedProblems) {
-                assertTrue(error.problems.first().message.startsWith("Currency mismatch (EUR"))
+                assertEquals("Currency mismatch (JPY bank transaction, none budget)", error.problems.first().message)
             }
             assertEquals(0L, database.sql.queryLong("SELECT COUNT(*) FROM transactions"))
         }
