@@ -53,13 +53,14 @@ data class RuleLine(val field: String, val op: String, val value: String)
 
 /** The fields and operators this editor offers (a subset of what the engine evaluates). */
 object RuleEditorFields {
-    val conditionFields = listOf("payee", "imported_payee", "notes", "account", "category", "amount", "date")
+    val conditionFields = listOf("payee", "imported_payee", "notes", "account", "category", "amount", "amount-inflow", "amount-outflow", "date")
     val actionFields = listOf("category", "payee", "notes", "cleared")
 
     fun conditionOps(field: String): List<String> = when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf") + if (field == "account") listOf("onBudget", "offBudget") else emptyList()
         com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "isNot", "contains", "doesNotContain", "matches") + if (field == "notes") listOf("hasTags", "hasAnyTag") else emptyList()
-        com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "isapprox", "isbetween", "gt", "gte", "lt", "lte")
+        com.sporez.actualist.core.rules.RuleValueKind.NUMBER ->
+            if (RuleFields.isDirectionalAmountField(field)) listOf("is", "isapprox", "gt", "gte", "lt", "lte") else listOf("is", "isapprox", "isbetween", "gt", "gte", "lt", "lte")
         // Plain dates only; Actual's recurring date values stay view-only.
         com.sporez.actualist.core.rules.RuleValueKind.DATE -> listOf("is", "isapprox", "gt", "gte", "lt", "lte")
         else -> emptyList()
@@ -82,6 +83,8 @@ object RuleEditorFields {
 
     fun label(field: String) = when (field) {
         "imported_payee" -> "Imported payee"
+        "amount-inflow" -> "Amount (inflow)"
+        "amount-outflow" -> "Amount (outflow)"
         else -> field.replaceFirstChar { it.uppercase() }
     }
 
@@ -175,7 +178,10 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
     }
 
     private fun representable(draft: RuleDraft): Boolean =
-        draft.conditions.all { it.fieldName in RuleEditorFields.conditionFields && it.op in RuleEditorFields.conditionOps(it.fieldName) && it.options.isNullOrEmpty() } &&
+        draft.conditions.all {
+            it.editorField in RuleEditorFields.conditionFields && it.op in RuleEditorFields.conditionOps(it.editorField) &&
+                (it.options.isNullOrEmpty() || RuleFields.isDirectionalAmountField(it.editorField))
+        } &&
             draft.actions.all { action ->
                 action.options.isNullOrEmpty() && when (action.op) {
                     "set" -> action.fieldName in RuleEditorFields.actionFields
@@ -188,7 +194,15 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
         val draft = RuleDraft(
             stage = stage,
             join = join,
-            conditions = conditions.map { RuleCondition(it.field, it.op, value(it.field, it.value, it.op), RuleFields.valueKind(it.field)?.raw) },
+            conditions = conditions.map {
+                // Inflow and outflow are amount conditions with a direction option, as Actual stores them.
+                val direction = when (it.field) {
+                    "amount-inflow" -> mapOf("inflow" to RuleValue.Bool(true))
+                    "amount-outflow" -> mapOf("outflow" to RuleValue.Bool(true))
+                    else -> null
+                }
+                RuleCondition(if (direction != null) "amount" else it.field, it.op, value(it.field, it.value, it.op), RuleFields.valueKind(it.field)?.raw, direction)
+            },
             actions = actions.map {
                 if (it.op == "set") RuleAction("set", it.field, value(it.field, it.value), RuleFields.valueKind(it.field)?.raw)
                 else RuleAction(it.op, null, RuleValue.Text(it.value))
@@ -252,7 +266,7 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
     val existing = loaded.existing
     var join by remember { mutableStateOf(existing?.join ?: RuleConditionJoin.AND) }
     var conditions by remember {
-        mutableStateOf(existing?.conditions?.map { RuleLine(it.fieldName, it.op, RuleEditorViewModel.text(it.fieldName, it.value)) } ?: listOf(RuleLine("payee", "is", "")))
+        mutableStateOf(existing?.conditions?.map { RuleLine(it.editorField, it.op, RuleEditorViewModel.text(it.editorField, it.value)) } ?: listOf(RuleLine("payee", "is", "")))
     }
     var actions by remember {
         mutableStateOf(existing?.actions?.map { RuleLine(it.fieldName ?: "notes", it.op, RuleEditorViewModel.text(it.fieldName ?: "notes", it.value)) } ?: listOf(RuleLine("category", "set", "")))
@@ -435,7 +449,7 @@ private fun LineCard(
                     singleLine = true,
                     label = {
                         Text(when (valueKind) {
-                            com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> "Amount (negative for outflow)"
+                            com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> if (RuleFields.isDirectionalAmountField(line.field)) "Amount (positive)" else "Amount (negative for outflow)"
                             com.sporez.actualist.core.rules.RuleValueKind.DATE -> "Date (YYYY-MM-DD, YYYY-MM or YYYY)"
                             else -> if (line.op == "hasTags" || line.op == "hasAnyTag") "Tags (e.g. #food #weekly)" else "Text"
                         })

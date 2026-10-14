@@ -134,6 +134,28 @@ class RuleWritesTest {
     }
 
     @Test
+    fun outflowAmountConditionsRoundTripAndMatchPositiveAmounts() {
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
+            val draft = RuleDraft(
+                stage = RuleStage.NORMAL,
+                join = RuleConditionJoin.AND,
+                conditions = listOf(RuleCondition("amount", "gt", RuleValue.Num(10_000.0), "number", mapOf("outflow" to RuleValue.Bool(true)))),
+                actions = listOf(RuleAction("set", "notes", RuleValue.Text("Large outflow"), "string")),
+            )
+            assertEquals("amount-outflow", draft.conditions.single().editorField)
+            val (id, messages) = RuleWrites(database) { "rule-outflow" }.create(draft)
+            assertEquals(
+                """S:[{"field":"amount","op":"gt","options":{"outflow":true},"type":"number","value":10000}]""",
+                messages.associate { it.column to it.serializedValue }["conditions"],
+            )
+            val engine = RuleEngine(database)
+            assertEquals(draft, engine.fetchRules().first { it.id == id }.draft)
+            assertEquals("Large outflow", engine.run(RuleTransactionInput(accountId = "checking", date = day, amount = -10_001), day).notes)
+            assertTrue(id !in engine.run(RuleTransactionInput(accountId = "checking", date = day, amount = 10_001), day).appliedRuleIds)
+        }
+    }
+
+    @Test
     fun amountBetweenRoundTripsAndMatchesEitherOrder() {
         DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
             val range = RuleValue.Obj(mapOf("num1" to RuleValue.Num(-1_000.0), "num2" to RuleValue.Num(-5_000.0)))
