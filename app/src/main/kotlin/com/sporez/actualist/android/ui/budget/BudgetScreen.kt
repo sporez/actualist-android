@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.verticalScroll
+import com.sporez.actualist.core.templates.editor.TemplateDraftEntry as TE
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -514,168 +518,131 @@ private fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
 }
 
 
+/** One entry of a template as the dialog edits it; "upto" stands for a monthly limit plus a refill. */
+private data class TemplateForm(
+    val kind: String = "monthly",
+    val amountText: String = "",
+    val monthText: String = java.time.YearMonth.now().plusMonths(6).toString(),
+    val countText: String = "3",
+    val scheduleId: String? = null,
+    val priority: Int = TE.DEFAULT_PRIORITY,
+)
+
+private object TemplateForms {
+    private fun money(value: Double) = Money.format(Math.round(value * 100), symbol = "", grouping = false)
+
+    /** Forms for a stored template, or null when it uses something these forms cannot show. */
+    fun from(entries: List<TE>, schedules: List<Pair<String, String>>): List<TemplateForm>? {
+        val forms = mutableListOf<TemplateForm>()
+        val limits = entries.filterIsInstance<TE.BalanceLimit>()
+        val refills = entries.filterIsInstance<TE.Refill>()
+        if (limits.size > 1 || refills.size > 1 || limits.size != refills.size) return null
+        limits.singleOrNull()?.let { limit ->
+            if (limit.hold || limit.period != com.sporez.actualist.core.templates.editor.TemplateLimitPeriod.MONTHLY || limit.start != null) return null
+            forms += TemplateForm(kind = "upto", amountText = money(limit.amount), priority = refills.single().priority)
+        }
+        for (entry in entries) {
+            forms += when (entry) {
+                is TE.BalanceLimit, is TE.Refill -> continue
+                is TE.MonthlyFixed -> if (entry.cadence == com.sporez.actualist.core.templates.editor.TemplateCadence.MONTH && entry.interval == 1) {
+                    TemplateForm("monthly", amountText = money(entry.amount), priority = entry.priority)
+                } else return null
+                is TE.DateTarget -> if (entry.repeatInterval == null && !entry.isSpend) TemplateForm("by", amountText = money(entry.amount), monthText = entry.month, priority = entry.priority) else return null
+                is TE.Average -> if (entry.adjustment == null) TemplateForm("average", countText = entry.numMonths.toString(), priority = entry.priority) else return null
+                is TE.Copy -> if (entry.legacyLimit == null) TemplateForm("copy", countText = entry.lookBack.toString(), priority = entry.priority) else return null
+                is TE.Goal -> TemplateForm("goal", amountText = money(entry.amount))
+                is TE.Percentage -> if (entry.sourceCategory == "all income" && !entry.previous) {
+                    TemplateForm("percent", countText = entry.percent.let { if (it == Math.rint(it)) it.toLong().toString() else it.toString() }, priority = entry.priority)
+                } else return null
+                is TE.Schedule -> if (entry.adjustment == null && !entry.full) {
+                    TemplateForm("schedule", scheduleId = entry.scheduleId ?: schedules.firstOrNull { it.second == entry.name }?.first, priority = entry.priority)
+                } else return null
+                else -> return null
+            }
+        }
+        return forms
+    }
+
+    /** The entries a form stands for, or null when it is incomplete. */
+    fun entries(form: TemplateForm, schedules: List<Pair<String, String>>): List<TE>? {
+        val amount = Money.parse(form.amountText)?.takeIf { it > 0 }?.let { it / 100.0 }
+        val count = form.countText.trim().toIntOrNull()?.takeIf { it in 1..12 }
+        return when (form.kind) {
+            "monthly" -> amount?.let { listOf(TE.monthlyFixed(amount = it, priority = form.priority)) }
+            "upto" -> amount?.let { listOf(TE.balanceLimit(amount = it), TE.refill(priority = form.priority)) }
+            "by" -> {
+                val month = runCatching { java.time.YearMonth.parse(form.monthText.trim()) }.getOrNull()
+                if (amount != null && month != null) {
+                    listOf(TE.dateTarget(amount = amount, month = month.toString(), priority = form.priority, repeatInterval = null, annual = false, isSpend = false))
+                } else null
+            }
+            "schedule" -> schedules.firstOrNull { it.first == form.scheduleId }?.let { (id, name) -> listOf(TE.schedule(name = name, scheduleId = id, priority = form.priority)) }
+            "percent" -> form.countText.trim().toDoubleOrNull()?.takeIf { it > 0 && it <= 100 }?.let {
+                listOf(TE.percentage(percent = it, sourceCategory = "all income", priority = form.priority))
+            }
+            "average" -> count?.let { listOf(TE.average(numMonths = it, priority = form.priority)) }
+            "copy" -> count?.let { listOf(TE.copyPrevious(lookBack = it, priority = form.priority)) }
+            "goal" -> amount?.let { listOf(TE.goal(amount = it)) }
+            else -> null
+        }
+    }
+
+    val kinds = listOf(
+        "monthly" to "Monthly", "upto" to "Up to", "by" to "By date", "schedule" to "Schedule",
+        "percent" to "% of income", "average" to "Average", "copy" to "Copy", "goal" to "Goal",
+    )
+}
+
 /**
- * The category's template, edited through the ported template editor model: a monthly amount,
- * saving toward a total by a month, an average of recent months, the same as an earlier month, or
- * a balance goal. Templates with several entries or other kinds are shown read-only and can be
- * removed; the editor's validation (Actualist's) refuses anything Actual would reject.
+ * The category's template, edited through the ported template editor model as a list of entries
+ * (Actual runs them in priority order): monthly amount, up to a cap, saving by a date, a schedule's
+ * amount, a share of income, an average or copy of earlier months, or a balance goal. A template
+ * using anything else is shown read-only and can be removed; the editor's validation (Actualist's)
+ * refuses whatever Actual would reject.
  */
 @Composable
 private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: (saved: Boolean) -> Unit) {
     var draft by remember { mutableStateOf<com.sporez.actualist.core.templates.editor.TemplateEditorDraft?>(null) }
     var loaded by remember { mutableStateOf(false) }
-    var kind by rememberSaveable(category.id) { mutableStateOf("monthly") }
-    var amountText by rememberSaveable(category.id) { mutableStateOf("") }
-    var monthText by rememberSaveable(category.id) { mutableStateOf(java.time.YearMonth.now().plusMonths(6).toString()) }
-    var countText by rememberSaveable(category.id) { mutableStateOf("3") }
-    var scheduleId by rememberSaveable(category.id) { mutableStateOf<String?>(null) }
     var schedules by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var forms by remember { mutableStateOf<List<TemplateForm>?>(null) }
     androidx.compose.runtime.LaunchedEffect(category.id) {
         draft = runCatching { viewModel.templateDraft(category.id) }.getOrNull()
         schedules = runCatching { viewModel.scheduleChoices() }.getOrDefault(emptyList())
-        fun money(value: Double) = Money.format(Math.round(value * 100), symbol = "", grouping = false)
-        // "Up to" is a monthly balance limit plus a refill, the shape Actual's editor writes.
-        val entries = draft?.entries.orEmpty()
-        val limit = entries.filterIsInstance<com.sporez.actualist.core.templates.editor.TemplateDraftEntry.BalanceLimit>().singleOrNull()
-        if (entries.size == 2 && limit != null && entries.any { it is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Refill }) {
-            kind = "upto"
-            amountText = money(limit.amount)
-        }
-        when (val entry = draft?.entries?.singleOrNull()) {
-            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed -> { kind = "monthly"; amountText = money(entry.amount) }
-            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DateTarget -> { kind = "by"; amountText = money(entry.amount); monthText = entry.month }
-            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average -> { kind = "average"; countText = entry.numMonths.toString() }
-            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy -> { kind = "copy"; countText = entry.lookBack.toString() }
-            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal -> { kind = "goal"; amountText = money(entry.amount) }
-            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Schedule -> { kind = "schedule"; scheduleId = entry.scheduleId ?: schedules.firstOrNull { it.second == entry.name }?.first }
-            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Percentage -> { kind = "percent"; countText = entry.percent.let { if (it == Math.rint(it)) it.toLong().toString() else it.toString() } }
-            else -> {}
-        }
+        forms = draft?.let { current -> TemplateForms.from(current.entries, schedules)?.ifEmpty { listOf(TemplateForm()) } }
         loaded = true
     }
     val current = draft
-    val single = current?.entries?.singleOrNull()
-    // Editable here: no template yet, or exactly one entry of a kind this dialog offers, in its plain form.
-    val editable = current != null && (
-        current.entries.isEmpty() ||
-            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed &&
-                single.cadence == com.sporez.actualist.core.templates.editor.TemplateCadence.MONTH && single.interval == 1) ||
-            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DateTarget && single.repeatInterval == null && !single.isSpend) ||
-            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average && single.adjustment == null) ||
-            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy && single.legacyLimit == null) ||
-            single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal ||
-            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Percentage && single.sourceCategory == "all income" && !single.previous) ||
-            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Schedule && single.adjustment == null && !single.full) ||
-            (current.entries.size == 2 && current.entries.any { it is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Refill } &&
-                current.entries.filterIsInstance<com.sporez.actualist.core.templates.editor.TemplateDraftEntry.BalanceLimit>().singleOrNull()?.let {
-                    !it.hold && it.period == com.sporez.actualist.core.templates.editor.TemplateLimitPeriod.MONTHLY && it.start == null
-                } == true)
-        )
-    val amount = Money.parse(amountText)
-    val count = countText.trim().toIntOrNull()
-    val month = runCatching { java.time.YearMonth.parse(monthText.trim()) }.getOrNull()
-    fun entry(): com.sporez.actualist.core.templates.editor.TemplateDraftEntry? {
-        val priority = (single as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed)?.priority
-            ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DEFAULT_PRIORITY
-        return when (kind) {
-            "monthly" -> amount?.takeIf { it > 0 }?.let { value ->
-                (single as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed)?.copy(amount = value / 100.0)
-                    ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.monthlyFixed(amount = value / 100.0, priority = priority)
-            }
-            "by" -> if (amount != null && amount > 0 && month != null) {
-                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.dateTarget(
-                    amount = amount / 100.0, month = month.toString(), priority = priority, repeatInterval = null, annual = false, isSpend = false,
-                )
-            } else null
-            "average" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.average(numMonths = it, priority = priority) }
-            "copy" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.copyPrevious(lookBack = it, priority = priority) }
-            "goal" -> amount?.takeIf { it > 0 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.goal(amount = it / 100.0) }
-            "schedule" -> schedules.firstOrNull { it.first == scheduleId }?.let { (id, name) ->
-                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.schedule(name = name, scheduleId = id, priority = priority)
-            }
-            "percent" -> countText.trim().toDoubleOrNull()?.takeIf { it > 0 && it <= 100 }?.let {
-                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.percentage(percent = it, sourceCategory = "all income", priority = priority)
-            }
-            else -> null
-        }
+    val editing = forms
+    fun update(index: Int, form: TemplateForm) {
+        forms = editing?.toMutableList()?.also { it[index] = form }
     }
-    fun entries(): List<com.sporez.actualist.core.templates.editor.TemplateDraftEntry>? {
-        if (kind == "upto") {
-            val value = amount?.takeIf { it > 0 } ?: return null
-            val refillPriority = current?.entries?.filterIsInstance<com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Refill>()?.singleOrNull()?.priority
-                ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DEFAULT_PRIORITY
-            return listOf(
-                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.balanceLimit(amount = value / 100.0),
-                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.refill(priority = refillPriority),
-            )
-        }
-        return entry()?.let { listOf(it) }
-    }
+    val planned = editing?.map { TemplateForms.entries(it, schedules) }
+    val next = if (planned != null && planned.all { it != null }) planned.flatMap { it!! } else null
     androidx.compose.material3.AlertDialog(
         onDismissRequest = { onDismiss(false) },
         title = { Text("Template for ${category.name}") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("template-editor")) {
+            Column(
+                Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()).testTag("template-editor"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 when {
                     !loaded -> Text("Reading the template…")
                     current == null -> Text("This template is managed in the category's note or uses options this app cannot change. Edit it in Actual.")
-                    editable -> {
-                        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val kinds = listOf("monthly" to "Monthly", "upto" to "Up to", "by" to "By date", "schedule" to "Schedule", "percent" to "% of income", "average" to "Average", "copy" to "Copy", "goal" to "Goal")
-                            items(kinds.size) { index ->
-                                val (key, label) = kinds[index]
-                                androidx.compose.material3.FilterChip(
-                                    selected = kind == key,
-                                    onClick = { kind = key },
-                                    label = { Text(label) },
-                                    modifier = Modifier.testTag("template-kind-$key"),
-                                )
+                    editing == null -> Text("${current.entries.size} template entries this app shows read-only. Edit them in Actual, or remove the template here.")
+                    else -> {
+                        editing.forEachIndexed { index, form ->
+                            TemplateFormCard(index, form, schedules, removable = editing.size > 1, onChange = { update(index, it) }) {
+                                forms = editing.filterIndexed { i, _ -> i != index }
                             }
                         }
-                        when (kind) {
-                            "monthly" -> {
-                                Text("Budget this amount every month.", style = MaterialTheme.typography.bodySmall)
-                                AmountField(amountText, { amountText = it }, label = "Monthly amount", tag = "template-amount")
-                            }
-                            "upto" -> {
-                                Text("Refill the category up to this balance each month.", style = MaterialTheme.typography.bodySmall)
-                                AmountField(amountText, { amountText = it }, label = "Up to", tag = "template-amount")
-                            }
-                            "by" -> {
-                                Text("Save toward a total by a month; the monthly amount is worked out for you.", style = MaterialTheme.typography.bodySmall)
-                                AmountField(amountText, { amountText = it }, label = "Total", tag = "template-amount")
-                                androidx.compose.material3.OutlinedTextField(monthText, { monthText = it }, label = { Text("By month (YYYY-MM)") }, singleLine = true, isError = month == null, modifier = Modifier.fillMaxWidth().testTag("template-month"))
-                            }
-                            "average", "copy" -> {
-                                Text(if (kind == "average") "Budget the average spent over the last months." else "Budget what was budgeted that many months ago.", style = MaterialTheme.typography.bodySmall)
-                                androidx.compose.material3.OutlinedTextField(countText, { countText = it.filter(Char::isDigit) }, label = { Text("Months (1-12)") }, singleLine = true, isError = count == null || count !in 1..12, modifier = Modifier.fillMaxWidth().testTag("template-months"))
-                            }
-                            "schedule" -> {
-                                Text("Budget what a schedule needs before its next date.", style = MaterialTheme.typography.bodySmall)
-                                if (schedules.isEmpty()) Text("No active schedules yet.", style = MaterialTheme.typography.bodySmall)
-                                for ((id, name) in schedules) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { scheduleId = id }.testTag("template-schedule-$id")) {
-                                        androidx.compose.material3.RadioButton(selected = scheduleId == id, onClick = { scheduleId = id })
-                                        Text(name)
-                                    }
-                                }
-                            }
-                            "percent" -> {
-                                Text("Budget a share of this month's income.", style = MaterialTheme.typography.bodySmall)
-                                androidx.compose.material3.OutlinedTextField(countText, { countText = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("Percent of all income") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("template-percent"))
-                            }
-                            "goal" -> {
-                                Text("A balance goal shown on the category; it does not assign money by itself.", style = MaterialTheme.typography.bodySmall)
-                                AmountField(amountText, { amountText = it }, label = "Goal balance", tag = "template-amount")
-                            }
-                        }
+                        TextButton(onClick = { forms = editing + TemplateForm(kind = "goal") }, modifier = Modifier.testTag("template-add-entry")) { Text("Add another entry") }
                     }
-                    else -> Text("${current.entries.size} template entries this app shows read-only. Edit them in Actual, or remove the template here.")
                 }
             }
         },
         confirmButton = {
-            val next = if (editable) entries() else null
             TextButton(
                 enabled = next != null,
                 onClick = {
@@ -697,6 +664,70 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             }
         },
     )
+}
+
+@Composable
+private fun TemplateFormCard(
+    index: Int,
+    form: TemplateForm,
+    schedules: List<Pair<String, String>>,
+    removable: Boolean,
+    onChange: (TemplateForm) -> Unit,
+    onRemove: () -> Unit,
+) {
+    // Field tags keep their single-entry names for the first entry, so existing tests still apply.
+    fun tag(name: String) = if (index == 0) name else "$name-$index"
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (index > 0) androidx.compose.material3.HorizontalDivider()
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(TemplateForms.kinds.size) { i ->
+                val (key, label) = TemplateForms.kinds[i]
+                androidx.compose.material3.FilterChip(
+                    selected = form.kind == key,
+                    onClick = { onChange(form.copy(kind = key)) },
+                    label = { Text(label) },
+                    modifier = Modifier.testTag(tag("template-kind-$key")),
+                )
+            }
+        }
+        when (form.kind) {
+            "monthly" -> AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Monthly amount", tag = tag("template-amount"))
+            "upto" -> {
+                Text("Refill the category up to this balance each month.", style = MaterialTheme.typography.bodySmall)
+                AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Up to", tag = tag("template-amount"))
+            }
+            "by" -> {
+                Text("Save toward a total by a month; the monthly amount is worked out for you.", style = MaterialTheme.typography.bodySmall)
+                AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Total", tag = tag("template-amount"))
+                val valid = runCatching { java.time.YearMonth.parse(form.monthText.trim()) }.isSuccess
+                androidx.compose.material3.OutlinedTextField(form.monthText, { onChange(form.copy(monthText = it)) }, label = { Text("By month (YYYY-MM)") }, singleLine = true, isError = !valid, modifier = Modifier.fillMaxWidth().testTag(tag("template-month")))
+            }
+            "schedule" -> {
+                Text("Budget what a schedule needs before its next date.", style = MaterialTheme.typography.bodySmall)
+                if (schedules.isEmpty()) Text("No active schedules yet.", style = MaterialTheme.typography.bodySmall)
+                for ((id, name) in schedules) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onChange(form.copy(scheduleId = id)) }.testTag(tag("template-schedule-$id"))) {
+                        androidx.compose.material3.RadioButton(selected = form.scheduleId == id, onClick = { onChange(form.copy(scheduleId = id)) })
+                        Text(name)
+                    }
+                }
+            }
+            "percent" -> {
+                Text("Budget a share of this month's income.", style = MaterialTheme.typography.bodySmall)
+                androidx.compose.material3.OutlinedTextField(form.countText, { value -> onChange(form.copy(countText = value.filter { it.isDigit() || it == '.' })) }, label = { Text("Percent of all income") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag(tag("template-percent")))
+            }
+            "average", "copy" -> {
+                Text(if (form.kind == "average") "Budget the average spent over the last months." else "Budget what was budgeted that many months ago.", style = MaterialTheme.typography.bodySmall)
+                val count = form.countText.trim().toIntOrNull()
+                androidx.compose.material3.OutlinedTextField(form.countText, { onChange(form.copy(countText = it.filter(Char::isDigit))) }, label = { Text("Months (1-12)") }, singleLine = true, isError = count == null || count !in 1..12, modifier = Modifier.fillMaxWidth().testTag(tag("template-months")))
+            }
+            "goal" -> {
+                Text("A balance goal shown on the category; it does not assign money by itself.", style = MaterialTheme.typography.bodySmall)
+                AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Goal balance", tag = tag("template-amount"))
+            }
+        }
+        if (removable) TextButton(onClick = onRemove, modifier = Modifier.testTag(tag("template-remove-entry"))) { Text("Remove this entry") }
+    }
 }
 
 /** The category's note text (template directives in the same note are kept as they are). */
