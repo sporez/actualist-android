@@ -48,9 +48,9 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38584773442 — 3,026 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38597414814 — 3,027 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
 - Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38577166032 — 4/4, none skipped.
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38583876032 — 25/25, none skipped (also 25/25 in the run before it, https://github.com/sporez/actualist-android/actions/runs/38581649460); process-death relaunch reopened the selected budget. One earlier round failed 12 tests in a cascade: the first test's activity was recreated while the new emulator was still settling, and its stray view model kept the demo session open across later tests' data resets (SQLITE_READONLY_DBMOVED). Resets now close every hub session first, and the script waits for boot completion, fixes portrait and settles before the suite.
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38597396518 — 25/25, none skipped, with per-test timeouts; process-death relaunch reopened the selected budget. Earlier rounds today: one cascade (fixed: sessions closed on reset) and one hang (now bounded); see above.
 
 ## Known limitations
 
