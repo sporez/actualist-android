@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -394,6 +395,21 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("reports-list").performScrollToNode(categoryRow)
         compose.onAllNodes(categoryRow)[0].performClick()
         compose.waitForTag("transaction-list")
+    }
+
+    @Test
+    fun theWidgetIsRegisteredAndReadsTheOpenBudget() {
+        openDemo()
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val providers = android.appwidget.AppWidgetManager.getInstance(context).getInstalledProvidersForPackage(context.packageName, null)
+        assertTrue(providers.any { it.provider.className == com.sporez.actualist.android.widget.BudgetWidgetReceiver::class.java.name })
+        val container = (context.applicationContext as ActualistApplication).container
+        // Off the test thread, so the open session's composition keeps advancing (v2 test API).
+        val summary = java.util.concurrent.atomic.AtomicReference<com.sporez.actualist.android.widget.WidgetSummary?>(null)
+        Thread { summary.set(kotlinx.coroutines.runBlocking { com.sporez.actualist.android.widget.WidgetData.load(container) }) }.start()
+        compose.waitUntil(30_000) { summary.get() != null }
+        assertEquals(com.sporez.actualist.core.demo.DemoBudget.NAME, summary.get()!!.budgetName)
+        assertEquals(toBudgetText().filter { it.isDigit() }, com.sporez.actualist.core.money.Money.format(summary.get()!!.toBudget).filter { it.isDigit() })
     }
 
     @Test

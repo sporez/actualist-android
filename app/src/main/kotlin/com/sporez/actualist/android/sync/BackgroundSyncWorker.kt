@@ -29,7 +29,9 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             container.sessions.acquire(id) { container.library.open(id) ?: error("The selected budget is no longer on this device.") }
         }
         return try {
-            if (container.server.sync(session) is SyncStatus.Failed) Result.retry() else Result.success()
+            val status = container.server.sync(session)
+            com.sporez.actualist.android.widget.WidgetData.refresh(applicationContext)
+            if (status is SyncStatus.Failed) Result.retry() else Result.success()
         } finally {
             withContext(Dispatchers.IO) { container.sessions.release(session) }
         }

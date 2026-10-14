@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Actualist (Exp)</string>
+    <string name="widget_name">Budget overview</string>
+    <string name="widget_description">To Budget and net worth for the selected budget</string>
 </resources>

@@ -105,6 +105,11 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             if (pending > 0 && session.syncStatus.value !is SyncStatus.Syncing) container.server.sync(session)
         }
     }
+    // Keep the home-screen widget current shortly after edits and syncs.
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    LaunchedEffect(session) {
+        session.revision.debounce(2_000).collect { com.sporez.actualist.android.widget.WidgetData.refresh(appContext) }
+    }
     // Sync again whenever the app returns to the foreground.
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         if (!session.isDemo) scope.launch { container.server.sync(session) }
