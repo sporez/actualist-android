@@ -523,6 +523,7 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average -> { kind = "average"; countText = entry.numMonths.toString() }
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy -> { kind = "copy"; countText = entry.lookBack.toString() }
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal -> { kind = "goal"; amountText = money(entry.amount) }
+            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Percentage -> { kind = "percent"; countText = entry.percent.let { if (it == Math.rint(it)) it.toLong().toString() else it.toString() } }
             else -> {}
         }
         loaded = true
@@ -537,7 +538,8 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DateTarget && single.repeatInterval == null && !single.isSpend) ||
             (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average && single.adjustment == null) ||
             (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy && single.legacyLimit == null) ||
-            single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal
+            single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal ||
+            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Percentage && single.sourceCategory == "all income" && !single.previous)
         )
     val amount = Money.parse(amountText)
     val count = countText.trim().toIntOrNull()
@@ -558,6 +560,9 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             "average" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.average(numMonths = it, priority = priority) }
             "copy" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.copyPrevious(lookBack = it, priority = priority) }
             "goal" -> amount?.takeIf { it > 0 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.goal(amount = it / 100.0) }
+            "percent" -> countText.trim().toDoubleOrNull()?.takeIf { it > 0 && it <= 100 }?.let {
+                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.percentage(percent = it, sourceCategory = "all income", priority = priority)
+            }
             else -> null
         }
     }
@@ -571,7 +576,7 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
                     current == null -> Text("This template is managed in the category's note or uses options this app cannot change. Edit it in Actual.")
                     editable -> {
                         androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val kinds = listOf("monthly" to "Monthly", "by" to "By date", "average" to "Average", "copy" to "Copy", "goal" to "Goal")
+                            val kinds = listOf("monthly" to "Monthly", "by" to "By date", "percent" to "% of income", "average" to "Average", "copy" to "Copy", "goal" to "Goal")
                             items(kinds.size) { index ->
                                 val (key, label) = kinds[index]
                                 androidx.compose.material3.FilterChip(
@@ -595,6 +600,10 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
                             "average", "copy" -> {
                                 Text(if (kind == "average") "Budget the average spent over the last months." else "Budget what was budgeted that many months ago.", style = MaterialTheme.typography.bodySmall)
                                 androidx.compose.material3.OutlinedTextField(countText, { countText = it.filter(Char::isDigit) }, label = { Text("Months (1-12)") }, singleLine = true, isError = count == null || count !in 1..12, modifier = Modifier.fillMaxWidth().testTag("template-months"))
+                            }
+                            "percent" -> {
+                                Text("Budget a share of this month's income.", style = MaterialTheme.typography.bodySmall)
+                                androidx.compose.material3.OutlinedTextField(countText, { countText = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("Percent of all income") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("template-percent"))
                             }
                             "goal" -> {
                                 Text("A balance goal shown on the category; it does not assign money by itself.", style = MaterialTheme.typography.bodySmall)
