@@ -61,7 +61,8 @@ if [ -n "${TEST_FILTER:-}" ]; then
   FILTER_ARGS=(-e class "$TEST_FILTER")
   echo "Running only $TEST_FILTER" | tee "$OUT/filter.txt"
 fi
-adb shell am instrument -w -r "${SERVER_ARGS[@]}" "${FILTER_ARGS[@]}" "$RUNNER" | tee "$OUT/instrumentation-raw.txt"
+# Bounded, so logcat and results are still collected if something hangs outside a single test.
+timeout 2700 adb shell am instrument -w -r "${SERVER_ARGS[@]}" "${FILTER_ARGS[@]}" "$RUNNER" | tee "$OUT/instrumentation-raw.txt"
 adb logcat -d > "$OUT/logcat.txt"
 
 # Process death: open the app on the budget the last test left selected, send it to the
