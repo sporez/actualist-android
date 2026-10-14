@@ -35,6 +35,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
 import com.sporez.actualist.android.ui.Loadable
 import com.sporez.actualist.android.ui.components.ErrorBanner
 import com.sporez.actualist.android.ui.components.LoadingBox
@@ -55,7 +61,8 @@ import java.util.Locale
 data class TransactionListState(val rows: List<TransactionRow>, val account: Account?, val uncategorizedCount: Int)
 
 /** A transaction list, optionally scoped to one account or category. */
-class TransactionsViewModel(session: BudgetSession, accountId: String?, categoryId: String?) : ViewModel() {
+class TransactionsViewModel(private val session: BudgetSession, accountId: String?, categoryId: String?) : ViewModel() {
+    val messages = com.sporez.actualist.android.ui.MessageState()
     private val _query = MutableStateFlow(TransactionQuery(accountId = accountId, categoryId = categoryId))
     val query: StateFlow<TransactionQuery> = _query.asStateFlow()
 
@@ -74,6 +81,54 @@ class TransactionsViewModel(session: BudgetSession, accountId: String?, category
     fun toggleUncategorized() {
         _query.value = _query.value.copy(uncategorizedOnly = !_query.value.uncategorizedOnly)
     }
+
+    fun exportFilename(): String = com.sporez.actualist.core.csv.CsvExport.filename(System.currentTimeMillis())
+
+    /** Writes Actual's CSV export format for this account (or every account) to [uri]. */
+    fun exportCsv(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val count = session.read {
+                    val rows = com.sporez.actualist.core.csv.CsvExport.rows(database, _query.value.accountId)
+                    val text = com.sporez.actualist.core.csv.CsvExport.encode(rows)
+                    resolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } ?: error("The file could not be opened.")
+                    rows.size
+                }
+                messages.show("Exported $count rows")
+            } catch (error: Exception) {
+                messages.show(error.message ?: "Export failed.")
+            }
+        }
+    }
+
+    /** Imports a CSV into this account in one transaction; nothing is written on any error. */
+    fun importCsv(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+        val accountId = _query.value.accountId ?: return
+        viewModelScope.launch {
+            try {
+                val plan = session.write {
+                    val bytes = resolver.openInputStream(uri)?.use { it.readNBytesCompat(com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES + 1) }
+                        ?: error("The file could not be opened.")
+                    if (bytes.size > com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES) error("The file is larger than 10 MB.")
+                    com.sporez.actualist.core.csv.CsvImporter(database, transactionWrites).import(accountId, bytes.toString(Charsets.UTF_8))
+                }
+                messages.show("Imported ${plan.imported} rows" + if (plan.duplicates > 0) ", skipped ${plan.duplicates} already present" else "")
+            } catch (error: Exception) {
+                messages.show(error.message ?: "Import failed.")
+            }
+        }
+    }
+}
+
+private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(64 * 1024)
+    while (out.size() < limit) {
+        val read = read(buffer, 0, minOf(buffer.size, limit - out.size()))
+        if (read < 0) break
+        out.write(buffer, 0, read)
+    }
+    return out.toByteArray()
 }
 
 private val dayFormat = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
@@ -82,8 +137,19 @@ private val dayFormat = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.U
 fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow) -> Unit, onAdd: () -> Unit) {
     val state by viewModel.state.collectAsState()
     val query by viewModel.query.collectAsState()
+    val message by viewModel.messages.message.collectAsState()
+    val resolver = LocalContext.current.contentResolver
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let { viewModel.exportCsv(resolver, it) } }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importCsv(resolver, it) } }
     Box(Modifier.fillMaxSize().testTag("transactions-screen")) {
         Column(Modifier.fillMaxSize()) {
+            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { exportLauncher.launch(viewModel.exportFilename()) }, modifier = Modifier.testTag("export-csv")) { Text("Export CSV") }
+                if (query.accountId != null) {
+                    TextButton(onClick = { importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }, modifier = Modifier.testTag("import-csv")) { Text("Import CSV") }
+                }
+                message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).testTag("transactions-message")) }
+            }
             OutlinedTextField(
                 value = query.search.orEmpty(),
                 onValueChange = viewModel::search,
