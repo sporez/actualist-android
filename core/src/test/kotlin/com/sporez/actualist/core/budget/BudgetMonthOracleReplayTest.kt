@@ -25,7 +25,7 @@ import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
 /**
- * Replays Actualist's pinned BudgetMonth oracle (Actual v26.10.0 `budget/*` handlers on
+ * Replays Actualist's pinned BudgetMonth oracle (Actual v26.10.0 budget handlers on
  * synthetic budgets) through this port's budget writes and reads, as Actualist's
  * `BudgetMonthOracleReplayTests` does: every step's CRDT cells and every recorded sheet
  * state are compared.
