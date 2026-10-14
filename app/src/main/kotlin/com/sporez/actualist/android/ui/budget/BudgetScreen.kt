@@ -348,6 +348,7 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var amountText by rememberSaveable { mutableStateOf("") }
     var picking by remember { mutableStateOf(false) }
+    var showTemplates by remember { mutableStateOf(false) }
     val month = screen.month
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("to-budget-sheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -373,8 +374,10 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
                 TextButton(onClick = { viewModel.setThreeMonthAverage(); onDismiss() }, modifier = Modifier.testTag("three-month-average")) { Text("3-month avg") }
                 TextButton(onClick = { viewModel.setZero(); onDismiss() }, modifier = Modifier.testTag("set-zero")) { Text("Zero all") }
             }
+            TextButton(onClick = { showTemplates = true }, modifier = Modifier.testTag("templates-open")) { Text("Apply budget templates…") }
         }
     }
+    if (showTemplates) TemplatesDialog(viewModel) { showTemplates = false; onDismiss() }
     if (picking) {
         PickerDialog(
             title = "Assign to",
@@ -431,4 +434,59 @@ private fun AddCategoryDialog(screen: BudgetScreenState, viewModel: BudgetViewMo
             onDismiss = { picking = false },
         )
     }
+}
+
+
+/** Preview of the budget's templates for this month, then apply (fill empty or overwrite). */
+@Composable
+private fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
+    var overwrite by rememberSaveable { mutableStateOf(false) }
+    var preview by remember { mutableStateOf<com.sporez.actualist.core.templates.TemplatePreview?>(null) }
+    var loaded by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(overwrite) {
+        preview = viewModel.templatePreview(overwrite)
+        loaded = true
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Budget templates") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("templates-dialog")) {
+                val p = preview
+                when {
+                    !loaded -> Text("Reading templates…")
+                    p == null -> Text("No category in this budget has a template. Templates are written in Actual (category notes or the template editor).")
+                    else -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Overwrite existing amounts", Modifier.weight(1f))
+                            Switch(checked = overwrite, onCheckedChange = { overwrite = it }, modifier = Modifier.testTag("templates-overwrite"))
+                        }
+                        p.errors.firstOrNull()?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        val changed = p.categories.filter { it.proposed != it.current }
+                        if (changed.isEmpty()) Text("Nothing to change.", style = MaterialTheme.typography.bodySmall)
+                        for (category in changed.take(12)) {
+                            Row {
+                                Text(category.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${money(category.current)} → ${money(category.proposed)}", style = MoneyTextStyle)
+                            }
+                        }
+                        if (changed.size > 12) Text("…and ${changed.size - 12} more", style = MaterialTheme.typography.bodySmall)
+                        HorizontalDivider()
+                        SummaryLine("Assigned", p.assigned)
+                        if (p.released != 0L) SummaryLine("Released", p.released)
+                        SummaryLine(if (p.isTracking) "Saved after" else "To Budget after", p.leftover)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            val p = preview
+            TextButton(
+                enabled = p != null && p.isReady && p.categories.any { it.proposed != it.current },
+                onClick = { viewModel.applyTemplates(overwrite); onDismiss() },
+                modifier = Modifier.testTag("templates-apply"),
+            ) { Text("Apply") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

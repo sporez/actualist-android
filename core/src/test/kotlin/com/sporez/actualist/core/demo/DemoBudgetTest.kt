@@ -67,6 +67,14 @@ class DemoBudgetTest {
             assertEquals("dining", result.categoryId)
             assertEquals(listOf("demo-rule-cafe"), result.appliedRuleIds)
 
+            // The demo's templates preview through the ported template engine.
+            val templates = com.sporez.actualist.core.templates.BudgetTemplates(database, TestClock())
+            assertTrue(templates.hasTemplates())
+            val preview = templates.preview("2026-11", today = anchor)
+            assertTrue(preview.errors.toString(), preview.isReady)
+            assertEquals(60_000L, preview.categories.single { it.categoryId == "groceries" }.proposed)
+            assertEquals(15_000L, preview.categories.single { it.categoryId == "entertainment" }.proposed)
+
             // Three monthly schedules, created through the ported schedule writer.
             val schedules = com.sporez.actualist.core.schedules.Schedules(database, TestClock()).list(anchor.toString())
             assertEquals(setOf("Rent", "StreamFlix", "Phone bill"), schedules.map { it.name }.toSet())

@@ -215,6 +215,21 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun appliesBudgetTemplatesToTheNextMonth() {
+        openDemo()
+        compose.onNodeWithTag("month-next").performClick()
+        compose.waitForTag("to-budget-banner")
+        compose.onNodeWithTag("to-budget-banner").performClick()
+        compose.waitForTag("templates-open")
+        compose.onNodeWithTag("templates-open").performClick()
+        compose.waitOrCapture("templates-preview") { compose.onAllNodes(hasText("$0.00 → $600.00", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("17-templates")
+        compose.onNodeWithTag("templates-apply").performClick()
+        compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("category-groceries"))
+        compose.waitOrCapture("templates-applied") { compose.onAllNodes(hasText("$600.00")).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()

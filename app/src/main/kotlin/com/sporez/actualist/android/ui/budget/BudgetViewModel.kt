@@ -71,6 +71,23 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun setZero() = write("Set all budgets to zero") { budgetWrites.applyBulk(month.value) { setZeroDrafts(month.value) } }
 
+    /** What the budget's templates would assign this month (Actual's "Apply budget template"). */
+    suspend fun templatePreview(overwrite: Boolean): com.sporez.actualist.core.templates.TemplatePreview? = try {
+        session.read {
+            val templates = com.sporez.actualist.core.templates.BudgetTemplates(database, clock)
+            if (!templates.hasTemplates()) null
+            else templates.preview(month.value, mode = if (overwrite) com.sporez.actualist.core.templates.TemplateApplyMode.OVERWRITE else com.sporez.actualist.core.templates.TemplateApplyMode.FILL_EMPTY)
+        }
+    } catch (error: Exception) {
+        messages.show(error.message ?: "Templates could not be read.")
+        null
+    }
+
+    fun applyTemplates(overwrite: Boolean) = write("Applied templates") {
+        com.sporez.actualist.core.templates.BudgetTemplates(database, clock)
+            .apply(month.value, mode = if (overwrite) com.sporez.actualist.core.templates.TemplateApplyMode.OVERWRITE else com.sporez.actualist.core.templates.TemplateApplyMode.FILL_EMPTY)
+    }
+
     fun hold(amount: Long) = write("Held for next month") { budgetWrites.hold(month.value, HoldCommand.Hold(amount)) }
 
     fun releaseHold() = write("Hold released") { budgetWrites.hold(month.value, HoldCommand.Reset) }
