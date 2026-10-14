@@ -49,13 +49,14 @@ import com.sporez.actualist.android.ui.components.ErrorBanner
 import com.sporez.actualist.android.ui.components.LoadingBox
 import com.sporez.actualist.android.ui.components.PickerDialog
 import com.sporez.actualist.android.ui.components.PickerOption
-import com.sporez.actualist.android.ui.components.money
+import com.sporez.actualist.android.ui.components.LocalHideAmounts
 import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.transactions.Account
 import com.sporez.actualist.core.transactions.CategoryOption
 import com.sporez.actualist.core.transactions.Payee
 import com.sporez.actualist.core.transactions.SplitDraft
+import com.sporez.actualist.core.transactions.SplitRemainingPresentation
 import com.sporez.actualist.core.transactions.TransactionDraft
 import com.sporez.actualist.core.transactions.TransactionEdit
 import com.sporez.actualist.core.transactions.TransactionRow
@@ -105,7 +106,27 @@ class TransactionEditorViewModel(
         }
     }
 
-    fun save(draft: TransactionDraft) = launchWrite {
+    /**
+     * Runs [block] with the transaction's reconciled rows unlocked (after the user confirmed
+     * Actualist's warning) and locks the survivors again, since the writers refuse locked rows.
+     */
+    private fun BudgetSession.withUnlock(unlock: Boolean, block: () -> Unit) {
+        val mutations = com.sporez.actualist.core.transactions.ReconciledMutations(database)
+        val locked = if (unlock && transactionId != null) mutations.unlock(listOf(transactionId)) else emptyList()
+        try {
+            block()
+        } finally {
+            if (locked.isNotEmpty()) mutations.relock(locked)
+        }
+    }
+
+    /** Which of this transaction's rows (and its transfer's other side) are reconciled. */
+    suspend fun reconciledScope(): com.sporez.actualist.core.transactions.ReconciledScope? {
+        val id = transactionId ?: return null
+        return session.read { com.sporez.actualist.core.transactions.ReconciledMutations(database).scope(id) }
+    }
+
+    fun save(draft: TransactionDraft, unlockReconciled: Boolean = false) = launchWrite {
         if (transactionId == null) {
             session.write {
                 val created = transactionWrites.create(draft)
@@ -115,6 +136,7 @@ class TransactionEditorViewModel(
         } else {
             val existing = data.value?.existing
             session.write {
+                withUnlock(unlockReconciled) {
                 transactionWrites.update(
                     transactionId,
                     TransactionEdit(
@@ -132,6 +154,7 @@ class TransactionEditorViewModel(
                 if (draft.categoryId != null && draft.categoryId != existing?.categoryId) {
                     com.sporez.actualist.core.rules.CategoryLearning(database).learn(listOf(transactionId), java.time.LocalDate.now())
                 }
+                }
             }
         }
     }
@@ -146,8 +169,8 @@ class TransactionEditorViewModel(
         null
     }
 
-    fun saveSplit(edit: com.sporez.actualist.core.transactions.SplitFamilyEdit) = launchWrite {
-        session.write { transactionWrites.updateSplit(transactionId!!, edit) }
+    fun saveSplit(edit: com.sporez.actualist.core.transactions.SplitFamilyEdit, unlockReconciled: Boolean = false) = launchWrite {
+        session.write { withUnlock(unlockReconciled) { transactionWrites.updateSplit(transactionId!!, edit) } }
     }
 
     fun duplicate() = launchWrite {
@@ -201,7 +224,9 @@ class TransactionEditorViewModel(
         com.sporez.actualist.core.commands.TransactionCommands(database, clock).previewMerge(transactionId!!, otherId).reconciledIds.isNotEmpty()
     }
 
-    fun delete() = launchWrite { session.write { transactionWrites.delete(transactionId!!) } }
+    fun delete(unlockReconciled: Boolean = false) = launchWrite {
+        session.write { withUnlock(unlockReconciled) { transactionWrites.delete(transactionId!!) } }
+    }
 
     private fun launchWrite(block: suspend () -> Unit) {
         viewModelScope.launch {
@@ -302,13 +327,11 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
         }
     }
 
-    Column(Modifier.fillMaxSize().testTag("transaction-editor")) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onDone, modifier = Modifier.testTag("editor-close")) { Icon(Icons.Filled.Close, contentDescription = "Close") }
-            Text(if (existing == null) "New transaction" else "Edit transaction", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            Button(
-                enabled = canSave && !editingSplit,
-                onClick = {
+    var reconciledScope by remember { mutableStateOf<com.sporez.actualist.core.transactions.ReconciledScope?>(null) }
+    var reconcileGuard by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(existing?.id) { reconciledScope = viewModel.reconciledScope() }
+    val reconciledNow = reconciledScope?.isEmpty == false
+    val performSave: (Boolean) -> Unit = { unlock ->
                     if (existing != null && splitting) {
                         viewModel.saveSplit(
                             com.sporez.actualist.core.transactions.SplitFamilyEdit(
@@ -320,6 +343,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                                 notes = notes,
                                 cleared = cleared,
                             ),
+                            unlock,
                         )
                     } else {
                     val draft = TransactionDraft(
@@ -334,16 +358,24 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                         isTransfer = isTransfer,
                         splits = if (splitting) splits.mapIndexed { i, line -> SplitDraft(line.categoryId, splitAmounts[i]!!) } else emptyList(),
                     )
-                    viewModel.save(draft)
+                    viewModel.save(draft, unlock)
                     }
-                },
+    }
+
+    Column(Modifier.fillMaxSize().testTag("transaction-editor")) {
+        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDone, modifier = Modifier.testTag("editor-close")) { Icon(Icons.Filled.Close, contentDescription = "Close") }
+            Text(if (existing == null) "New transaction" else "Edit transaction", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            Button(
+                enabled = canSave && !editingSplit,
+                onClick = { if (reconciledNow) reconcileGuard = "save" else performSave(false) },
                 modifier = Modifier.testTag("editor-save"),
             ) { Text("Save") }
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             error?.let { ErrorBanner(it, Modifier.testTag("editor-error")) }
             if (editingSplit) ErrorBanner("This is part of a split. Open the whole transaction to edit it.")
-            if (existing?.reconciled == true) ErrorBanner("This transaction is reconciled and locked.")
+            if (reconciledNow) ErrorBanner("This transaction is reconciled. Changing it asks you to confirm first.")
             if (rulesApplied.isNotEmpty()) {
                 Text(
                     "Rules applied: ${rulesApplied.size}. Review before saving.",
@@ -379,16 +411,38 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             FieldButton("Split ${index + 1} category", loaded.categories.firstOrNull { it.id == line.categoryId }?.name ?: "Uncategorized", "split-category-$index") { picking = "split-$index" }
                             AmountField(line.amountText, { text -> splits = splits.toMutableList().also { it[index] = SplitLine(line.categoryId, text, line.id) } }, label = "Amount", tag = "split-amount-$index")
+                            if (splits.size > 2) {
+                                TextButton(onClick = { splits = splits.toMutableList().also { it.removeAt(index) } }, modifier = Modifier.testTag("split-delete-$index")) {
+                                    Text("Remove split ${index + 1}", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
                         }
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { splits = splits + SplitLine(null, "") }, modifier = Modifier.testTag("split-add")) { Text("Add split") }
+                    val hideAmounts = LocalHideAmounts.current
+                    val displayed = SplitRemainingPresentation.displayedCents(splitRemaining, signed ?: 0L)
                     Text(
-                        if (splitRemaining == 0L) "Fully allocated" else "${money(kotlin.math.abs(splitRemaining))} left to allocate",
+                        SplitRemainingPresentation.statusText(displayed) { amount -> if (hideAmounts) "•••••" else Money.format(amount) },
                         color = if (splitRemaining == 0L) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                         modifier = Modifier.testTag("split-remaining"),
                     )
+                }
+                if (signed != null && splitRemaining != 0L) {
+                    // The first empty entry takes the remainder; with none empty, the last entry grows or shrinks by it.
+                    val target = splits.indexOfFirst { it.amountText.isBlank() }.takeIf { it >= 0 } ?: splits.lastIndex
+                    val filled = (splitAmounts[target] ?: 0L) + splitRemaining
+                    val sameDirection = if (outflow) filled <= 0 else filled >= 0
+                    OutlinedButton(
+                        enabled = sameDirection,
+                        onClick = {
+                            splits = splits.toMutableList().also {
+                                it[target] = SplitLine(it[target].categoryId, Money.format(kotlin.math.abs(filled), symbol = "", grouping = false), it[target].id)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("split-fill-remaining"),
+                    ) { Text("Fill Remaining") }
                 }
             }
             if (existing != null) {
@@ -396,12 +450,29 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                     TextButton(onClick = { viewModel.duplicate() }, modifier = Modifier.testTag("editor-duplicate")) { Text("Duplicate") }
                     TextButton(onClick = { picking = "merge" }, modifier = Modifier.testTag("editor-merge")) { Text("Merge with…") }
                     if (!existing.isParent) TextButton(onClick = { picking = "schedule" }, modifier = Modifier.testTag("editor-make-schedule")) { Text("Schedule…") }
-                    TextButton(onClick = { viewModel.delete() }, modifier = Modifier.testTag("editor-delete")) {
+                    TextButton(onClick = { if (reconciledNow) reconcileGuard = "delete" else viewModel.delete() }, modifier = Modifier.testTag("editor-delete")) {
                         Text("Delete", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
         }
+    }
+
+    reconcileGuard?.let { action ->
+        val scope = reconciledScope
+        ReconciledGuardDialog(
+            presentation = com.sporez.actualist.core.transactions.ReconciledMutationPresentation.make(
+                intent = if (action == "delete") com.sporez.actualist.core.transactions.ReconciledIntent.DELETE else com.sporez.actualist.core.transactions.ReconciledIntent.UPDATE,
+                targetReconciledCount = scope?.targetIds?.size ?: 1,
+                includesPairedTransfer = scope?.pairedIds?.isNotEmpty() == true,
+                targetRequiresUnlock = scope?.targetIds?.isNotEmpty() == true,
+            ),
+            onConfirm = {
+                reconcileGuard = null
+                if (action == "delete") viewModel.delete(unlockReconciled = true) else performSave(true)
+            },
+            onDismiss = { reconcileGuard = null },
+        )
     }
 
     when (val target = picking) {

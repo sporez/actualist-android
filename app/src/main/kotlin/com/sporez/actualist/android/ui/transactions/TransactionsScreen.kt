@@ -53,6 +53,7 @@ import com.sporez.actualist.android.ui.components.SectionCard
 import com.sporez.actualist.android.ui.reloading
 import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.transactions.Account
+import com.sporez.actualist.core.transactions.BatchIntent
 import com.sporez.actualist.core.transactions.TransactionQuery
 import com.sporez.actualist.core.transactions.TransactionRow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -244,12 +245,29 @@ class TransactionsViewModel(
         _selection.value = emptySet()
     }
 
-    private fun batch(describe: (com.sporez.actualist.core.transactions.BatchResult) -> String, block: BudgetSession.(Set<String>) -> com.sporez.actualist.core.transactions.BatchResult) {
+    /**
+     * Runs a batch on the selection. After the user confirmed the reconciled-rows warning
+     * ([unlockReconciled]) the lock is lifted for the change and put back after it, so the
+     * locked rows are changed rather than skipped.
+     */
+    private fun batch(
+        unlockReconciled: Boolean,
+        describe: (com.sporez.actualist.core.transactions.BatchResult) -> String,
+        block: BudgetSession.(Set<String>) -> com.sporez.actualist.core.transactions.BatchResult,
+    ) {
         val ids = _selection.value
         if (ids.isEmpty()) return
         viewModelScope.launch {
             try {
-                val result = session.write { block(ids) }
+                val result = session.write {
+                    val mutations = com.sporez.actualist.core.transactions.ReconciledMutations(database)
+                    val locked = if (unlockReconciled) mutations.unlock(ids) else emptyList()
+                    try {
+                        block(ids)
+                    } finally {
+                        if (locked.isNotEmpty()) mutations.relock(locked)
+                    }
+                }
                 _selection.value = emptySet()
                 messages.show(describe(result) + if (result.skipped > 0) " (${result.skipped} skipped: locked or not applicable)" else "")
             } catch (error: Exception) {
@@ -258,23 +276,90 @@ class TransactionsViewModel(
         }
     }
 
-    fun clearSelected(cleared: Boolean) = batch({ "${if (cleared) "Cleared" else "Uncleared"} ${it.changed}" }) {
+    fun clearSelected(cleared: Boolean, unlockReconciled: Boolean = false) = batch(unlockReconciled, { "${if (cleared) "Cleared" else "Uncleared"} ${it.changed}" }) {
         com.sporez.actualist.core.transactions.TransactionBatch(database, clock).setCleared(it, cleared)
     }
 
-    fun categorizeSelected(categoryId: String) = batch({ "Categorized ${it.changed}" }) { ids ->
+    fun categorizeSelected(categoryId: String, unlockReconciled: Boolean = false) = batch(unlockReconciled, { "Categorized ${it.changed}" }) { ids ->
         val result = com.sporez.actualist.core.transactions.TransactionBatch(database, clock).categorize(ids, categoryId)
         com.sporez.actualist.core.rules.CategoryLearning(database).learn(ids, java.time.LocalDate.now())
         result
     }
 
-    fun deleteSelected() = batch({ "Deleted ${it.changed}" }) {
+    fun deleteSelected(unlockReconciled: Boolean = false) = batch(unlockReconciled, { "Deleted ${it.changed}" }) {
         com.sporez.actualist.core.transactions.TransactionBatch(database, clock).delete(it)
     }
 
-    fun duplicateSelected() = batch({ "Duplicated ${it.changed}" }) { ids ->
+    fun duplicateSelected() = batch(false, { "Duplicated ${it.changed}" }) { ids ->
         val result = com.sporez.actualist.core.commands.TransactionCommands(database, clock).duplicate(ids.toList())
         com.sporez.actualist.core.transactions.BatchResult(result.duplicateIds.size, 0)
+    }
+
+    private fun listedRows(): List<TransactionRow> = (state.value as? Loadable.Ready)?.value?.rows.orEmpty()
+
+    /** The before → after review of [intent] on the current selection (nothing is written). */
+    fun batchReview(intent: com.sporez.actualist.core.transactions.BatchIntent, categoryName: String? = null): com.sporez.actualist.core.transactions.BatchReview =
+        com.sporez.actualist.core.transactions.BatchReviewPlanner.plan(intent, _selection.value, listedRows(), categoryName)
+
+    /** The review of merging the two selected transactions; null unless exactly two are selected. */
+    suspend fun mergeReview(): MergeReviewState? {
+        val ids = _selection.value.toList()
+        if (ids.size != 2) return null
+        val byId = listedRows().associateBy { it.id }
+        var blocked: String? = null
+        var keptId: String? = null
+        var droppedId: String? = null
+        var reconciledCount = 0
+        try {
+            val preview = session.read { com.sporez.actualist.core.commands.TransactionCommands(database, clock).previewMerge(ids[0], ids[1]) }
+            keptId = preview.keeperId
+            droppedId = preview.removedId
+            reconciledCount = preview.reconciledIds.size
+        } catch (error: Exception) {
+            blocked = failure(error, "These transactions cannot be merged.")
+        }
+        val inputs = ids.mapIndexed { index, id ->
+            val row = byId[id]
+            MergeInputView(
+                id = id,
+                label = "Input ${index + 1}",
+                title = row?.displayPayee?.ifBlank { "No payee" } ?: "Transaction unavailable",
+                context = listOfNotNull(row?.date?.format(dayFormat), row?.accountName, row?.notes?.takeIf { it.isNotBlank() }).joinToString(" · "),
+                amount = row?.amount ?: 0,
+                outcome = when (id) {
+                    keptId -> "Kept"
+                    droppedId -> "Dropped"
+                    else -> null
+                },
+                detail = when {
+                    row == null -> "This transaction is unavailable."
+                    id == keptId -> "This transaction is kept."
+                    id == droppedId -> "This transaction will be removed."
+                    else -> "This transaction will not be changed."
+                },
+            )
+        }
+        return MergeReviewState(
+            inputs = inputs,
+            keptLabel = inputs.firstOrNull { it.id == keptId }?.label,
+            droppedLabel = inputs.firstOrNull { it.id == droppedId }?.label,
+            reconciledCount = reconciledCount,
+            blocked = blocked,
+        )
+    }
+
+    fun mergeSelected(allowReconciled: Boolean) {
+        val ids = _selection.value.toList()
+        if (ids.size != 2) return
+        viewModelScope.launch {
+            try {
+                session.write { com.sporez.actualist.core.commands.TransactionCommands(database, clock).merge(ids[0], ids[1], allowReconciled) }
+                _selection.value = emptySet()
+                messages.show("Merged 2 transactions")
+            } catch (error: Exception) {
+                messages.show(failure(error, "The transactions could not be merged."))
+            }
+        }
     }
 
     suspend fun categoryOptions(): List<com.sporez.actualist.android.ui.components.PickerOption> = session.read {
@@ -292,16 +377,36 @@ class TransactionsViewModel(
     /** Cleared balance for the reconcile dialog, read fresh each time it opens. */
     suspend fun clearedBalance(): Long? = _query.value.accountId?.let { id -> session.read { com.sporez.actualist.core.transactions.Reconciliation(database, clock).snapshot(id).clearedBalance } }
 
-    fun reconcile(bankBalance: Long, finish: Boolean) {
+    /** The balances the reconcile steps show, read fresh each time a step changes the ledger. */
+    suspend fun reconcileInfo(): ReconcileInfo? {
+        val id = _query.value.accountId ?: return null
+        return session.read {
+            val account = ledger.accounts(includeClosed = true).firstOrNull { it.id == id } ?: return@read null
+            val snapshot = com.sporez.actualist.core.transactions.Reconciliation(database, clock).snapshot(id)
+            ReconcileInfo(account.name, account.balance, snapshot.clearedBalance, snapshot.unclearedCount, snapshot.lastReconciled)
+        }
+    }
+
+    /** Adds the cleared adjustment that closes the gap to [bankBalance]; false when it could not be added. */
+    suspend fun addReconcileAdjustment(bankBalance: Long): Boolean {
+        val accountId = _query.value.accountId ?: return false
+        return try {
+            session.write { com.sporez.actualist.core.transactions.Reconciliation(database, clock).createAdjustment(accountId, bankBalance, java.time.LocalDate.now()) }
+            messages.show("Adjustment added")
+            true
+        } catch (error: Exception) {
+            messages.show(error.message ?: "Reconciliation failed.")
+            false
+        }
+    }
+
+    /** Locks every cleared transaction once the difference is zero. */
+    fun lockReconciled(bankBalance: Long) {
         val accountId = _query.value.accountId ?: return
         viewModelScope.launch {
             try {
-                session.write {
-                    val reconciliation = com.sporez.actualist.core.transactions.Reconciliation(database, clock)
-                    reconciliation.createAdjustment(accountId, bankBalance, java.time.LocalDate.now())
-                    if (finish) reconciliation.finish(accountId, bankBalance)
-                }
-                messages.show(if (finish) "Reconciled and locked" else "Adjustment added")
+                session.write { com.sporez.actualist.core.transactions.Reconciliation(database, clock).finish(accountId, bankBalance) }
+                messages.show("Reconciled and locked")
             } catch (error: Exception) {
                 messages.show(error.message ?: "Reconciliation failed.")
             }
@@ -530,18 +635,7 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                     }
                     FilterChipsRow(list, viewModel)
                     list.filterProblem?.let { ErrorBanner(it, Modifier.padding(horizontal = 14.dp)) }
-                    list.account?.let { account ->
-                        Row(Modifier.padding(horizontal = 18.dp, vertical = 6.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Balance", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                MoneyText(account.balance, colored = true, style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("account-balance"))
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("Cleared", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                MoneyText(account.clearedBalance)
-                            }
-                        }
-                    }
+                    list.account?.let { account -> AccountSummary(account) }
                     if (list.rows.isEmpty()) {
                         MessageBox("No transactions", if (query.search.isNullOrBlank()) "Add one with the + button." else "Nothing matches that search.")
                     } else {
@@ -641,39 +735,6 @@ private fun TransactionItem(
             }
         }
     }
-}
-
-
-@Composable
-private fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
-    var cleared by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Long?>(null) }
-    var balanceText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
-    androidx.compose.runtime.LaunchedEffect(Unit) { cleared = viewModel.clearedBalance() }
-    val bank = com.sporez.actualist.core.money.Money.parse(balanceText)
-    val difference = if (bank != null && cleared != null) bank - cleared!! else null
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Reconcile account") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Cleared balance: " + (cleared?.let { com.sporez.actualist.core.money.Money.format(it) } ?: "…"), modifier = Modifier.testTag("reconcile-cleared"))
-                com.sporez.actualist.android.ui.components.AmountField(balanceText, { balanceText = it }, label = "Bank statement balance", tag = "reconcile-balance")
-                difference?.let {
-                    Text(
-                        if (it == 0L) "Balanced. Finishing locks every cleared transaction." else "Difference ${com.sporez.actualist.core.money.Money.format(it)} will be added as a cleared adjustment.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag("reconcile-difference"),
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = bank != null && cleared != null, onClick = { viewModel.reconcile(bank!!, finish = true); onDismiss() }, modifier = Modifier.testTag("reconcile-finish")) {
-                Text(if (difference == 0L) "Finish" else "Adjust and finish")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 
@@ -926,11 +987,39 @@ private fun AccountNoteField(viewModel: TransactionsViewModel, onDismiss: () -> 
 }
 
 
-/** Batch actions on the selected rows, as Actualist's multi-select offers. */
+/** Working balance with the cleared and uncleared parts (Actualist's account summary). */
+@Composable
+private fun AccountSummary(account: Account) {
+    Row(Modifier.padding(horizontal = 18.dp, vertical = 6.dp).testTag("account-summary")) {
+        Column(Modifier.weight(1f)) {
+            Text("Working balance", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            MoneyText(account.balance, colored = true, style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("account-balance"))
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text("Cleared", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            MoneyText(account.clearedBalance, modifier = Modifier.testTag("account-cleared"))
+        }
+        Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(start = 18.dp)) {
+            Text("Uncleared", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            MoneyText(account.balance - account.clearedBalance, modifier = Modifier.testTag("account-uncleared"))
+        }
+    }
+}
+
+/**
+ * Batch actions on the selected rows, as Actualist's multi-select offers. Every action opens a
+ * before → after review first; nothing changes until the review is confirmed.
+ */
 @Composable
 private fun SelectionBar(count: Int, viewModel: TransactionsViewModel) {
     var choosing by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<com.sporez.actualist.android.ui.components.PickerOption>?>(null) }
+    var review by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.sporez.actualist.core.transactions.BatchReview?>(null) }
+    var categoryId by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var mergeReview by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<MergeReviewState?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun open(intent: BatchIntent) {
+        review = viewModel.batchReview(intent)
+    }
     androidx.compose.foundation.lazy.LazyRow(
         Modifier.fillMaxWidth().testTag("selection-bar"),
         contentPadding = PaddingValues(horizontal = 14.dp),
@@ -938,13 +1027,16 @@ private fun SelectionBar(count: Int, viewModel: TransactionsViewModel) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         item { Text("$count selected", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 6.dp)) }
-        item { TextButton(onClick = { viewModel.clearSelected(true) }, modifier = Modifier.testTag("batch-clear")) { Text("Clear") } }
-        item { TextButton(onClick = { viewModel.clearSelected(false) }, modifier = Modifier.testTag("batch-unclear")) { Text("Unclear") } }
+        item { TextButton(onClick = { open(BatchIntent.CLEAR) }, modifier = Modifier.testTag("batch-clear")) { Text("Clear") } }
+        item { TextButton(onClick = { open(BatchIntent.UNCLEAR) }, modifier = Modifier.testTag("batch-unclear")) { Text("Unclear") } }
         item {
             TextButton(onClick = { scope.launch { choosing = viewModel.categoryOptions() } }, modifier = Modifier.testTag("batch-categorize")) { Text("Categorize") }
         }
-        item { TextButton(onClick = viewModel::duplicateSelected, modifier = Modifier.testTag("batch-duplicate")) { Text("Duplicate") } }
-        item { TextButton(onClick = viewModel::deleteSelected, modifier = Modifier.testTag("batch-delete")) { Text("Delete", color = MaterialTheme.colorScheme.error) } }
+        item { TextButton(onClick = { open(BatchIntent.DUPLICATE) }, modifier = Modifier.testTag("batch-duplicate")) { Text("Duplicate") } }
+        if (count == 2) {
+            item { TextButton(onClick = { scope.launch { mergeReview = viewModel.mergeReview() } }, modifier = Modifier.testTag("batch-merge")) { Text("Merge") } }
+        }
+        item { TextButton(onClick = { open(BatchIntent.DELETE) }, modifier = Modifier.testTag("batch-delete")) { Text("Delete", color = MaterialTheme.colorScheme.error) } }
         item { TextButton(onClick = viewModel::clearSelection, modifier = Modifier.testTag("batch-cancel")) { Text("Cancel") } }
     }
     choosing?.let { options ->
@@ -952,8 +1044,41 @@ private fun SelectionBar(count: Int, viewModel: TransactionsViewModel) {
             title = "Categorize as",
             options = options,
             searchable = true,
-            onPick = { option -> option.id?.let(viewModel::categorizeSelected); choosing = null },
+            onPick = { option ->
+                choosing = null
+                option.id?.let {
+                    categoryId = it
+                    review = viewModel.batchReview(BatchIntent.CATEGORIZE, option.title)
+                }
+            },
             onDismiss = { choosing = null },
+        )
+    }
+    review?.let { current ->
+        BatchReviewDialog(
+            review = current,
+            onDismiss = { review = null },
+            onConfirm = {
+                val unlock = current.needsReconciledConfirmation
+                when (current.intent) {
+                    BatchIntent.CLEAR -> viewModel.clearSelected(true, unlock)
+                    BatchIntent.UNCLEAR -> viewModel.clearSelected(false, unlock)
+                    BatchIntent.CATEGORIZE -> categoryId?.let { viewModel.categorizeSelected(it, unlock) }
+                    BatchIntent.DELETE -> viewModel.deleteSelected(unlock)
+                    BatchIntent.DUPLICATE -> viewModel.duplicateSelected()
+                }
+                review = null
+            },
+        )
+    }
+    mergeReview?.let { current ->
+        MergeReviewDialog(
+            review = current,
+            onDismiss = { mergeReview = null },
+            onConfirm = {
+                viewModel.mergeSelected(allowReconciled = current.reconciledCount > 0)
+                mergeReview = null
+            },
         )
     }
 }
