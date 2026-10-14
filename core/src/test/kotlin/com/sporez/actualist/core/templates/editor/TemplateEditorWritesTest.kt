@@ -56,7 +56,9 @@ class TemplateEditorWritesTest {
             val stored = db.sql.queryString("SELECT goal_def FROM categories WHERE id = 'personal_care'")!!
             assertTrue(stored, stored.contains("\"type\":\"limit\"") && stored.contains("\"type\":\"refill\""))
             val upTo = BudgetTemplates(db, clock).preview("2026-11", today = day, categoryIds = setOf("personal_care"))
-            assertTrue("${upTo.errors} ${upTo.categories}", upTo.isReady && upTo.categories.single { it.categoryId == "personal_care" }.proposed in 0L..7_500L)
+            // Personal Care carries about $648 into November, so the limit releases down to the $75 cap.
+            assertTrue("${upTo.errors} ${upTo.categories}", upTo.isReady)
+            assertEquals(7_500L, upTo.categories.single { it.categoryId == "personal_care" }.metric.after)
 
             // Saving an unchanged draft writes nothing; an empty draft clears the template.
             val unchanged = writes.load("dining")!!
