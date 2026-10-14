@@ -208,6 +208,15 @@ class TransactionsViewModel(
         com.sporez.actualist.core.accountgroups.AccountGroups(database, clock).moveAccount(it, groupId)
     }
 
+    suspend fun accountNote(): String? {
+        val id = _query.value.accountId ?: return null
+        return session.read { com.sporez.actualist.core.notes.EntityNotes(database).read(com.sporez.actualist.core.notes.NoteTarget.Account(id)) }
+    }
+
+    fun saveAccountNote(text: String) = accountWrite("Notes saved") {
+        com.sporez.actualist.core.notes.EntityNotes(database).write(com.sporez.actualist.core.notes.NoteTarget.Account(it), text)
+    }
+
     fun reopenAccount() = accountWrite("Account reopened") { com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).reopen(it) }
 
     fun renameAccount(name: String) = accountWrite("Renamed") { com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).rename(it, name) }
@@ -527,6 +536,7 @@ private fun AccountDialog(account: Account, viewModel: TransactionsViewModel, on
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("account-rename"))
                 TextButton(onClick = { viewModel.renameAccount(name); onDismiss() }, enabled = name.isNotBlank() && name.trim() != account.name) { Text("Rename") }
+                AccountNoteField(viewModel, onDismiss)
                 GroupRow(viewModel, onDismiss)
                 if (viewModel.bankSyncAvailable && !account.closed) {
                     androidx.compose.material3.HorizontalDivider()
@@ -738,5 +748,23 @@ private fun GroupRow(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
             },
             onDismiss = { picking = false },
         )
+    }
+}
+
+
+@Composable
+private fun AccountNoteField(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
+    var original by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var text by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var loaded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        original = runCatching { viewModel.accountNote() }.getOrNull()
+        text = original.orEmpty()
+        loaded = true
+    }
+    if (!loaded) return
+    androidx.compose.material3.OutlinedTextField(text, { text = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("account-notes"))
+    if (text.trim() != original.orEmpty()) {
+        TextButton(onClick = { viewModel.saveAccountNote(text); onDismiss() }, modifier = Modifier.testTag("account-notes-save")) { Text("Save notes") }
     }
 }
