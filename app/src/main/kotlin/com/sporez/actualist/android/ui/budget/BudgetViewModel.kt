@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class BudgetScreenState(val month: BudgetMonth, val availableMonths: List<String>) {
+data class BudgetScreenState(val month: BudgetMonth, val availableMonths: List<String>, val note: String? = null) {
     val overspent get() = month.categoryGroups.filter { !it.isIncome }.flatMap { it.categories }.filter { it.balance < 0 }
 }
 
@@ -24,7 +24,7 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
     val messages = MessageState()
 
     val state = reloading(session, _month) { month ->
-        BudgetScreenState(budget.fetchBudgetMonth(month), budget.availableMonths())
+        BudgetScreenState(budget.fetchBudgetMonth(month), budget.availableMonths(), budget.monthNote(month))
     }
 
     fun showMonth(month: String) {

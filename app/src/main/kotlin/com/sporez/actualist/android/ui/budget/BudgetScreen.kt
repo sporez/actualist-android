@@ -108,6 +108,13 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                     } else {
                         item(key = "tracking") { TrackingSummaryCard(screen) }
                     }
+                    screen.note?.let { note ->
+                        item(key = "note") {
+                            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                                Text(note, Modifier.padding(12.dp).testTag("month-note"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                     if (screen.overspent.isNotEmpty()) {
                         item(key = "overspent") { OverspentRow(screen.overspent.size) { selectedCategory = screen.overspent.first().id } }
                     }

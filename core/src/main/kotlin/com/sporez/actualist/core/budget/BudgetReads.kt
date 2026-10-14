@@ -418,6 +418,12 @@ class BudgetReads(private val database: BudgetDatabase) {
         return result
     }
 
+    /** The month's note (`notes` row `budget-YYYY-MM`), or null when empty. */
+    fun monthNote(month: String): String? {
+        if (!database.tableExists("notes")) return null
+        return sql.queryString("SELECT note FROM notes WHERE id = ?", "budget-$month")?.takeIf { it.isNotBlank() }
+    }
+
     private fun userNoteIds(month: String): Set<String> {
         if (!database.tableExists("notes")) return emptySet()
         return sql.query(
