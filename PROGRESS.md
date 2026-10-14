@@ -30,7 +30,8 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
 - Multi-select batch actions, status filters, account notes, make-a-schedule from a transaction, budget ZIP export and import-as-new (with Actual's resetSync, checked against the real server), custom request headers scoped to the server origin.
-- Device tests moved to Compose's v2 test API (StandardTestDispatcher): the deprecated v1 rule's unconfined dispatcher once let a background state change run the Recomposer off the main thread (CalledFromWrongThreadException at teardown).
+- Device tests moved to Compose's v2 test API (StandardTestDispatcher): the deprecated v1 rule's unconfined dispatcher once let a background state change run the Recomposer off the main thread (CalledFromWrongThreadException at teardown). Rules learned under v2: never block the test thread on work that needs the session's write lock (run it on a thread and `waitUntil`), invoke long-press through the `OnLongClick` semantics action, and wait for the browser to fully take the foreground before delivering an OpenID redirect.
+- Emulator workflow accepts an optional `test_filter` input (`am instrument -e class`) for fast single-test reruns.
 - History screen (this session's edits with undo and redo); schedule editing (name, amount, auto-posting, first date and frequency of simple rules); account groups (create, rename, delete, move accounts) with Actualist's compatibility replay on open.
 - SimpleFIN bank sync through the Actual server's `/simplefin/*` routes (as Actualist), field mapping, link/sync/unlink in the account dialog; background sync with WorkManager sharing the UI's session through a reference-counted SessionHub; OpenID sign-in via browser redirect with a single-use nonce; monthly template editing from the category sheet.
 - Undo/redo: Actual's cell-level undo (`server/undo.ts`) captured in every local commit, per-session history, refused after a later edit to a touched row (OP-76); Undo/Redo in the top bar.
@@ -46,7 +47,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Known limitations
 
-- Not ported: GoCardless, the direct SimpleFIN bridge fallback, header auth, schedule patterns and end rules in the editor, editing non-monthly template kinds in the UI, rule editor for advanced operators (those rules stay read-only), widgets.
+- Not ported: GoCardless, the direct SimpleFIN bridge fallback, header auth, schedule patterns and end rules in the editor, editing non-monthly template kinds in the UI, rule editor operators beyond is/is not/one of/contains/matches/comparisons/approximately (other rules stay read-only), widgets, multi-month budget view.
 - Real-server coverage is a disposable `actualbudget/actual-server:26.10.0` container in CI with synthetic data (login, new plain and encrypted budgets, download, two-device sync, conflicts); the on-device tests use an in-process loopback server.
 - Background sync runs hourly on any network; its first run waits 30 minutes, since opening the app syncs anyway.
 - Plain-http servers are refused except on loopback.
