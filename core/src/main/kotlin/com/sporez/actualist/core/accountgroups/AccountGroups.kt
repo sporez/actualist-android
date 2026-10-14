@@ -63,6 +63,72 @@ class AccountGroups(
         database.commitLocal { moveGroupDrafts(id, beforeId) to Unit }
     }
 
+    /**
+     * Actual's `moveAccount`: puts [accountId] before [beforeId] (null for the end) among the
+     * live accounts of the same budget kind (open) or the closed ones, shoving neighbours when
+     * gaps run out. [groupId] changes the account's group in the same commit when [setGroup].
+     */
+    fun reorderAccount(accountId: String, beforeId: String?, setGroup: Boolean = false, groupId: String? = null) {
+        database.commitLocal { reorderAccountDrafts(accountId, beforeId, setGroup, groupId) to Unit }
+    }
+
+    /**
+     * One step up (delta -1) or down (+1) among the visible peers of the account: same group,
+     * same budget kind, same open state. Does nothing at an edge.
+     */
+    fun moveAccountBy(accountId: String, delta: Int) {
+        database.commitLocal {
+            val rows = peerRows(accountId)
+            val ids = rows.filter { it.visible }.map { it.id }
+            val index = ids.indexOf(accountId)
+            val to = index + delta
+            if (index < 0 || to < 0 || to >= ids.size) return@commitLocal emptyList<CellDraft>() to Unit
+            val before = if (delta < 0) ids[to] else ids.getOrNull(to + 1)
+            reorderAccountDrafts(accountId, before, false, null) to Unit
+        }
+    }
+
+    private class PeerRow(val id: String, val sortOrder: Double, val visible: Boolean)
+
+    private fun accountPeers(accountId: String): Pair<List<PeerRow>, Boolean> {
+        val columns = database.requiredColumns("accounts", listOf("sort_order"))
+        val predicate = BudgetDatabase.livePredicate(columns)
+        val account = sql.queryOne("SELECT closed, offbudget FROM accounts WHERE id = ? AND $predicate", accountId)
+            ?: throw LocalFirstException.InvalidLocalWrite("missing account")
+        val closed = account.bool("closed")
+        val hasGroup = "account_group_id" in columns
+        val groupColumn = if (hasGroup) "account_group_id" else "NULL"
+        val where = if (closed) "closed = 1" else "offbudget = ${if (account.bool("offbudget")) 1 else 0}"
+        val rows = sql.query("SELECT id, sort_order, closed, $groupColumn AS grp FROM accounts WHERE $predicate AND $where ORDER BY sort_order, name")
+        val ownGroup = rows.firstOrNull { it.string("id") == accountId }?.string("grp")?.takeIf { it.isNotEmpty() }
+        val peers = rows.mapNotNull { row ->
+            val id = row.string("id") ?: return@mapNotNull null
+            val group = row.string("grp")?.takeIf { it.isNotEmpty() }
+            PeerRow(id, row.double("sort_order") ?: 0.0, (closed || !row.bool("closed")) && group == ownGroup)
+        }
+        return peers to closed
+    }
+
+    private fun peerRows(accountId: String): List<PeerRow> = accountPeers(accountId).first
+
+    private fun reorderAccountDrafts(accountId: String, beforeId: String?, setGroup: Boolean, groupId: String?): List<CellDraft> {
+        if (beforeId == accountId) throw LocalFirstException.InvalidLocalWrite("an account cannot move before itself")
+        if (setGroup && groupId != null) requiredLiveGroup(groupId)
+        val peers = peerRows(accountId)
+        val result = SortOrder.shove(peers.map { SortOrder.Item(it.id, it.sortOrder) }, beforeId)
+        val drafts = mutableListOf<CellDraft>()
+        for (update in result.updates) {
+            if (update.id == accountId) continue
+            drafts.add(CellDraft("accounts", update.id, "sort_order", SyncValue.Real(update.sortOrder)))
+        }
+        drafts.add(CellDraft("accounts", accountId, "sort_order", SyncValue.Real(result.sortOrder)))
+        if (setGroup) {
+            database.requiredColumns("accounts", listOf("account_group_id"))
+            drafts.add(CellDraft("accounts", accountId, "account_group_id", SyncValue.textOrNull(groupId)))
+        }
+        return drafts
+    }
+
     private fun createDrafts(groupId: String, name: String): List<CellDraft> {
         val trimmedId = groupId.trim()
         val trimmedName = validatedName(name)

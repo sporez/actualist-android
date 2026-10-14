@@ -17,10 +17,16 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -90,6 +96,20 @@ class AccountsViewModel(private val session: BudgetSession) : ViewModel() {
 
     fun deleteGroup(id: String) = groupWrite("Deleted group") { delete(id) }
 
+    fun moveAccount(id: String, delta: Int) = groupWrite("Moved account") { moveAccountBy(id, delta) }
+
+    fun moveAccountToGroup(id: String, groupId: String?) =
+        groupWrite(if (groupId == null) "Removed from group" else "Moved to group") { reorderAccount(id, null, setGroup = true, groupId = groupId) }
+
+    /** One step up (delta -1) or down (+1) among the groups, as Actualist's group menu. */
+    fun moveGroup(groups: List<com.sporez.actualist.core.accountgroups.AccountGroup>, id: String, delta: Int) {
+        val index = groups.indexOfFirst { it.id == id }
+        val to = index + delta
+        if (index < 0 || to < 0 || to >= groups.size) return
+        val before = if (delta < 0) groups[to].id else groups.getOrNull(to + 1)?.id
+        groupWrite("Moved group") { moveGroup(id, before) }
+    }
+
     fun create(name: String, offBudget: Boolean, balance: Long) {
         viewModelScope.launch {
             try {
@@ -125,16 +145,16 @@ fun AccountsScreen(viewModel: AccountsViewModel, onOpenAccount: (Account) -> Uni
                     message?.let { item { Text(it, Modifier.testTag("accounts-message").clickable { viewModel.messages.clear() }, color = MaterialTheme.colorScheme.primary) } }
                     item { NetWorthHeader(accounts.filter { !it.closed }.sumOf { it.balance }) }
                     // Account groups (Actual 26.10) come first, each with its open member accounts.
-                    for ((group, members) in grouped) section(group.name, "group-${group.id}", members, onOpenAccount)
-                    section("Budget Accounts", "budget-accounts", onBudget, onOpenAccount)
-                    section("Off Budget", "off-budget-accounts", offBudget, onOpenAccount)
+                    for ((group, members) in grouped) section(group.name, "group-${group.id}", members, onOpenAccount, viewModel, current.value.groups, group.id)
+                    section("Budget Accounts", "budget-accounts", onBudget, onOpenAccount, viewModel, current.value.groups, null)
+                    section("Off Budget", "off-budget-accounts", offBudget, onOpenAccount, viewModel, current.value.groups, null)
                     if (closed.isNotEmpty()) {
                         item {
                             TextButton(onClick = { showClosed = !showClosed }, modifier = Modifier.testTag("toggle-closed")) {
                                 Text(if (showClosed) "Hide closed (${closed.size})" else "Closed (${closed.size})")
                             }
                         }
-                        if (showClosed) section("Closed", "closed-accounts", closed, onOpenAccount)
+                        if (showClosed) section("Closed", "closed-accounts", closed, onOpenAccount, viewModel, current.value.groups, null)
                     }
                     item {
                         OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().testTag("add-account")) {
@@ -168,7 +188,15 @@ private fun NetWorthHeader(total: Long) {
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String, tag: String, accounts: List<Account>, onOpen: (Account) -> Unit) {
+private fun androidx.compose.foundation.lazy.LazyListScope.section(
+    title: String,
+    tag: String,
+    accounts: List<Account>,
+    onOpen: (Account) -> Unit,
+    viewModel: AccountsViewModel,
+    groups: List<com.sporez.actualist.core.accountgroups.AccountGroup>,
+    groupId: String?,
+) {
     if (accounts.isEmpty()) return
     item(key = tag) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -195,11 +223,50 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String
                         Spacer(Modifier.width(12.dp))
                         Text(account.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                         MoneyText(account.balance, colored = true)
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        AccountMenu(account, index > 0, index < accounts.lastIndex, groups, groupId, viewModel)
                     }
                     if (index < accounts.lastIndex) HorizontalDivider(Modifier.padding(start = 48.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
+        }
+    }
+}
+
+/** Move Up / Move Down within the section, plus Move to Group / Remove from Group, as Actualist's context menu. */
+@Composable
+private fun AccountMenu(
+    account: Account,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    groups: List<com.sporez.actualist.core.accountgroups.AccountGroup>,
+    groupId: String?,
+    viewModel: AccountsViewModel,
+) {
+    var open by remember { mutableStateOf(false) }
+    val destinations = if (account.closed) emptyList() else groups.filter { it.id != groupId }
+    if (!canMoveUp && !canMoveDown && destinations.isEmpty() && groupId == null) {
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    IconButton(onClick = { open = true }, modifier = Modifier.size(32.dp).testTag("account-menu-${account.id}")) {
+        Icon(Icons.Filled.MoreVert, contentDescription = "Account actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        if (canMoveUp) {
+            DropdownMenuItem(text = { Text("Move Up") }, onClick = { open = false; viewModel.moveAccount(account.id, -1) }, modifier = Modifier.testTag("account-move-up-${account.id}"))
+        }
+        if (canMoveDown) {
+            DropdownMenuItem(text = { Text("Move Down") }, onClick = { open = false; viewModel.moveAccount(account.id, 1) }, modifier = Modifier.testTag("account-move-down-${account.id}"))
+        }
+        for (group in destinations) {
+            DropdownMenuItem(
+                text = { Text("Move to ${group.name}") },
+                onClick = { open = false; viewModel.moveAccountToGroup(account.id, group.id) },
+                modifier = Modifier.testTag("account-to-group-${account.id}-${group.id}"),
+            )
+        }
+        if (groupId != null) {
+            DropdownMenuItem(text = { Text("Remove from Group") }, onClick = { open = false; viewModel.moveAccountToGroup(account.id, null) }, modifier = Modifier.testTag("account-ungroup-${account.id}"))
         }
     }
 }
@@ -217,10 +284,15 @@ private fun AddAccountDialog(onDismiss: () -> Unit, onCreate: (String, Boolean, 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("account-name"))
                 AmountField(balance, { balance = it }, label = "Current balance", tag = "account-balance")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = offBudget, onCheckedChange = { offBudget = it }, modifier = Modifier.testTag("account-offbudget"))
-                    Text("Off budget (tracking only)")
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(selected = !offBudget, onClick = { offBudget = false }, shape = SegmentedButtonDefaults.itemShape(0, 2), modifier = Modifier.testTag("account-kind-budget")) { Text("Budget") }
+                    SegmentedButton(selected = offBudget, onClick = { offBudget = true }, shape = SegmentedButtonDefaults.itemShape(1, 2), modifier = Modifier.testTag("account-kind-offbudget")) { Text("Off Budget") }
                 }
+                Text(
+                    if (offBudget) "Tracked outside the budget." else "Included in the budget.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
         confirmButton = {
@@ -250,6 +322,8 @@ private fun GroupsDialog(groups: List<com.sporez.actualist.core.accountgroups.Ac
                             TextButton(onClick = { viewModel.renameGroup(group.id, renameText); renaming = null }, enabled = renameText.isNotBlank()) { Text("Save") }
                         } else {
                             Text(group.name, Modifier.weight(1f))
+                            if (groups.first().id != group.id) TextButton(onClick = { viewModel.moveGroup(groups, group.id, -1) }, modifier = Modifier.testTag("group-up-${group.id}")) { Text("Up") }
+                            if (groups.last().id != group.id) TextButton(onClick = { viewModel.moveGroup(groups, group.id, 1) }, modifier = Modifier.testTag("group-down-${group.id}")) { Text("Down") }
                             TextButton(onClick = { renaming = group; renameText = group.name }) { Text("Rename") }
                             TextButton(onClick = { viewModel.deleteGroup(group.id) }, modifier = Modifier.testTag("group-delete-${group.id}")) {
                                 Text("Delete", color = MaterialTheme.colorScheme.error)
