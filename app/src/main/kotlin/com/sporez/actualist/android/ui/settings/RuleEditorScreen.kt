@@ -58,9 +58,24 @@ object RuleEditorFields {
 
     fun conditionOps(field: String): List<String> = when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf")
-        com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "contains", "doesNotContain", "matches")
+        com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "isNot", "contains", "doesNotContain", "matches")
         com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "isapprox", "gt", "gte", "lt", "lte")
         else -> emptyList()
+    }
+
+    /** Notes actions also add text before or after the existing notes; Actual stores these without a field. */
+    val notesActionOps = listOf("set", "prepend-notes", "append-notes")
+
+    fun actionOpLabel(op: String) = when (op) {
+        "prepend-notes" -> "add before"
+        "append-notes" -> "add after"
+        else -> "set to"
+    }
+
+    fun stageLabel(stage: RuleStage) = when (stage) {
+        RuleStage.PRE -> "Pre"
+        RuleStage.NORMAL -> "Default"
+        RuleStage.POST -> "Post"
     }
 
     fun label(field: String) = when (field) {
@@ -129,16 +144,24 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
     }
 
     private fun representable(draft: RuleDraft): Boolean =
-        draft.stage == RuleStage.NORMAL &&
-            draft.conditions.all { it.fieldName in RuleEditorFields.conditionFields && it.op in RuleEditorFields.conditionOps(it.fieldName) && it.options.isNullOrEmpty() } &&
-            draft.actions.all { it.op == "set" && it.fieldName in RuleEditorFields.actionFields && it.options.isNullOrEmpty() }
+        draft.conditions.all { it.fieldName in RuleEditorFields.conditionFields && it.op in RuleEditorFields.conditionOps(it.fieldName) && it.options.isNullOrEmpty() } &&
+            draft.actions.all { action ->
+                action.options.isNullOrEmpty() && when (action.op) {
+                    "set" -> action.fieldName in RuleEditorFields.actionFields
+                    "prepend-notes", "append-notes" -> action.fieldName == null && action.value.isStringLike
+                    else -> false
+                }
+            }
 
-    fun save(join: RuleConditionJoin, conditions: List<RuleLine>, actions: List<RuleLine>) = launch {
+    fun save(stage: RuleStage, join: RuleConditionJoin, conditions: List<RuleLine>, actions: List<RuleLine>) = launch {
         val draft = RuleDraft(
-            stage = RuleStage.NORMAL,
+            stage = stage,
             join = join,
             conditions = conditions.map { RuleCondition(it.field, it.op, value(it.field, it.value, it.op), RuleFields.valueKind(it.field)?.raw) },
-            actions = actions.map { RuleAction("set", it.field, value(it.field, it.value), RuleFields.valueKind(it.field)?.raw) },
+            actions = actions.map {
+                if (it.op == "set") RuleAction("set", it.field, value(it.field, it.value), RuleFields.valueKind(it.field)?.raw)
+                else RuleAction(it.op, null, RuleValue.Text(it.value))
+            },
         )
         session.write { if (ruleId == null) RuleWrites(database).create(draft) else RuleWrites(database).update(ruleId, draft) }
     }
@@ -193,8 +216,9 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
         mutableStateOf(existing?.conditions?.map { RuleLine(it.fieldName, it.op, RuleEditorViewModel.text(it.fieldName, it.value)) } ?: listOf(RuleLine("payee", "is", "")))
     }
     var actions by remember {
-        mutableStateOf(existing?.actions?.map { RuleLine(it.fieldName ?: "", it.op, RuleEditorViewModel.text(it.fieldName ?: "", it.value)) } ?: listOf(RuleLine("category", "set", "")))
+        mutableStateOf(existing?.actions?.map { RuleLine(it.fieldName ?: "notes", it.op, RuleEditorViewModel.text(it.fieldName ?: "notes", it.value)) } ?: listOf(RuleLine("category", "set", "")))
     }
+    var stage by remember { mutableStateOf(existing?.stage ?: RuleStage.NORMAL) }
     var picking by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     val valid = conditions.isNotEmpty() && actions.isNotEmpty() &&
         conditions.all { it.value.isNotBlank() && (RuleFields.valueKind(it.field) != com.sporez.actualist.core.rules.RuleValueKind.NUMBER || Money.parse(it.value) != null) } &&
@@ -204,6 +228,18 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
         error?.let { ErrorBanner(it, Modifier.testTag("rule-error")) }
         if (!loaded.editable) {
             Text("This rule uses options this editor does not offer yet. You can delete it here or edit it in Actual.", style = MaterialTheme.typography.bodyMedium)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Stage", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(end = 8.dp))
+            for (option in RuleStage.values()) {
+                androidx.compose.material3.FilterChip(
+                    selected = stage == option,
+                    onClick = { stage = option },
+                    enabled = loaded.editable,
+                    label = { Text(RuleEditorFields.stageLabel(option)) },
+                    modifier = Modifier.padding(end = 4.dp).testTag("rule-stage-${option.raw}"),
+                )
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("If", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -240,7 +276,7 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
         if (loaded.editable) TextButton(onClick = { actions = actions + RuleLine("notes", "set", "") }, modifier = Modifier.testTag("rule-add-action")) { Text("Add action") }
         Row {
             if (loaded.editable) {
-                Button(onClick = { viewModel.save(join, conditions, actions) }, enabled = valid, modifier = Modifier.testTag("rule-save")) { Text("Save rule") }
+                Button(onClick = { viewModel.save(stage, join, conditions, actions) }, enabled = valid, modifier = Modifier.testTag("rule-save")) { Text("Save rule") }
             }
             if (existing != null) {
                 TextButton(onClick = { viewModel.delete() }, modifier = Modifier.testTag("rule-delete")) { Text("Delete", color = MaterialTheme.colorScheme.error) }
@@ -266,7 +302,12 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                 },
                 onDismiss = { picking = null },
             )
-            "op" -> PickerDialog(
+            "op" -> if (kind == "action") PickerDialog(
+                title = "Notes",
+                options = RuleEditorFields.notesActionOps.map { PickerOption(it, RuleEditorFields.actionOpLabel(it)) },
+                onPick = { option -> set(line.copy(op = option.id!!)) },
+                onDismiss = { picking = null },
+            ) else PickerDialog(
                 title = "Operator",
                 options = RuleEditorFields.conditionOps(line.field).map { PickerOption(it, RuleEditorFields.opLabel(it)) },
                 onPick = { option ->
@@ -321,6 +362,8 @@ private fun LineCard(
                 OutlinedButton(onClick = { onPick("field") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-field")) { Text(RuleEditorFields.label(line.field)) }
                 if (kind == "condition") {
                     TextButton(onClick = { onPick("op") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-op")) { Text(RuleEditorFields.opLabel(line.op)) }
+                } else if (line.field == "notes") {
+                    TextButton(onClick = { onPick("op") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-op")) { Text(RuleEditorFields.actionOpLabel(line.op)) }
                 } else {
                     Text("  set to", modifier = Modifier.padding(horizontal = 8.dp))
                 }

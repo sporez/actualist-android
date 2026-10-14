@@ -227,9 +227,17 @@ class DemoBudgetFlowTest {
         compose.waitForTag("picker-search")
         compose.onNodeWithTag("picker-search").performTextInput("Shopping")
         compose.onNodeWithTag("pick-shopping").performClick()
+        // A post-stage rule that also adds a tag after the existing notes.
+        compose.onNodeWithTag("rule-stage-post").performScrollTo().performClick()
+        compose.onNodeWithTag("rule-add-action").performScrollTo().performClick()
+        compose.onNodeWithTag("rule-action-1-op").performScrollTo().performClick()
+        compose.onNodeWithTag("pick-append-notes").performClick()
+        compose.onNodeWithTag("rule-action-1-text").performScrollTo().performTextInput(" #shop")
         compose.screenshot("15-rule-editor")
-        compose.onNodeWithTag("rule-save").performClick()
+        compose.onNodeWithTag("rule-save").performScrollTo().performClick()
         compose.waitOrCapture("rule-saved") { compose.onAllNodes(hasText("payee is MarketPlace", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitOrCapture("rule-notes-action") { compose.onAllNodes(hasText("append-notes \" #shop\"", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Stage: post").assertExists()
         compose.screenshot("16-rules")
     }
 

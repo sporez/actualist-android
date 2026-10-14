@@ -60,6 +60,35 @@ class RuleWritesTest {
     }
 
     @Test
+    fun preStageNotesActionsAndIsNotRoundTripAndRun() {
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
+            val draft = RuleDraft(
+                stage = RuleStage.PRE,
+                join = RuleConditionJoin.AND,
+                conditions = listOf(
+                    RuleCondition("imported_payee", "contains", RuleValue.Text("bakery"), "string"),
+                    RuleCondition("notes", "isNot", RuleValue.Text("skip"), "string"),
+                ),
+                actions = listOf(
+                    RuleAction("prepend-notes", null, RuleValue.Text("[bakery] ")),
+                    RuleAction("append-notes", null, RuleValue.Text(" #food")),
+                ),
+            )
+            val (id, messages) = RuleWrites(database) { "rule-pre" }.create(draft)
+            val stored = messages.associate { it.column to it.serializedValue }
+            // As Actual stores them: notes actions carry no field or type.
+            assertEquals("""S:[{"op":"prepend-notes","value":"[bakery] "},{"op":"append-notes","value":" #food"}]""", stored["actions"])
+            assertEquals("S:pre", stored["stage"])
+            val engine = RuleEngine(database)
+            assertEquals(draft, engine.fetchRules().first { it.id == id }.draft)
+            val hit = engine.run(RuleTransactionInput(accountId = "checking", date = day, amount = -650, importedPayee = "CORNER BAKERY", notes = "Bread"), day)
+            assertEquals("[bakery] Bread #food", hit.notes)
+            val miss = engine.run(RuleTransactionInput(accountId = "checking", date = day, amount = -650, importedPayee = "CORNER BAKERY", notes = "skip"), day)
+            assertTrue(id !in miss.appliedRuleIds)
+        }
+    }
+
+    @Test
     fun oneOfAndApproximateConditionsRoundTripAndMatch() {
         DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
             val draft = RuleDraft(
