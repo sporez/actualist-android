@@ -69,7 +69,7 @@ jobs:
           root = ET.parse(files[0]).getroot()
           tests, skipped = int(root.get("tests")), int(root.get("skipped"))
           print(f"tests={tests} skipped={skipped} failures={root.get('failures')} errors={root.get('errors')}")
-          if tests == 0 or skipped:
+          if tests < 2 or skipped:
               sys.exit("RealActualServerTest was skipped; the server was not reachable")
           EOF
 

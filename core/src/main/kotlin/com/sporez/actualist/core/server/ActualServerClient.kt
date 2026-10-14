@@ -177,7 +177,7 @@ class ActualServerClient(
      * Registers a budget archive as a new (or replacement) server file, as Actualist's
      * `uploadUserFile` does. Returns the group id the server assigned, when it sends one.
      */
-    fun uploadUserFile(token: String, fileId: String, name: String, groupId: String?, archive: ByteArray): String? {
+    fun uploadUserFile(token: String, fileId: String, name: String, groupId: String?, archive: ByteArray, encryptMeta: EncryptMeta? = null): String? {
         val builder = request("sync/upload-user-file")
             .header(TOKEN, token)
             .header(FILE_ID, fileId)
@@ -185,10 +185,40 @@ class ActualServerClient(
             .header("X-ACTUAL-FORMAT", "2")
             .post(archive.toRequestBody("application/encrypted-file".toMediaType()))
         groupId?.let { builder.header("X-ACTUAL-GROUP-ID", it) }
+        encryptMeta?.let { meta ->
+            builder.header(
+                "X-ACTUAL-ENCRYPT-META",
+                buildJsonObject {
+                    put("keyId", meta.keyId)
+                    meta.algorithm?.let { put("algorithm", it) }
+                    meta.iv?.let { put("iv", it) }
+                    meta.authTag?.let { put("authTag", it) }
+                }.toString(),
+            )
+        }
         val text = execute(builder.build()) { it.bodyText() }
         val root = runCatching { parse(text) }.getOrNull() ?: return null
         if ((root["status"] as? JsonPrimitive)?.contentOrNull == "error") throw ServerException.InvalidResponse()
         return (root["groupId"] as? JsonPrimitive)?.contentOrNull ?: ((root["data"] as? JsonObject)?.get("groupId") as? JsonPrimitive)?.contentOrNull
+    }
+
+    /** Registers a budget's encryption key (`user-create-key`); only `status: ok` confirms it. */
+    fun createUserKey(token: String, fileId: String, keyId: String, keySalt: String, testContent: String) {
+        val payload = buildJsonObject {
+            put("fileId", fileId)
+            put("keyId", keyId)
+            put("keySalt", keySalt)
+            put("testContent", testContent)
+        }.toString()
+        val text = execute(request("sync/user-create-key").header(TOKEN, token).post(payload.toRequestBody(JSON)).build()) { it.bodyText() }
+        val status = runCatching { (parse(text)["status"] as? JsonPrimitive)?.contentOrNull }.getOrNull()
+        if (status?.lowercase() != "ok") throw ServerException.InvalidResponse()
+    }
+
+    /** Removes a server file (`delete-user-file`); used to withdraw a half-registered budget. */
+    fun deleteUserFile(token: String, fileId: String) {
+        val payload = buildJsonObject { put("fileId", fileId) }.toString()
+        execute(request("sync/delete-user-file").header(TOKEN, token).post(payload.toRequestBody(JSON)).build()) { it.bodyText() }
     }
 
     override fun sync(body: ByteArray, token: String): ByteArray = execute(

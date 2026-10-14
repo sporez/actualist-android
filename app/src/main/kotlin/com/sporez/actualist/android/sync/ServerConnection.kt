@@ -89,23 +89,34 @@ class ServerConnection(
      * built locally, registered with `upload-user-file`, and kept only once the server confirmed
      * it. Any failure removes the local copy, so nothing unregistered stays selectable.
      */
-    suspend fun createBudget(name: String): LocalBudget = withContext(Dispatchers.IO) {
+    suspend fun createBudget(name: String, encryptionPassword: String? = null): LocalBudget = withContext(Dispatchers.IO) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) throw LocalFirstException.InvalidLocalWrite("Enter a name for the new budget.")
         val client = client()
         val token = token()
         val id = java.util.UUID.randomUUID().toString()
         val file = library.databaseFile(id)
+        var uploaded = false
         try {
             com.sporez.actualist.core.server.NewBudget.createFile(driver, file.absolutePath)
             val archive = com.sporez.actualist.core.server.NewBudget.archive(file, id, trimmed)
-            val groupId = client.uploadUserFile(token, id, trimmed, null, archive)
+            val keys = encryptionPassword?.takeIf { it.isNotEmpty() }?.let { com.sporez.actualist.core.server.NewBudget.RegistrationKeys.make(it, archive) }
+            val groupId = client.uploadUserFile(token, id, trimmed, null, keys?.encryptedArchive ?: archive, keys?.encryptMeta)
                 ?: client.userFileInfo(token, id)?.groupId
                 ?: throw ServerException.InvalidResponse()
-            val metadata = LocalBudget(id = id, name = trimmed, isDemo = false, cloudFileId = id, groupId = groupId, nodeId = HybridLogicalClock.makeClientId())
+            uploaded = true
+            // Upload first, then the key, as Actualist's registration flow does.
+            keys?.let { client.createUserKey(token, id, it.keyId, it.salt, it.testContent) }
+            keys?.let { secrets.put(SecretStore.budgetKey(id), it.keyData) }
+            val metadata = LocalBudget(
+                id = id, name = trimmed, isDemo = false, cloudFileId = id, groupId = groupId,
+                encryptKeyId = keys?.keyId, nodeId = HybridLogicalClock.makeClientId(),
+            )
             library.saveMetadata(metadata)
             metadata
         } catch (error: Exception) {
+            // A landed file without its key would stay undecryptable on the server: withdraw it.
+            if (uploaded) runCatching { client.deleteUserFile(token, id) }
             library.delete(id)
             throw error
         }

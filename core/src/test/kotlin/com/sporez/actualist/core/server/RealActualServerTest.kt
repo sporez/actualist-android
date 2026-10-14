@@ -109,4 +109,64 @@ class RealActualServerTest {
             }
         }
     }
+
+    @Test
+    fun encryptedBudgetsRoundTripThroughARealActualServer() {
+        assumeTrue("set ACTUAL_TEST_SERVER_URL to run against a disposable Actual server", url != null)
+        val client = ActualServerClient(url!!)
+        val token = client.login(password)
+        val budgetPassword = "synthetic-budget-password-${UUID.randomUUID().toString().take(6)}"
+        val dir = TestDatabases.tempFile().parentFile
+        val fileId = UUID.randomUUID().toString()
+        val name = "Synthetic Encrypted ${fileId.take(8)}"
+        val creatorFile = File(dir, "enc-creator.sqlite")
+        NewBudget.createFile(TestDatabases.driver, creatorFile.absolutePath)
+        val keys = NewBudget.RegistrationKeys.make(budgetPassword, NewBudget.archive(creatorFile, fileId, name))
+        val groupId = client.uploadUserFile(token, fileId, name, null, keys.encryptedArchive, keys.encryptMeta)
+            ?: client.userFileInfo(token, fileId)?.groupId
+        client.createUserKey(token, fileId, keys.keyId, keys.salt, keys.testContent)
+
+        // The server now reports the file as encrypted, and the key test proves the password.
+        val remote = client.userFileInfo(token, fileId)!!
+        assertEquals(keys.keyId, remote.encryptKeyId)
+        val serverKey = client.userKey(token, fileId)
+        assertThrows(com.sporez.actualist.core.LocalFirstException.InvalidEncryptionPassword::class.java) {
+            BudgetImporter.validateUserKey(serverKey, "wrong-password")
+        }
+        val context = BudgetImporter.validateUserKey(serverKey, budgetPassword)
+        assertTrue(context.keyData.contentEquals(keys.keyData))
+
+        // A second device downloads, decrypts and installs the archive.
+        val phoneFile = File(dir, "enc-phone.sqlite")
+        val download = client.downloadUserFile(token, fileId)
+        BudgetImporter.install(BudgetImporter.decryptIfNeeded(download, remote, context), phoneFile, TestDatabases.driver)
+
+        val clock = TestClock(System.currentTimeMillis())
+        val configuration = SyncConfiguration(fileId, groupId, keys.keyId, context)
+        BudgetDatabase.open(TestDatabases.driver, creatorFile.absolutePath, "e1e1e1e1e1e1e1e1", clock).use { creator ->
+            BudgetDatabase.open(TestDatabases.driver, phoneFile.absolutePath, "e2e2e2e2e2e2e2e2", clock).use { phone ->
+                val savings = creator.sql.queryString("SELECT id FROM categories WHERE name = 'Savings'")!!
+                val today = LocalDate.now()
+                val month = "%04d-%02d".format(java.util.Locale.ROOT, today.year, today.monthValue)
+                BudgetWrites(creator).assign(month, savings, 12_345)
+                creator.commitLocal(listOf(CellDraft("notes", "budget-$month", "note", SyncValue.text("Synthetic encrypted note"))))
+                SyncEngine(creator, client, configuration, clock).sync(token)
+                clock.advance(1_000)
+                SyncEngine(phone, client, configuration, clock).sync(token)
+                assertEquals(12_345L, BudgetReads(phone).fetchBudgetMonth(month).category(savings)!!.budgeted)
+                assertEquals("Synthetic encrypted note", BudgetReads(phone).monthNote(month))
+                assertEquals(creator.merkleTrie().hash, phone.merkleTrie().hash)
+                // Without the key the messages cannot be read.
+                val outsider = File(dir, "enc-outsider.sqlite")
+                BudgetImporter.install(BudgetImporter.decryptIfNeeded(download, remote, context), outsider, TestDatabases.driver)
+                BudgetDatabase.open(TestDatabases.driver, outsider.absolutePath, "e3e3e3e3e3e3e3e3", clock).use { other ->
+                    assertThrows(com.sporez.actualist.core.LocalFirstException.EncryptedBudgetRequiresPassword::class.java) {
+                        SyncEngine(other, client, SyncConfiguration(fileId, groupId, keys.keyId, null), clock).sync(token)
+                    }
+                }
+            }
+        }
+        client.deleteUserFile(token, fileId)
+        assertTrue(client.listUserFiles(token).none { it.fileId == fileId })
+    }
 }

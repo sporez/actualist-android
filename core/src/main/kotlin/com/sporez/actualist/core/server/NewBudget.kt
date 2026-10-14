@@ -100,6 +100,52 @@ object NewBudget {
         return bytes.toByteArray()
     }
 
+    /**
+     * Key material for an encrypted registration, as Actualist's `ActualBudgetRegistrationKeySet`:
+     * a fresh key id and 32-byte base64 salt, the PBKDF2 key, the archive sealed with it, the
+     * `X-ACTUAL-ENCRYPT-META` for the archive, and the key-test envelope `user-create-key` stores.
+     */
+    class RegistrationKeys(
+        val keyId: String,
+        val salt: String,
+        val keyData: ByteArray,
+        val encryptMeta: EncryptMeta,
+        val testContent: String,
+        val encryptedArchive: ByteArray,
+    ) {
+        companion object {
+            const val KEY_TEST_PLAINTEXT = "actualist-d0-key-test"
+
+            fun make(password: String, archive: ByteArray, keyId: String = UUID.randomUUID().toString()): RegistrationKeys {
+                if (password.isEmpty()) throw LocalFirstException.EncryptedBudgetRequiresPassword()
+                val saltBytes = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+                val salt = java.util.Base64.getEncoder().encodeToString(saltBytes)
+                val keyData = com.sporez.actualist.core.sync.ActualCrypto.deriveKey(password, salt)
+                val context = com.sporez.actualist.core.sync.EncryptionContext(keyId, keyData)
+                val sealedArchive = com.sporez.actualist.core.sync.ActualCrypto.encrypt(archive, context)
+                val sealedTest = com.sporez.actualist.core.sync.ActualCrypto.encrypt(KEY_TEST_PLAINTEXT.toByteArray(Charsets.UTF_8), context)
+                val b64 = java.util.Base64.getEncoder()
+                val testContent = buildJsonObject {
+                    put("value", b64.encodeToString(sealedTest.data))
+                    put("meta", buildJsonObject {
+                        put("keyId", keyId)
+                        put("algorithm", com.sporez.actualist.core.sync.ActualCrypto.ALGORITHM)
+                        put("iv", b64.encodeToString(sealedTest.iv))
+                        put("authTag", b64.encodeToString(sealedTest.authTag))
+                    })
+                }.toString()
+                return RegistrationKeys(
+                    keyId = keyId,
+                    salt = salt,
+                    keyData = keyData,
+                    encryptMeta = EncryptMeta(keyId, com.sporez.actualist.core.sync.ActualCrypto.ALGORITHM, b64.encodeToString(sealedArchive.iv), b64.encodeToString(sealedArchive.authTag)),
+                    testContent = testContent,
+                    encryptedArchive = sealedArchive.data,
+                )
+            }
+        }
+    }
+
     private class Widget(val type: String, val width: Int, val height: Int, val x: Int, val y: Int, val meta: String?)
 
     /** Actual v26.10.0's seeded dashboard, verbatim from Actualist `ActualStarterSchema.dashboardWidgets`. */

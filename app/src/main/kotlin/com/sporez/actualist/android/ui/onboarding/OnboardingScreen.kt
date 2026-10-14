@@ -140,7 +140,9 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
         }
         if (server.isSignedIn) {
             var newName by rememberSaveable { mutableStateOf("") }
+            var newPassword by remember { mutableStateOf("") }
             OutlinedTextField(newName, { newName = it }, label = { Text("New budget name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("new-budget-name"))
+            OutlinedTextField(newPassword, { newPassword = it }, label = { Text("Encryption password (optional)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().testTag("new-budget-password"))
             OutlinedButton(
                 enabled = !busy && newName.isNotBlank(),
                 onClick = {
@@ -148,7 +150,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                         busy = true
                         error = null
                         try {
-                            onDownloaded(server.createBudget(newName))
+                            onDownloaded(server.createBudget(newName, newPassword.ifEmpty { null }))
                         } catch (e: Exception) {
                             error = e.message ?: "The budget could not be created."
                         }
