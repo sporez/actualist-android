@@ -32,6 +32,9 @@ class EndpointHeaders(serverUrl: String, headers: List<CustomHeader>) {
 
     fun appliesTo(url: HttpUrl): Boolean = originOf(url) == origin
 
+    /** Whether [url]'s origin is the one these headers were saved for; false for an invalid address. */
+    fun appliesToUrl(url: String): Boolean = url.toHttpUrlOrNull()?.let { appliesTo(it) } ?: false
+
     companion object {
         val reservedNames = setOf(
             "x-actual-token", "x-actual-file-id", "accept", "content-type", "content-length",
@@ -83,9 +86,6 @@ class CustomHeaderInterceptor(private val endpoint: EndpointHeaders) : Intercept
 fun httpClientWithHeaders(endpoint: EndpointHeaders?): OkHttpClient =
     if (endpoint == null || endpoint.headers.isEmpty()) ActualServerClient.defaultHttpClient()
     else ActualServerClient.defaultHttpClient().newBuilder().addInterceptor(CustomHeaderInterceptor(endpoint)).build()
-
-/** Whether [url]'s origin is the one these headers were saved for; false for an invalid address. */
-fun EndpointHeaders.appliesToUrl(url: String): Boolean = url.toHttpUrlOrNull()?.let { appliesTo(it) } ?: false
 
 /** Clients carrying the configured headers, so callers never need the HTTP library's types. */
 object ServerClients {
