@@ -230,9 +230,16 @@ class TransactionsViewModel(private val session: BudgetSession, accountId: Strin
                     val bytes = resolver.openInputStream(uri)?.use { it.readNBytesCompat(com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES + 1) }
                         ?: error("The file could not be opened.")
                     if (bytes.size > com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES) error("The file is larger than 10 MB.")
-                    com.sporez.actualist.core.csv.CsvImporter(database, transactionWrites).import(accountId, bytes.toString(Charsets.UTF_8))
+                    com.sporez.actualist.core.csv.CsvImporter(database, clock).import(accountId, bytes.toString(Charsets.UTF_8))
                 }
-                messages.show("Imported ${plan.imported} rows" + if (plan.duplicates > 0) ", skipped ${plan.duplicates} already present" else "")
+                messages.show(
+                    listOfNotNull(
+                        "Imported ${plan.imported} rows",
+                        plan.updated.takeIf { it > 0 }?.let { "updated $it" },
+                        plan.duplicates.takeIf { it > 0 }?.let { "$it already present" },
+                        plan.skipped.takeIf { it > 0 }?.let { "skipped $it" },
+                    ).joinToString(", "),
+                )
             } catch (error: Exception) {
                 messages.show(error.message ?: "Import failed.")
             }

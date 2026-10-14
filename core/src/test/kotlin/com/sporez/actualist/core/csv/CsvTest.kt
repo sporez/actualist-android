@@ -135,7 +135,7 @@ class CsvTest {
             val csv = CsvExport.encode(export)
             assertTrue(csv.startsWith("Account,Date,Payee"))
             val target = AccountWrites(database, clock).create("Imported Copy", offBudget = false, openingBalance = 0, date = LocalDate.of(2026, 10, 15)).accountId
-            val importer = CsvImporter(database, TransactionWrites(database, clock))
+            val importer = CsvImporter(database, clock, LocalDate.of(2026, 10, 15))
             val first = importer.import(target, csv)
             assertEquals(export.size, first.imported)
             assertEquals(0, first.duplicates)
@@ -148,7 +148,7 @@ class CsvTest {
             // Importing the same file again writes nothing.
             val second = importer.import(target, csv)
             assertEquals(0, second.imported)
-            assertEquals(export.size, second.duplicates)
+            assertEquals(export.size, second.duplicates + second.updated)
             assertEquals(accounts.getValue(target).balance, ledger.accounts().first { it.id == target }.balance)
         }
     }
@@ -165,9 +165,8 @@ class CsvTest {
                 """[{"op":"set","field":"category","value":"groceries","type":"id"}]""",
             )
             val csv = "Date,Payee,Notes,Amount\n2026-10-14,WHOLE FOODS #123,,-42.50\n2026-10-14,Daily Grind,,-4.75\n2026-10-14,Unmatched Shop,,-9.99\n"
-            val plan = CsvImporter(database, TransactionWrites(database, clock), today = day).import("checking", csv)
+            val plan = CsvImporter(database, clock, today = day).import("checking", csv)
             assertEquals(3, plan.imported)
-            assertEquals(setOf("import-rule", "demo-rule-cafe"), plan.rulesApplied)
             val rows = LedgerReads(database).transactions(TransactionQuery(accountId = "checking", limit = 10_000)).filter { it.date == LocalDate.of(2026, 10, 14) }
             assertEquals("groceries", rows.single { it.amount == -4_250L }.categoryId)
             assertEquals("dining", rows.single { it.amount == -475L }.categoryId)

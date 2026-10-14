@@ -3,12 +3,10 @@ package com.sporez.actualist.core.csv
 import com.sporez.actualist.core.LocalFirstException
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.db.BudgetDatabase
-import com.sporez.actualist.core.db.CellDraft
-import com.sporez.actualist.core.rules.RuleEngine
-import com.sporez.actualist.core.rules.RuleTransactionInput
-import com.sporez.actualist.core.transactions.SplitDraft
-import com.sporez.actualist.core.transactions.TransactionDraft
-import com.sporez.actualist.core.transactions.TransactionWrites
+import com.sporez.actualist.core.db.Clock
+import com.sporez.actualist.core.importer.ImportReconcileOptions
+import com.sporez.actualist.core.importer.ImportReconciler
+import com.sporez.actualist.core.importer.ImportRow
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -286,121 +284,43 @@ object CsvImportMapper {
 }
 
 /**
- * Plans a CSV import into one account. Each row becomes a simple transaction with the
- * payee text as imported payee (payees and categories matched by name, payees created when
- * missing). A row is skipped as a duplicate when the account already holds a live row with
- * the same date, amount and imported payee, or the same imported id.
- *
- * The budget's rules run on each row (imported text as `imported_payee`), as in Actual. Partial
- * port: Actualist's fuzzy import-reconcile matcher and review step are not ported.
+ * Imports a CSV into one account through [ImportReconciler] (Actual's `importTransactions`, replayed
+ * against the BankSync oracle's csv cases): rows are matched to existing transactions by imported id
+ * and Actual's fuzzy date/amount/payee passes, payee names are title-cased and created when missing,
+ * the budget's rules run on every row, matched rows are updated and the rest are added, all in one
+ * commit. Nothing is written when the file has any unreadable row.
  */
 class CsvImporter(
     private val database: BudgetDatabase,
-    private val writes: TransactionWrites,
-    private val rules: RuleEngine? = RuleEngine(database),
+    private val clock: Clock = Clock.SYSTEM,
     private val today: LocalDate = LocalDate.now(),
+    private val newId: () -> String = { java.util.UUID.randomUUID().toString() },
 ) {
-    data class Plan(
-        val drafts: List<CellDraft>,
-        val imported: Int,
-        val duplicates: Int,
-        val ruleDeleted: Int = 0,
-        val rulesApplied: Set<String> = emptySet(),
-    )
+    data class Plan(val imported: Int, val updated: Int, val duplicates: Int, val skipped: Int)
 
-    fun plan(accountId: String, rows: List<CsvImportRow>): Plan {
-        val sql = database.sql
-        if (!database.liveRowExists("accounts", accountId)) throw LocalFirstException.InvalidLocalWrite("missing account")
-        val offBudget = writes.accountOffBudget(accountId)
-        val categoriesByName = sql.query("SELECT id, name FROM categories WHERE (tombstone IS NULL OR tombstone = 0)")
-            .associate { (it.string("name") ?: "").lowercase() to it.string("id")!! }
-        val existing = sql.query(
-            "SELECT date, amount, imported_description, financial_id FROM transactions WHERE acct = ? AND (tombstone IS NULL OR tombstone = 0)",
-            accountId,
+    fun rows(rows: List<CsvImportRow>): List<ImportRow> = rows.map {
+        ImportRow(
+            date = it.date,
+            amount = it.amount,
+            payeeName = it.payeeName,
+            notes = it.notes,
+            categoryName = it.categoryName,
+            importedId = it.importedId,
+            cleared = it.cleared,
+            sourceLine = it.line,
         )
-        val seen = existing.map { Triple(it.long("date"), it.longOr0("amount"), it.string("imported_description")?.lowercase()) }.toMutableSet()
-        val importedIds = existing.mapNotNull { it.string("financial_id") }.toMutableSet()
-        val drafts = mutableListOf<CellDraft>()
-        val createdPayees = HashMap<String, String>()
-        var imported = 0
-        var duplicates = 0
-        var ruleDeleted = 0
-        val rulesApplied = sortedSetOf<String>()
-        for (row in rows) {
-            val key = Triple(Months.packedDate(row.date).toLong(), row.amount, row.payeeName.ifEmpty { null }?.lowercase())
-            if ((row.importedId != null && row.importedId in importedIds) || key in seen) {
-                duplicates++
-                continue
-            }
-            seen += key
-            row.importedId?.let { importedIds += it }
-            var payeeId: String? = null
-            if (row.payeeName.isNotBlank()) {
-                val known = createdPayees[row.payeeName.lowercase()]
-                if (known != null) {
-                    payeeId = known
-                } else {
-                    val (id, payeeDrafts) = writes.resolveOrCreatePayeeDrafts(null, row.payeeName)
-                    drafts += payeeDrafts
-                    createdPayees[row.payeeName.lowercase()] = id
-                    payeeId = id
-                }
-            }
-            var draft = TransactionDraft(
-                accountId = accountId,
-                date = row.date,
-                amount = row.amount,
-                categoryId = if (offBudget) null else row.categoryName?.let { categoriesByName[it.lowercase()] },
-                notes = row.notes,
-                cleared = row.cleared ?: true,
-                importedPayee = row.payeeName.ifEmpty { null },
-                importedId = row.importedId,
-            )
-            // Actual runs the budget's rules on every imported row, with the raw text as imported_payee.
-            val ruled = rules?.run(
-                RuleTransactionInput(
-                    accountId = accountId,
-                    date = draft.date,
-                    amount = draft.amount,
-                    payeeId = payeeId,
-                    payeeName = row.payeeName,
-                    categoryId = draft.categoryId,
-                    notes = draft.notes,
-                    cleared = draft.cleared,
-                    importedPayee = draft.importedPayee,
-                ),
-                today,
-            )
-            if (ruled != null && ruled.appliedRuleIds.isNotEmpty()) {
-                if (ruled.deletesTransaction) {
-                    ruleDeleted++
-                    continue
-                }
-                if (ruled.payeeId != null && ruled.payeeId != payeeId && database.liveRowExists("payees", ruled.payeeId)) payeeId = ruled.payeeId
-                draft = draft.copy(
-                    date = ruled.date,
-                    amount = ruled.amount,
-                    categoryId = if (offBudget || ruled.splits.isNotEmpty()) null else ruled.categoryId,
-                    notes = ruled.notes,
-                    cleared = ruled.cleared,
-                    splits = if (offBudget) emptyList() else ruled.splits.map { SplitDraft(it.categoryId, it.amount, it.notes) },
-                )
-                ruled.appliedRuleIds.forEach { rulesApplied += it }
-            }
-            val id = java.util.UUID.randomUUID().toString()
-            drafts += if (draft.splits.isNotEmpty()) writes.splitDrafts(draft, id, payeeId) else writes.simpleDrafts(draft, id, payeeId)
-            imported++
-        }
-        return Plan(drafts, imported, duplicates, ruleDeleted, rulesApplied)
     }
 
-    /** Parses, maps and commits a file in one transaction; nothing is written on any error. */
     fun import(accountId: String, csv: String, delimiter: Char = ',', hasHeaderRow: Boolean = true): Plan {
         if (csv.toByteArray().size > CsvImportMapper.MAXIMUM_BYTES) throw CsvImportException("The file is larger than 10 MB.")
-        val rows = CsvImportMapper.map(CsvParser.parse(csv, delimiter, hasHeaderRow))
-        return database.commitLocal {
-            val plan = plan(accountId, rows)
-            plan.drafts to plan
-        }.outcome
+        val parsed = CsvImportMapper.map(CsvParser.parse(csv, delimiter, hasHeaderRow))
+        val result = ImportReconciler(database, clock, newId).apply(accountId, rows(parsed), ImportReconcileOptions.CSV, today)
+        val plan = result.plan
+        return Plan(
+            imported = result.insertedCount,
+            updated = result.updatedCount,
+            duplicates = plan.unchangedCount,
+            skipped = plan.skippedCount,
+        )
     }
 }
