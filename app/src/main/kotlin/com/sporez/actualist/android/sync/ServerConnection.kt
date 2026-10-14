@@ -58,6 +58,13 @@ class ServerConnection(
         secrets.putString(CUSTOM_HEADERS, url + "\u0000" + text.trim())
     }
 
+    private val _needsReauthentication = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /** True after the server rejected the saved session, until a sign-in succeeds (Actualist's re-authentication banner). */
+    val needsReauthentication: kotlinx.coroutines.flow.StateFlow<Boolean> = _needsReauthentication
+
+    /** The saved server address, if any. */
+    val serverUrl: String? get() = settings.settings.value.serverUrl
+
     private fun token(): String = secrets.getString(SecretStore.SERVER_TOKEN) ?: throw ServerException.AuthenticationFailed()
 
     /** The active login methods [serverUrl] advertises (`password`, `openid`, `header`). */
@@ -70,6 +77,7 @@ class ServerConnection(
         val token = client.login(password)
         secrets.putString(SecretStore.SERVER_TOKEN, token)
         settings.update { it.copy(serverUrl = client.url) }
+        _needsReauthentication.value = false
     }
 
     sealed class OpenIdOutcome {
@@ -109,6 +117,7 @@ class ServerConnection(
             val token = com.sporez.actualist.core.server.OpenIdLogin.token(callback, scheme, nonce)
             secrets.putString(SecretStore.SERVER_TOKEN, token)
             settings.update { it.copy(serverUrl = url) }
+            _needsReauthentication.value = false
             OpenIdOutcome.SignedIn
         } catch (error: com.sporez.actualist.core.server.OpenIdException) {
             OpenIdOutcome.Failed(error.message ?: "OpenID sign-in failed.")
@@ -264,6 +273,7 @@ class ServerConnection(
             val status = if (result.third == 0) SyncStatus.Synced(now, result.second, result.first) else SyncStatus.Idle(result.third, now)
             status.also(session::publishSyncStatus)
         } catch (error: Exception) {
+            if (generateSequence<Throwable>(error) { it.cause }.any { it is ServerException.AuthenticationFailed }) _needsReauthentication.value = true
             fail(session, error.message ?: "Sync failed.")
         }
     }

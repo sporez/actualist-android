@@ -124,6 +124,36 @@ class ServerSyncFlowTest {
     }
 
     @Test
+    fun anExpiredSessionShowsTheSignInAgainBannerAndResumesSyncing() {
+        publishBudget()
+        compose.waitForTag("onboarding")
+        compose.onNodeWithTag("onboarding-connect").performClick()
+        compose.waitForTag("server-url-field")
+        compose.onNodeWithTag("server-url-field").performTextClearance()
+        compose.onNodeWithTag("server-url-field").performTextInput(server.url)
+        compose.onNodeWithTag("server-password-field").performTextInput(LoopbackActualServer.PASSWORD)
+        compose.onNodeWithTag("server-sign-in").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("Loopback Synthetic Budget").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Loopback Synthetic Budget").performClick()
+        compose.waitForTag("bottom-bar", 60_000)
+        // The server now refuses the saved session.
+        server.rejectSessions = true
+        compose.onNodeWithTag("tab-spending").performClick()
+        compose.waitForTag("sync-button")
+        compose.onNodeWithTag("sync-button").performClick()
+        compose.waitForTag("reauth-banner", 30_000)
+        compose.screenshot("23-reauth-banner")
+        compose.onNodeWithTag("reauth-sign-in").performClick()
+        compose.waitForTag("reauth-password")
+        compose.onNodeWithTag("reauth-password").performTextInput(LoopbackActualServer.PASSWORD)
+        compose.onNodeWithTag("reauth-submit").performClick()
+        compose.waitForGone("reauth-banner", 30_000)
+        compose.onNodeWithTag("open-settings").performClick()
+        compose.waitForTag("settings-screen")
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synced", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
     fun explainsAHeaderAuthenticationServerInsteadOfAskingForAPassword() {
         server.loginMethodsJson = """{"status":"ok","methods":[{"method":"header","active":1,"displayName":"Header"}]}"""
         compose.waitForTag("onboarding")

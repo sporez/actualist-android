@@ -2,6 +2,7 @@
 
 package com.sporez.actualist.android.ui
 
+import  androidx.compose.foundation.layout.statusBarsPadding androidx.compose.foundation.layout.fillMaxWidth androidx.compose.foundation.layout.Row androidx.compose.foundation.layout.Arrangement androidx.compose.ui.Alignment androidx.compose.runtime.remember androidx.compose.runtime.mutableStateOf androidx.compose.runtime.setValue androidx.compose.material3.MaterialTheme androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -131,6 +132,8 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
     Scaffold(
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
+            androidx.compose.foundation.layout.Column {
+            if (!session.isDemo) ReauthenticationBanner(container.server, session)
             // The transaction editor has its own header with close and save.
             if (!route.startsWith("transaction")) TopAppBar(
                 title = {
@@ -183,6 +186,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                     }
                 },
             )
+            }
         },
         bottomBar = {
             if (isTab) {
@@ -301,5 +305,67 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 TransactionEditorScreen(vm) { navController.popBackStack() }
             }
         }
+    }
+}
+
+/**
+ * Actualist's re-authentication banner: shown when the server rejected the saved session, with
+ * a sign-in for the same server that resumes syncing.
+ */
+@Composable
+private fun ReauthenticationBanner(server: com.sporez.actualist.android.sync.ServerConnection, session: BudgetSession) {
+    val needed by server.needsReauthentication.collectAsState()
+    if (!needed) return
+    var signingIn by remember { mutableStateOf(false) }
+    androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().testTag("reauth-banner")) {
+        Row(Modifier.statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Your Actual session expired. Sign in again to resume syncing.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            androidx.compose.material3.TextButton(onClick = { signingIn = true }, modifier = Modifier.testTag("reauth-sign-in")) { Text("Sign in again") }
+        }
+    }
+    if (signingIn) {
+        val scope = rememberCoroutineScope()
+        var password by remember { mutableStateOf("") }
+        var error by remember { mutableStateOf<String?>(null) }
+        var busy by remember { mutableStateOf(false) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { if (!busy) signingIn = false },
+            title = { Text("Sign in again") },
+            text = {
+                androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(server.serverUrl ?: "", style = MaterialTheme.typography.bodySmall)
+                    androidx.compose.material3.OutlinedTextField(
+                        password,
+                        { password = it },
+                        label = { Text("Server password") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth().testTag("reauth-password"),
+                    )
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    enabled = !busy && password.isNotEmpty(),
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                server.signIn(server.serverUrl ?: throw IllegalStateException("No server is saved."), password)
+                                signingIn = false
+                                server.sync(session)
+                            } catch (e: Exception) {
+                                error = e.message ?: "Sign-in failed."
+                            }
+                            busy = false
+                        }
+                    },
+                    modifier = Modifier.testTag("reauth-submit"),
+                ) { Text("Sign in") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { signingIn = false }, enabled = !busy) { Text("Cancel") } },
+        )
     }
 }

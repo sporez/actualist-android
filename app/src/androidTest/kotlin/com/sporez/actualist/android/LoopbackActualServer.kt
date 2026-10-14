@@ -34,6 +34,8 @@ class LoopbackActualServer(
     var openIdReturnUrl: String? = null
     private var trie = MerkleTrie.EMPTY
     @Volatile var budgetZip: ByteArray = ByteArray(0)
+    /** While true, every session token is refused (an expired session) until the next password login. */
+    @Volatile var rejectSessions: Boolean = false
     /** The `/account/login-methods` answer; a test can make this a header-only server. */
     @Volatile var loginMethodsJson: String =
         """{"status":"ok","methods":[{"method":"password","active":1,"displayName":"Password"},{"method":"openid","active":1,"displayName":"OpenID"}]}"""
@@ -109,11 +111,12 @@ class LoopbackActualServer(
             }
             path == "/fake-idp" -> Triple(200, "text/html", "<html><body>Synthetic identity provider</body></html>".toByteArray())
             path == "/account/login" -> if (String(body).contains("\"password\":\"$PASSWORD\"")) {
+                rejectSessions = false
                 Triple(200, "application/json", """{"status":"ok","data":{"token":"$TOKEN"}}""".toByteArray())
             } else {
                 Triple(400, "application/json", """{"status":"error","reason":"invalid-password"}""".toByteArray())
             }
-            token != TOKEN -> Triple(401, "application/json", """{"status":"error","reason":"unauthorized"}""".toByteArray())
+            token != TOKEN || rejectSessions -> Triple(401, "application/json", """{"status":"error","reason":"unauthorized"}""".toByteArray())
             path == "/sync/list-user-files" -> Triple(
                 200,
                 "application/json",
