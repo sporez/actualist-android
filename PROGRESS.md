@@ -19,8 +19,8 @@ reconciliation, CSV, payees, bulk month actions. Remaining work is listed below.
 | Rule engine (conditions, ranking, actions, formulas, BALANCE_OF, split actions, schedule date conditions) | **Rules oracle: 245/245 replayed cases match** (24 oracle-only listed) |
 | Schedules (recurrence, status, create/post/skip/complete/delete, advancement) | **Schedules oracle: recurrence 136/136, status 49/49, stateful 66/66** (OP-51/52/53 as in Actualist) |
 | Split create and edit, transaction edit/delete, account create/rename/close | `SplitEditTest`, unit tests |
-| Reconciliation (adjustment, lock, unlock) | `ReconciliationTest` (cases from Actualist's reconciliation oracle) |
-| CSV export (Actual's format) and import (duplicate-skipping) | `CsvTest` incl. export→import round trip |
+| Reconciliation (adjustment, lock, unlock; rules run on the adjustment) | `ReconciliationTest` (cases from Actualist's reconciliation oracle) |
+| CSV export (Actual's format) and import (duplicate-skipping, rules run on each row) | `CsvTest` incl. export→import round trip and rules on import |
 | Categories/groups create, rename, hide; payee rename and merge | `CategoryWritesTest`, `PayeeWritesTest` |
 | Sync engine: push with server confirmation, pull, merkle re-pull, encryption, batching | `SyncEngineTest` (11 multi-device scenarios) |
 | Actual server HTTP client, encrypted download/import, sanitizer | `ServerIntegrationTest` (JVM loopback server, end to end) |
@@ -29,8 +29,9 @@ reconciliation, CSV, payees, bulk month actions. Remaining work is listed below.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38510931999 — 1,120 JVM tests, 0 failures, 0 skipped; debug APK artifact `actualist-android-debug-apk`.
-- Emulator (API 34): last completed run https://github.com/sporez/actualist-android/actions/runs/38509606145 — 8/9 UI tests passed; the reconcile test exposed a real list-scroll bug (new newest row inserted off-screen), fixed in `fix(app): keep a newly added newest transaction in view`. Process-death relaunch reopened the selected budget. Re-run in progress: https://github.com/sporez/actualist-android/actions/runs/38511146138.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38513472719 — 1,122 JVM tests, 0 failures, 0 skipped (count from the run before, same tests); debug APK artifact `actualist-android-debug-apk`.
+- Emulator (API 34): https://github.com/sporez/actualist-android/actions/runs/38512580752 — **9/9 UI tests passed** (onboarding, every main screen, assign, add transaction, rule preview, reconcile, schedules, activity recreation, sign-in/download/edit/sync against a loopback server); process-death relaunch reopened the selected budget.
+- Open question: after reconciling, the display capture (UiAutomation) still showed the pre-reconcile balance while Compose semantics already held the new values (the test asserts them). A run comparing Compose's render with the display capture is in progress.
 
 ## Bugs found by the emulator (all fixed)
 
@@ -43,7 +44,6 @@ reconciliation, CSV, payees, bulk month actions. Remaining work is listed below.
 - Not implemented: budget templates, bank sync (SimpleFIN), transaction duplicate/merge/batch edit, rule and schedule editors, OpenID/header login, account groups, notes editing, widgets, background sync while the app is closed (WorkManager).
 - Transfer payee/account changes on edit are refused rather than re-pairing the transfer.
 - CSV import skips exact duplicates only; Actualist's fuzzy import-reconcile matcher and import rules are not ported.
-- Rules do not run on CSV import or reconciliation adjustments (they do run in the editor preview and on schedule posting).
 - Plain-http servers are refused except on loopback (Android network security config matches).
 - Server sync has only been exercised against in-repo mock servers, never a real Actual server (by design for this experiment).
 
@@ -56,6 +56,6 @@ reconciliation, CSV, payees, bulk month actions. Remaining work is listed below.
 ## Next recommended work
 
 1. Rule and schedule editors (the engines and writers exist).
-2. Run rules on CSV import; port Actualist's import-reconcile matcher.
+2. Port Actualist's fuzzy import-reconcile matcher for CSV import.
 3. Background sync with WorkManager (needs a busy-timeout story for a second SQLite connection).
 4. Budget templates (Actualist has a large template engine and fixtures).
