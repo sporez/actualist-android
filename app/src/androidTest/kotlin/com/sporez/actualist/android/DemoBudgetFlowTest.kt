@@ -425,6 +425,11 @@ class DemoBudgetFlowTest {
             compose.onNodeWithTag("following-$next").performClick()
             // Only after switching to next month does the month after next-plus-one get a column.
             compose.waitOrCapture("switched-month") { compose.onAllNodes(hasTestTag("following-${java.time.YearMonth.parse(next).plusMonths(2)}")).fetchSemanticsNodes().isNotEmpty() }
+            // A later month's cell opens that month's category sheet.
+            val later = java.time.YearMonth.parse(next).plusMonths(1).toString()
+            compose.onNodeWithTag("budget-following").performScrollToNode(hasTestTag("following-$later-groceries"))
+            compose.onNodeWithTag("following-$later-groceries").performClick()
+            compose.waitForTag("category-sheet")
         } finally {
             compose.activityRule.scenario.onActivity { it.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
         }

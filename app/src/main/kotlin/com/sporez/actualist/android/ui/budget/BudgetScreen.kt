@@ -144,7 +144,13 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                         TextButton(onClick = { addingCategory = true }, modifier = Modifier.testTag("add-category")) { Text("Add category") }
                     }
                 }
-                if (wide) FollowingMonths(screen, viewModel, collapsed, Modifier.weight(1f).fillMaxHeight())
+                if (wide) {
+                    FollowingMonths(screen, viewModel, collapsed, Modifier.weight(1f).fillMaxHeight()) { month, categoryId ->
+                        // Editing a later month: switch to it and open the category there.
+                        viewModel.showMonth(month)
+                        selectedCategory = categoryId
+                    }
+                }
                 }
                 }
                 val category = selectedCategory?.let { id -> screen.month.category(id) }
@@ -714,7 +720,13 @@ private fun CategoryNoteField(categoryId: String, viewModel: BudgetViewModel) {
 
 /** Read-only columns for the next two months: each category's budgeted amount and balance. */
 @Composable
-private fun FollowingMonths(screen: BudgetScreenState, viewModel: BudgetViewModel, collapsed: Map<String, Boolean>, modifier: Modifier) {
+private fun FollowingMonths(
+    screen: BudgetScreenState,
+    viewModel: BudgetViewModel,
+    collapsed: Map<String, Boolean>,
+    modifier: Modifier,
+    onEdit: (month: String, categoryId: String) -> Unit,
+) {
     val state by viewModel.following.collectAsState()
     val months = (state as? Loadable.Ready)?.value ?: return
     LazyColumn(
@@ -744,7 +756,10 @@ private fun FollowingMonths(screen: BudgetScreenState, viewModel: BudgetViewMode
                                 Text(category.name, Modifier.weight(1.2f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 for (month in months) {
                                     val value = month.category(category.id)
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                    Column(
+                                        Modifier.weight(1f).clickable { onEdit(month.month, category.id) }.testTag("following-${month.month}-${category.id}"),
+                                        horizontalAlignment = Alignment.End,
+                                    ) {
                                         Text(money(value?.budgeted ?: 0L), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         MoneyText(value?.balance ?: 0L, colored = true)
                                     }
