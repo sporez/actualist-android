@@ -56,13 +56,23 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
      * Creates a schedule through the ported schedule writer: [frequency] null is a one-time
      * schedule; [approximate] matches amounts within Actual's 7.5% "isapprox" window.
      */
-    fun create(name: String, accountId: String, payeeId: String?, amount: Long, approximate: Boolean, start: LocalDate, frequency: com.sporez.actualist.core.rules.ScheduleFrequency?, posts: Boolean) =
+    fun create(
+        name: String,
+        accountId: String,
+        payeeId: String?,
+        amount: Long,
+        approximate: Boolean,
+        start: LocalDate,
+        frequency: com.sporez.actualist.core.rules.ScheduleFrequency?,
+        posts: Boolean,
+        repeat: RepeatOptions = RepeatOptions(),
+    ) =
         write("Added ${name.ifBlank { "schedule" }}") {
             val operation = if (approximate) "isapprox" else "is"
             val rule = if (frequency == null) {
                 com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), operation)
             } else {
-                com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), frequency), operation)
+                com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(repeat.recurrence(start, frequency) ?: error("Check the repeat options."), operation)
             }
             Schedules(database, clock).create(
                 com.sporez.actualist.core.schedules.ScheduleCreateCommand(
@@ -159,6 +169,7 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
     var posts by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var startText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(LocalDate.now().plusDays(1).toString()) }
     var frequency by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("MONTHLY") }
+    var repeat by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(RepeatOptions()) }
     var accountId by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var payeeId by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var choices by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Pair<List<com.sporez.actualist.android.ui.components.PickerOption>, List<com.sporez.actualist.android.ui.components.PickerOption>>?>(null) }
@@ -193,6 +204,7 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
                         androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-frequency-$key"))
                     }
                 }
+                if (frequency != "ONCE") RepeatFields(repeat, frequency, "schedule") { repeat = it }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
                     Text("Post the transaction automatically")
@@ -201,11 +213,12 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
         },
         confirmButton = {
             TextButton(
-                enabled = accountId != null && magnitude != null && magnitude != 0L && start != null,
+                enabled = accountId != null && magnitude != null && magnitude != 0L && start != null &&
+                    (frequency == "ONCE" || repeat.recurrence(start, com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)) != null),
                 onClick = {
                     val signed = kotlin.math.abs(magnitude!!).let { if (outflow) -it else it }
                     val freq = if (frequency == "ONCE") null else com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)
-                    viewModel.create(name, accountId!!, payeeId, signed, approximate, start!!, freq, posts)
+                    viewModel.create(name, accountId!!, payeeId, signed, approximate, start!!, freq, posts, repeat)
                     onDismiss()
                 },
                 modifier = Modifier.testTag("schedule-save"),
@@ -300,12 +313,17 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
     var rule by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.sporez.actualist.core.schedules.ScheduleDateRule?>(null) }
     var startText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var frequency by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var repeat by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(RepeatOptions()) }
     androidx.compose.runtime.LaunchedEffect(item.id) {
         val loaded = viewModel.dateRule(item)
         rule = loaded
         when (val current = loaded) {
             is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> { startText = current.dayId; frequency = "ONCE" }
-            is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> { startText = current.recurrenceValue.startDayId; frequency = current.recurrenceValue.frequency.name }
+            is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> {
+                startText = current.recurrenceValue.startDayId
+                frequency = current.recurrenceValue.frequency.name
+                repeat = RepeatOptions.of(current.recurrenceValue)
+            }
             else -> {}
         }
     }
@@ -313,8 +331,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
     val simpleRule = when (val current = rule) {
         is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> true
         is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> current.recurrenceValue.let {
-            it.interval == 1L && it.patterns.isEmpty() && !it.skipWeekend && it.ending == com.sporez.actualist.core.rules.ScheduleEnding.Never &&
-                it.frequency != com.sporez.actualist.core.rules.ScheduleFrequency.DAILY
+            it.patterns.isEmpty() && !it.skipWeekend && it.frequency != com.sporez.actualist.core.rules.ScheduleFrequency.DAILY
         }
         else -> false
     }
@@ -331,7 +348,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
             com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), operation)
         } else {
             com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(
-                com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)),
+                repeat.recurrence(start, com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)) ?: return null,
                 operation,
             )
         }
@@ -367,6 +384,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                             androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-edit-frequency-$key"))
                         }
                     }
+                    if (frequency != "ONCE") RepeatFields(repeat, frequency, "schedule-edit") { repeat = it }
                 } else {
                     Text("Repeats: ${item.recurrenceDescription} (edit this rule in Actual)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -385,4 +403,64 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+
+/** "Every N" and an end rule for a recurring schedule; patterns and weekend handling stay in Actual. */
+data class RepeatOptions(val intervalText: String = "1", val end: String = "never", val endValue: String = "") {
+    fun recurrence(start: LocalDate, frequency: com.sporez.actualist.core.rules.ScheduleFrequency): com.sporez.actualist.core.rules.ScheduleRecurrence? {
+        val interval = intervalText.trim().toLongOrNull()?.takeIf { it in 1..99 } ?: return null
+        val ending = when (end) {
+            "count" -> com.sporez.actualist.core.rules.ScheduleEnding.AfterOccurrences(endValue.trim().toLongOrNull()?.takeIf { it in 1..999 } ?: return null)
+            "date" -> {
+                val day = runCatching { LocalDate.parse(endValue.trim()) }.getOrNull()?.takeIf { !it.isBefore(start) } ?: return null
+                com.sporez.actualist.core.rules.ScheduleEnding.OnDate(day.toString())
+            }
+            else -> com.sporez.actualist.core.rules.ScheduleEnding.Never
+        }
+        return runCatching { com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), frequency, interval = interval, ending = ending) }.getOrNull()
+    }
+
+    companion object {
+        fun of(recurrence: com.sporez.actualist.core.rules.ScheduleRecurrence): RepeatOptions = when (val ending = recurrence.ending) {
+            is com.sporez.actualist.core.rules.ScheduleEnding.AfterOccurrences -> RepeatOptions(recurrence.interval.toString(), "count", ending.count.toString())
+            is com.sporez.actualist.core.rules.ScheduleEnding.OnDate -> RepeatOptions(recurrence.interval.toString(), "date", ending.dayId)
+            else -> RepeatOptions(recurrence.interval.toString())
+        }
+    }
+}
+
+@Composable
+private fun RepeatFields(options: RepeatOptions, frequency: String, tag: String, onChange: (RepeatOptions) -> Unit) {
+    val unit = when (frequency) {
+        "WEEKLY" -> "weeks"
+        "YEARLY" -> "years"
+        else -> "months"
+    }
+    androidx.compose.material3.OutlinedTextField(
+        options.intervalText,
+        { onChange(options.copy(intervalText = it.filter(Char::isDigit))) },
+        label = { Text("Every how many $unit") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().testTag("$tag-interval"),
+    )
+    Row {
+        for ((key, label) in listOf("never" to "No end", "count" to "After N times", "date" to "On a date")) {
+            androidx.compose.material3.FilterChip(
+                selected = options.end == key,
+                onClick = { onChange(options.copy(end = key, endValue = "")) },
+                label = { Text(label) },
+                modifier = Modifier.padding(end = 4.dp).testTag("$tag-end-$key"),
+            )
+        }
+    }
+    if (options.end != "never") {
+        androidx.compose.material3.OutlinedTextField(
+            options.endValue,
+            { onChange(options.copy(endValue = it)) },
+            label = { Text(if (options.end == "count") "Number of times" else "Last date (YYYY-MM-DD)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("$tag-end-value"),
+        )
+    }
 }
