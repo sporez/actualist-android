@@ -22,9 +22,14 @@ Actualist implements Actual Budget-compatible storage and synchronization
 behavior. The following notice is retained for any portions derived from the
 Actual Budget project:
 
-The starter database schema in `core/src/main/resources/actual/starter-schema.sql`
-and the parity oracle fixtures under `core/src/test/resources/oracle/` are derived
-from Actual v26.10.0 (via Actualist's parity harnesses).
+The starter database schema in `core/src/main/resources/actual/starter-schema.sql`,
+the migration list in `core/src/main/resources/actual/migrations.txt`, the default
+dashboard definitions in `core/.../server/NewBudget.kt`, the title-case character
+tables in `core/.../importer/UpstreamTitleCaseCharacters.kt` and the parity oracle
+fixtures under `core/src/test/resources/oracle/` are derived from Actual v26.10.0
+(via Actualist's sources and parity harnesses). The CI workflows run the published
+`actualbudget/actual-server:26.10.0` container image as a disposable test server; it
+is not redistributed here.
 
 Copyright James Long
 
@@ -36,7 +41,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## Android Jetpack, Kotlin, kotlinx, OkHttp
 
-Android Jetpack (AndroidX) libraries, Kotlin, kotlinx.coroutines,
+Android Jetpack (AndroidX) libraries (including WorkManager and Glance), Kotlin, kotlinx.coroutines,
 kotlinx.serialization and OkHttp are used as build dependencies under the
 Apache License 2.0. They are fetched by Gradle and not vendored in this
 repository.
