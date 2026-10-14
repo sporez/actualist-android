@@ -49,9 +49,9 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38597414814 — 3,027 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38586241823 — 4/4, none skipped.
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38597396518 — 25/25, none skipped, with per-test timeouts; process-death relaunch reopened the selected budget. Earlier rounds today: one cascade (fixed: sessions closed on reset) and one hang (now bounded); see above.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38627655141 — 3,036 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38601859657 — 4/4, none skipped (last core change; only core tests changed since).
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38629152079 — 25/25, none skipped, with per-test timeouts; process-death relaunch reopened the selected budget. Earlier rounds today: one cascade (fixed: sessions closed on reset), one hang (now bounded), and one test that needed to scroll to a post-stage rule.
 
 ## Known limitations
 
