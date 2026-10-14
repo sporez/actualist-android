@@ -41,7 +41,7 @@ class ServerSyncFlowTest {
     private val server = LoopbackActualServer()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(FreshAppState()).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(FreshAppState()).around(compose)
 
     @After
     fun stop() = server.close()

@@ -14,6 +14,15 @@ import org.junit.rules.ExternalResource
 import java.io.File
 
 /** Every UI test starts from a fresh install state: no selected budget, no demo file. */
+/**
+ * A per-test limit, outermost in every rule chain: a hang fails that test (with the stuck thread's
+ * stack in the failure) instead of stalling the whole emulator job until it times out.
+ */
+fun testTimeout(): org.junit.rules.Timeout = org.junit.rules.Timeout.builder()
+    .withTimeout(5, java.util.concurrent.TimeUnit.MINUTES)
+    .withLookingForStuckThread(true)
+    .build()
+
 class FreshAppState : ExternalResource() {
     override fun before() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
