@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sporez.actualist.android.ActualistApplication
 import com.sporez.actualist.core.demo.DemoBudget
+import com.sporez.actualist.core.server.RemoteFile
 import com.sporez.actualist.core.store.BudgetSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +53,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 container.library.delete(DemoBudget.FILE_ID)
             }
             openSession(DemoBudget.FILE_ID) { container.library.openDemo() }
+        }
+    }
+
+    private val _notice = MutableStateFlow<String?>(null)
+    /** A message from the last background action (a failed reimport), shown in Settings. */
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
+    fun clearNotice() {
+        _notice.value = null
+    }
+
+    /**
+     * Actualist's "Reimport Budget": releases the open copy, downloads [remote] again (replacing the
+     * local file and discarding unsynced changes), and reopens it. On failure the old copy is reopened.
+     */
+    fun reimportBudget(remote: RemoteFile, password: String?) {
+        val current = (state.value as? AppState.Open)?.session ?: return
+        val id = current.budgetId
+        _notice.value = null
+        _state.value = AppState.Loading
+        viewModelScope.launch {
+            val failure = withContext(Dispatchers.IO) {
+                container.sessions.release(current)
+                try {
+                    container.server.download(remote, password)
+                    null
+                } catch (error: Exception) {
+                    error.message ?: "The budget could not be downloaded."
+                }
+            }
+            _notice.value = failure ?: "Budget reimported from the server."
+            openBudget(id)
         }
     }
 

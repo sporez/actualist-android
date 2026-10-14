@@ -61,6 +61,7 @@ fun SettingsScreen(
                 Text("Budget", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(session.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("settings-budget-name"))
                 Text(syncDescription(syncStatus), modifier = Modifier.testTag("sync-status"))
+                if (!session.isDemo) SettingsSyncRows(syncStatus)
                 if (!session.isDemo) {
                     Button(onClick = { scope.launch { server.sync(session) } }, enabled = syncStatus !is SyncStatus.Syncing, modifier = Modifier.testTag("sync-now")) { Text("Sync now") }
                 } else {
@@ -85,6 +86,7 @@ fun SettingsScreen(
                 Text("Server", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (server.isSignedIn) {
                     Text(current.serverUrl ?: "", modifier = Modifier.testTag("server-url"))
+                    SettingsCustomHeaders(server, current.serverUrl ?: "")
                     Row {
                         TextButton(onClick = onConnectServer) { Text("Open another budget") }
                         TextButton(onClick = { server.signOut() }, modifier = Modifier.testTag("sign-out")) { Text("Sign out") }
@@ -95,25 +97,7 @@ fun SettingsScreen(
                 }
             }
         }
-        SectionCard {
-            Column(Modifier.padding(16.dp)) {
-                Text("Appearance", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                for (mode in ThemeMode.entries) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = current.themeMode == mode, onClick = { settings.update { it.copy(themeMode = mode) } }, modifier = Modifier.testTag("theme-${mode.name.lowercase()}"))
-                        Text(mode.name.lowercase().replaceFirstChar { it.uppercase() })
-                    }
-                }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Hide amounts")
-                        Text("Show bullets instead of money, for screenshots", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = current.hideAmounts, onCheckedChange = { value -> settings.update { it.copy(hideAmounts = value) } }, modifier = Modifier.testTag("hide-amounts"))
-                }
-            }
-        }
+        SettingsAppearanceCard(settings)
         SectionCard {
             Column(Modifier.padding(16.dp)) {
                 Text("Privacy", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -127,17 +111,22 @@ fun SettingsScreen(
                         }
                     }
                 }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use sample values")
+                        Text("Show made-up amounts instead of real ones, for screenshots", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = current.sampleValues, onCheckedChange = { value -> settings.update { it.copy(sampleValues = value) } }, modifier = Modifier.testTag("sample-values"))
+                }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                com.sporez.actualist.android.notifications.NewTransactionAlertsSetting()
             }
         }
         BudgetDisplayCard(settings)
+        SettingsBudgetDataCard(session, settings, server)
         RolloverAllCard(session)
-        SectionCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("About", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Actualist for Android — experimental port of Actualist (GPLv3). Not a release.")
-                Text("Compatible with Actual Budget's sync protocol. Actual is MIT licensed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        SettingsAboutCard(session, settings, server.isSignedIn)
     }
 }
 

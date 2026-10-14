@@ -26,7 +26,9 @@ import com.sporez.actualist.android.ui.AppState
 import com.sporez.actualist.android.ui.AppViewModel
 import com.sporez.actualist.android.ui.MainScaffold
 import com.sporez.actualist.android.ui.components.LoadingBox
+import com.sporez.actualist.android.ui.components.LocalGreenIncomeAmounts
 import com.sporez.actualist.android.ui.components.LocalHideAmounts
+import com.sporez.actualist.android.ui.components.LocalSampleValues
 import com.sporez.actualist.android.ui.components.MessageBox
 import com.sporez.actualist.android.ui.onboarding.OnboardingScreen
 import com.sporez.actualist.android.ui.onboarding.ServerScreen
@@ -81,8 +83,12 @@ fun ActualistApp(app: AppViewModel = viewModel()) {
     val container = app.container
     val settings by container.settings.settings.collectAsState()
     val state by app.state.collectAsState()
-    ActualistTheme(settings.themeMode) {
-        CompositionLocalProvider(LocalHideAmounts provides settings.hideAmounts) {
+    ActualistTheme(settings.themeMode, settings.namedTheme, settings.displaySize) {
+        CompositionLocalProvider(
+            LocalHideAmounts provides settings.hideAmounts,
+            LocalSampleValues provides settings.sampleValues,
+            LocalGreenIncomeAmounts provides settings.greenIncomeAmounts,
+        ) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 when (val current = state) {
                     AppState.Loading -> LoadingBox()

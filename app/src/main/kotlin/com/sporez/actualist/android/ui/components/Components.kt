@@ -31,8 +31,32 @@ import com.sporez.actualist.core.money.Money
 /** When true, amounts render as bullets (Actualist's privacy mode). */
 val LocalHideAmounts = compositionLocalOf { false }
 
+/** When true, amounts are replaced by made-up ones, on screen only (Actualist's "Use Sample Values"). */
+val LocalSampleValues = compositionLocalOf { false }
+
+/** When false, positive amounts in [MoneyText] use the normal text colour instead of green. */
+val LocalGreenIncomeAmounts = compositionLocalOf { true }
+
+/**
+ * A stable made-up amount for [minorUnits]: the sign is kept, the size is a pseudo-random value
+ * under 500.00 derived from the real one, and zero stays zero.
+ */
+fun sampleMinorUnits(minorUnits: Long): Long {
+    if (minorUnits == 0L) return 0L
+    var h = minorUnits * -7046029254386353131L
+    h = h xor (h ushr 29)
+    h *= -4658895280553007687L
+    h = h xor (h ushr 32)
+    val magnitude = (Math.floorMod(h, 49_900L)) + 100L
+    return if (minorUnits < 0) -magnitude else magnitude
+}
+
 @Composable
-fun money(minorUnits: Long): String = if (LocalHideAmounts.current) "•••••" else Money.format(minorUnits)
+fun money(minorUnits: Long): String = when {
+    LocalHideAmounts.current -> "•••••"
+    LocalSampleValues.current -> Money.format(sampleMinorUnits(minorUnits))
+    else -> Money.format(minorUnits)
+}
 
 /** A plain amount, colored by sign when [colored]. */
 @Composable
@@ -40,7 +64,7 @@ fun MoneyText(minorUnits: Long, modifier: Modifier = Modifier, colored: Boolean 
     val colors = LocalMoneyColors.current
     val color = when {
         !colored -> MaterialTheme.colorScheme.onSurface
-        minorUnits > 0 -> colors.positive
+        minorUnits > 0 -> if (LocalGreenIncomeAmounts.current) colors.positive else MaterialTheme.colorScheme.onSurface
         minorUnits < 0 -> colors.negative
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }

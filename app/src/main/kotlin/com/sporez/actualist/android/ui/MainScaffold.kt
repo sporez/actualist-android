@@ -311,7 +311,8 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 arguments = listOf(navArgument("account") { type = NavType.StringType; nullable = true; defaultValue = null }),
             ) { backStack ->
                 val account = backStack.arguments?.getString("account")?.let(::decode)
-                val vm = viewModel(key = "new-$account-$key") { TransactionEditorViewModel(session, null, account) }
+                // An account from the feed wins; otherwise the default account from Settings.
+                val vm = viewModel(key = "new-$account-$key") { TransactionEditorViewModel(session, null, account ?: container.settings.settings.value.defaultAccountId) }
                 TransactionEditorScreen(vm) { navController.popBackStack() }
             }
             composable("transaction/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { backStack ->

@@ -12,6 +12,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import com.sporez.actualist.android.data.DisplaySize
+import com.sporez.actualist.android.data.NamedTheme
 import com.sporez.actualist.android.data.ThemeMode
 
 /** Money tones shared by every screen: positive, zero and negative balances. */
@@ -99,13 +103,29 @@ private val AppTypography = Typography().let { base ->
 val MoneyTextStyle = TextStyle(fontFeatureSettings = "tnum", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
 
 @Composable
-fun ActualistTheme(mode: ThemeMode = ThemeMode.DARK, content: @Composable () -> Unit) {
-    val dark = when (mode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.DARK -> true
-        ThemeMode.LIGHT -> false
+fun ActualistTheme(
+    mode: ThemeMode = ThemeMode.DARK,
+    namedTheme: NamedTheme? = null,
+    displaySize: DisplaySize = DisplaySize.COMFORTABLE,
+    content: @Composable () -> Unit,
+) {
+    val dark = when {
+        namedTheme != null -> namedTheme.dark
+        mode == ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        mode == ThemeMode.DARK -> true
+        else -> false
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalMoneyColors provides if (dark) DarkMoney else LightMoney) {
-        MaterialTheme(colorScheme = if (dark) DarkScheme else LightScheme, typography = AppTypography, content = content)
+    val scheme = when {
+        namedTheme != null -> namedColorScheme(namedTheme)
+        dark -> DarkScheme
+        else -> LightScheme
+    }
+    val density = LocalDensity.current
+    val scaled = Density(density.density, density.fontScale * displaySize.fontScale)
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalMoneyColors provides if (dark) DarkMoney else LightMoney,
+        LocalDensity provides scaled,
+    ) {
+        MaterialTheme(colorScheme = scheme, typography = AppTypography, content = content)
     }
 }
