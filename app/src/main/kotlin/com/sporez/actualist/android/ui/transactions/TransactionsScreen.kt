@@ -69,7 +69,12 @@ data class TransactionListState(
 )
 
 /** A transaction list, optionally scoped to one account or category. */
-class TransactionsViewModel(private val session: BudgetSession, accountId: String?, categoryId: String?) : ViewModel() {
+class TransactionsViewModel(
+    private val session: BudgetSession,
+    accountId: String?,
+    categoryId: String?,
+    private val server: com.sporez.actualist.android.sync.ServerConnection? = null,
+) : ViewModel() {
     val messages = com.sporez.actualist.android.ui.MessageState()
     private val _query = MutableStateFlow(TransactionQuery(accountId = accountId, categoryId = categoryId))
     val query: StateFlow<TransactionQuery> = _query.asStateFlow()
@@ -198,6 +203,41 @@ class TransactionsViewModel(private val session: BudgetSession, accountId: Strin
                 messages.show(done)
             } catch (error: Exception) {
                 messages.show(error.message ?: "The account could not be changed.")
+            }
+        }
+    }
+
+    /** SimpleFIN bank sync is offered for server budgets; the server holds the SimpleFIN token. */
+    val bankSyncAvailable: Boolean get() = server != null && !session.isDemo && _query.value.accountId != null
+
+    suspend fun bankLink(): com.sporez.actualist.core.banksync.SimpleFinLinkedAccount? {
+        val id = _query.value.accountId ?: return null
+        val connection = server ?: return null
+        return session.read { connection.simpleFin(database, clock).linkedAccounts().firstOrNull { it.id == id && it.isSimpleFin } }
+    }
+
+    /** The server's SimpleFIN accounts; throws with a readable message when the server cannot sync. */
+    suspend fun simpleFinAccounts(): List<com.sporez.actualist.core.banksync.SimpleFinRemoteAccount> {
+        val connection = server ?: return emptyList()
+        return session.read { connection.simpleFin(database, clock).remoteAccounts() }
+    }
+
+    fun linkBank(remote: com.sporez.actualist.core.banksync.SimpleFinRemoteAccount) = accountWrite("Linked to ${remote.name}") {
+        server!!.simpleFin(database, clock).link(it, remote)
+    }
+
+    fun unlinkBank() = accountWrite("Unlinked from the bank") { server!!.simpleFin(database, clock).unlink(it) }
+
+    /** Downloads and imports this account's bank transactions (not an undoable edit, like a server sync). */
+    fun syncBank() {
+        val accountId = _query.value.accountId ?: return
+        val connection = server ?: return
+        viewModelScope.launch {
+            try {
+                val summary = session.syncing { connection.simpleFin(database, clock).sync(accountId) }
+                messages.show(summary.text())
+            } catch (error: Exception) {
+                messages.show(error.message ?: "Bank sync failed.")
             }
         }
     }
@@ -451,6 +491,10 @@ private fun AccountDialog(account: Account, viewModel: TransactionsViewModel, on
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("account-rename"))
                 TextButton(onClick = { viewModel.renameAccount(name); onDismiss() }, enabled = name.isNotBlank() && name.trim() != account.name) { Text("Rename") }
+                if (viewModel.bankSyncAvailable && !account.closed) {
+                    androidx.compose.material3.HorizontalDivider()
+                    BankSyncSection(viewModel, onDismiss)
+                }
                 androidx.compose.material3.HorizontalDivider()
                 if (account.closed) {
                     TextButton(onClick = { viewModel.reopenAccount(); onDismiss() }, modifier = Modifier.testTag("reopen-account")) { Text("Reopen account") }
@@ -577,6 +621,58 @@ private fun NewFilterDialog(viewModel: TransactionsViewModel, onDismiss: () -> U
             searchable = true,
             onPick = { value = it; choices = null },
             onDismiss = { choices = null },
+        )
+    }
+}
+
+
+/** Link this account to a SimpleFIN account on the server, sync it, or unlink it. */
+@Composable
+private fun BankSyncSection(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
+    var link by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.sporez.actualist.core.banksync.SimpleFinLinkedAccount?>(null) }
+    var loaded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var remotes by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<com.sporez.actualist.core.banksync.SimpleFinRemoteAccount>?>(null) }
+    var problem by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        link = runCatching { viewModel.bankLink() }.getOrNull()
+        loaded = true
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("bank-sync-section")) {
+        Text("Bank sync (SimpleFIN)", style = MaterialTheme.typography.labelLarge)
+        val linked = link
+        when {
+            !loaded -> Text("Checking…", style = MaterialTheme.typography.bodySmall)
+            linked != null -> Row {
+                TextButton(onClick = { viewModel.syncBank(); onDismiss() }, modifier = Modifier.testTag("bank-sync")) { Text("Sync bank") }
+                TextButton(onClick = { viewModel.unlinkBank(); onDismiss() }, modifier = Modifier.testTag("bank-unlink")) { Text("Unlink") }
+            }
+            else -> TextButton(
+                onClick = {
+                    scope.launch {
+                        problem = null
+                        try {
+                            remotes = viewModel.simpleFinAccounts()
+                        } catch (error: Exception) {
+                            problem = error.message ?: "The server cannot reach SimpleFIN."
+                        }
+                    }
+                },
+                modifier = Modifier.testTag("bank-link"),
+            ) { Text("Link to a SimpleFIN account…") }
+        }
+        problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    }
+    remotes?.let { list ->
+        com.sporez.actualist.android.ui.components.PickerDialog(
+            title = if (list.isEmpty()) "No SimpleFIN accounts on this server" else "SimpleFIN account",
+            options = list.map { com.sporez.actualist.android.ui.components.PickerOption(it.accountId, it.name, listOfNotNull(it.orgName ?: it.institution, it.balance).joinToString(" · ")) },
+            onPick = { option ->
+                list.firstOrNull { it.accountId == option.id }?.let { viewModel.linkBank(it) }
+                remotes = null
+                onDismiss()
+            },
+            onDismiss = { remotes = null },
         )
     }
 }

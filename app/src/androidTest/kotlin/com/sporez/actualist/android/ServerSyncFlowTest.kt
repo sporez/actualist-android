@@ -180,4 +180,36 @@ class ServerSyncFlowTest {
         compose.waitUntil(30_000) { compose.onAllNodesWithText("Background Category").fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("23-background-sync")
     }
+
+    @Test
+    fun linksAndSyncsASimpleFinAccountThroughTheServer() {
+        publishBudget()
+        compose.waitForTag("onboarding")
+        compose.onNodeWithTag("onboarding-connect").performClick()
+        compose.waitForTag("server-url-field")
+        compose.onNodeWithTag("server-url-field").performTextClearance()
+        compose.onNodeWithTag("server-url-field").performTextInput(server.url)
+        compose.onNodeWithTag("server-password-field").performTextInput(LoopbackActualServer.PASSWORD)
+        compose.onNodeWithTag("server-sign-in").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("Loopback Synthetic Budget").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Loopback Synthetic Budget").performClick()
+        compose.waitForTag("bottom-bar", 60_000)
+        compose.onNodeWithTag("tab-accounts").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("Loopback Checking").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Loopback Checking").performClick()
+        compose.waitForTag("manage-account")
+        compose.onNodeWithTag("manage-account").performClick()
+        compose.waitForTag("bank-link", 30_000)
+        compose.onNodeWithTag("bank-link").performClick()
+        compose.waitForTag("pick-remote-1", 30_000)
+        compose.onNodeWithTag("pick-remote-1").performClick()
+        compose.waitForGone("pick-remote-1")
+        compose.onNodeWithTag("manage-account").performClick()
+        compose.waitForTag("bank-sync", 30_000)
+        compose.screenshot("24-bank-sync")
+        compose.onNodeWithTag("bank-sync").performClick()
+        compose.waitUntil(60_000) { compose.onAllNodes(hasText("Synthetic Bank Market", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(server.simpleFinRequests.single().contains("remote-1"))
+        compose.screenshot("25-bank-synced")
+    }
 }

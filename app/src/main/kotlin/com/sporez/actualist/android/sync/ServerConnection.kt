@@ -122,6 +122,15 @@ class ServerConnection(
         }
     }
 
+    /** SimpleFIN bank sync for [database] through this server, which holds the SimpleFIN token (as in Actualist). */
+    fun simpleFin(database: com.sporez.actualist.core.db.BudgetDatabase, clock: com.sporez.actualist.core.db.Clock): com.sporez.actualist.core.banksync.SimpleFinSync =
+        com.sporez.actualist.core.banksync.SimpleFinSync(
+            database,
+            com.sporez.actualist.core.banksync.SimpleFinServerClient(settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()),
+            token(),
+            clock,
+        )
+
     /** One sync pass for an open (non-demo) session. Never reports success early. */
     suspend fun sync(session: BudgetSession): SyncStatus {
         if (session.isDemo) return SyncStatus.LocalOnly.also(session::publishSyncStatus)

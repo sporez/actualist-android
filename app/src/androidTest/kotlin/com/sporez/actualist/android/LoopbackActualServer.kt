@@ -28,6 +28,7 @@ class LoopbackActualServer(
     private val messages = TreeMap<String, SyncProto.MessageEnvelope>()
     /** Files registered through upload-user-file, by id; each shares this server's message log. */
     val uploadedNames = java.util.concurrent.ConcurrentHashMap<String, String>()
+    val simpleFinRequests = java.util.concurrent.CopyOnWriteArrayList<String>()
     private var trie = MerkleTrie.EMPTY
     @Volatile var budgetZip: ByteArray = ByteArray(0)
     @Volatile private var running = true
@@ -111,6 +112,24 @@ class LoopbackActualServer(
                 Triple(200, "application/json", """{"status":"ok","groupId":"$groupId"}""".toByteArray())
             }
             path == "/sync/sync" -> Triple(200, "application/actual-sync", sync(body))
+            // SimpleFIN through the server, as Actualist uses it; synthetic accounts and rows only.
+            path == "/simplefin/status" -> Triple(200, "application/json", """{"status":"ok","data":{"configured":true}}""".toByteArray())
+            path == "/simplefin/accounts" -> Triple(
+                200,
+                "application/json",
+                """{"status":"ok","data":{"accounts":[{"id":"remote-1","name":"Synthetic Bank Checking","balance":"100.00","currency":"USD","org":{"name":"Synthetic Bank","domain":"bank.example","id":"org-1"}}]}}""".toByteArray(),
+            )
+            path == "/simplefin/transactions" -> {
+                simpleFinRequests += String(body)
+                val day = java.time.LocalDate.now(java.time.ZoneOffset.UTC).minusDays(2).toString()
+                Triple(
+                    200,
+                    "application/json",
+                    ("""{"status":"ok","data":{"remote-1":{"transactions":{"all":[""" +
+                        """{"transactionId":"sf-1","date":"$day","transactionAmount":{"amount":"-15.00","currency":"USD"},"payeeName":"Synthetic Bank Market","booked":true}""" +
+                        """]},"balances":[{"balanceAmount":{"amount":"100.00","currency":"USD"}}],"startingBalance":10000}}}""").toByteArray(),
+                )
+            }
             else -> Triple(404, "text/plain", "not found".toByteArray())
         }
         val out = client.getOutputStream()

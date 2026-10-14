@@ -243,7 +243,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 arguments = listOf(navArgument("id") { type = NavType.StringType }, navArgument("name") { type = NavType.StringType; defaultValue = "" }),
             ) { backStack ->
                 val id = decode(backStack.arguments?.getString("id") ?: "")
-                val vm = viewModel(key = "account-$id-$key") { TransactionsViewModel(session, id, null) }
+                val vm = viewModel(key = "account-$id-$key") { TransactionsViewModel(session, id, null, container.server) }
                 TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new?account=${encode(id)}") })
             }
             composable(
