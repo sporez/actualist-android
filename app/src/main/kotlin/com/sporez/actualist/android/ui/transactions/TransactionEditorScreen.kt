@@ -115,6 +115,7 @@ class TransactionEditorViewModel(
                     transactionId,
                     TransactionEdit(
                         date = draft.date,
+                        accountId = draft.accountId.takeIf { it != existing?.accountId },
                         amount = draft.amount,
                         payeeId = draft.payeeId.takeIf { it != existing?.payeeId },
                         payeeName = draft.payeeName.takeIf { draft.payeeId == null && it.isNotBlank() },

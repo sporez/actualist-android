@@ -48,6 +48,8 @@ data class SplitFamilyEdit(
 /** Field changes to an existing simple or transfer row. Null leaves a field unchanged. */
 data class TransactionEdit(
     val date: LocalDate? = null,
+    /** Moves the row to another account; a transfer's paired row follows Actual's rules. */
+    val accountId: String? = null,
     val amount: Long? = null,
     val payeeId: String? = null,
     val payeeName: String? = null,
@@ -387,58 +389,111 @@ class TransactionWrites(
     }
 
     /**
-     * Writes only the changed cells of a simple or transfer row. A transfer's paired row
-     * follows its amount (negated), date and notes, as Actual's `transfer.onUpdate` does.
-     * Split families and reconciled rows are refused here: they need Actualist's family
-     * and reconciliation guards, which this port does not have yet.
+     * Writes only the changed cells of a simple or transfer row, then applies Actual's
+     * `transfer.onUpdate` (as Actualist's `transferMessagesOnUpdate` ports it): choosing a transfer
+     * payee creates the paired row, leaving one tombstones it, and any other change to a transfer
+     * moves the paired row to the destination account with this account's transfer payee, the
+     * notes and the negated amount (never the date). Between accounts on the same side of the
+     * budget the category is cleared on both legs. Split rows and reconciled rows are refused here.
      */
     fun updateDrafts(transactionId: String, edit: TransactionEdit): List<CellDraft> {
         val row = loadRow(transactionId)?.takeIf { !it.tombstone } ?: throw LocalFirstException.InvalidLocalWrite("missing transaction")
-        if (row.isParent || row.isChild) throw LocalFirstException.InvalidLocalWrite("editing split transactions is not supported yet")
+        if (row.isParent || row.isChild) throw LocalFirstException.InvalidLocalWrite("edit the whole split transaction instead")
         if (row.reconciled) throw LocalFirstException.InvalidLocalWrite("reconciled transactions are locked")
         val drafts = mutableListOf<CellDraft>()
-        fun cell(column: String, value: SyncValue) {
-            drafts += CellDraft("transactions", transactionId, column, value)
+        fun cell(id: String, column: String, value: SyncValue) {
+            drafts += CellDraft("transactions", id, column, value)
         }
-        val newDate = edit.date?.let(Months::packedDate)?.toLong()
-        if (newDate != null && newDate != row.date) cell("date", SyncValue.int(newDate))
-        if (edit.amount != null && edit.amount != row.amount) cell("amount", SyncValue.int(edit.amount))
-        var newPayee: String? = null
+
+        val account = edit.accountId?.takeIf { it != row.accountId }?.also(::validateAccount) ?: row.accountId
+            ?: throw LocalFirstException.InvalidLocalWrite("missing account")
+        val date = edit.date?.let(Months::packedDate)?.toLong() ?: row.date
+        val amount = edit.amount ?: row.amount
+        val notes = edit.notes?.let { it.ifEmpty { null } } ?: if (edit.notes == null) row.notes else null
+        var payee = row.payeeId
         if (edit.payeeId != null || !edit.payeeName.isNullOrBlank()) {
             val (payeeId, payeeDrafts) = resolveOrCreatePayeeDrafts(edit.payeeId, edit.payeeName ?: "")
             if (payeeId != row.payeeId) {
-                if (row.transferId != null || transferAccountIdOf(payeeId) != null) {
-                    throw LocalFirstException.InvalidLocalWrite("changing a transfer's payee is not supported yet")
-                }
                 drafts.addAll(0, payeeDrafts)
-                newPayee = payeeId
-                cell("description", SyncValue.text(payeeId))
+                payee = payeeId
             }
         }
-        val offBudget = row.accountId?.let(::accountOffBudget) ?: false
-        if (edit.clearCategory && row.categoryId != null) {
-            cell("category", SyncValue.Null)
-        } else if (edit.categoryId != null && edit.categoryId != row.categoryId && !offBudget) {
-            validateCategory(edit.categoryId)
-            cell("category", SyncValue.text(edit.categoryId))
+        val destination = payee?.let(::transferAccountIdOf)
+        if (destination != null && destination == account) throw LocalFirstException.InvalidLocalWrite("transfer to the same account")
+        val offBudget = accountOffBudget(account)
+        var category = when {
+            edit.clearCategory -> null
+            edit.categoryId != null && !offBudget -> edit.categoryId.also(::validateCategory)
+            else -> row.categoryId
         }
-        if (edit.notes != null && edit.notes != (row.notes ?: "")) cell("notes", if (edit.notes.isEmpty()) SyncValue.Null else SyncValue.text(edit.notes))
-        if (edit.cleared != null && edit.cleared != row.cleared) cell("cleared", SyncValue.bool(edit.cleared))
-        check(newPayee == null || row.transferId == null)
-        val paired = row.transferId?.let(::loadRow)?.takeIf { !it.tombstone }
-        if (paired != null) {
-            val pairedDrafts = mutableListOf<CellDraft>()
-            if (edit.amount != null && -edit.amount != paired.amount) {
-                pairedDrafts += CellDraft("transactions", paired.id, "amount", SyncValue.int(-edit.amount))
+        val cleared = edit.cleared ?: row.cleared
+
+        val transferDrafts = mutableListOf<CellDraft>()
+        var transferId = row.transferId
+        val linkInputsUnchanged = account == row.accountId && payee == row.payeeId
+        if (!(linkInputsUnchanged && (row.transferId == null || (amount == row.amount && notes == row.notes)))) {
+            when {
+                destination != null && row.transferId == null -> {
+                    // Becomes a transfer: create the paired row.
+                    val pairedId = newId()
+                    transferId = pairedId
+                    if (offBudget == accountOffBudget(destination)) category = null
+                    transferDrafts += snapshotLeg(pairedId, destination, date ?: Months.packedDate(LocalDate.now()).toLong(), -amount, transferPayeeId(account), notes, transactionId)
+                }
+                destination == null && row.transferId != null -> {
+                    // No longer a transfer: the paired row goes, and the link is cleared.
+                    val paired = loadRow(row.transferId)
+                    if (paired != null && !paired.tombstone) {
+                        if (paired.isChild) {
+                            transferDrafts += CellDraft("transactions", paired.id, "transferred_id", SyncValue.Null)
+                            transferDrafts += CellDraft("transactions", paired.id, "description", SyncValue.Null)
+                        } else {
+                            transferDrafts += CellDraft("transactions", paired.id, "tombstone", SyncValue.bool(true))
+                        }
+                    }
+                    transferId = null
+                }
+                destination != null && row.transferId != null -> {
+                    val pairedId = row.transferId
+                    transferDrafts += CellDraft("transactions", pairedId, "acct", SyncValue.text(destination))
+                    transferDrafts += CellDraft("transactions", pairedId, "description", SyncValue.text(transferPayeeId(account)))
+                    transferDrafts += CellDraft("transactions", pairedId, "notes", SyncValue.textOrNull(notes))
+                    transferDrafts += CellDraft("transactions", pairedId, "amount", SyncValue.int(-amount))
+                    if (offBudget == accountOffBudget(destination)) {
+                        category = null
+                        transferDrafts += CellDraft("transactions", pairedId, "category", SyncValue.Null)
+                    }
+                }
             }
-            if (newDate != null && newDate != paired.date) pairedDrafts += CellDraft("transactions", paired.id, "date", SyncValue.int(newDate))
-            if (edit.notes != null && edit.notes != (paired.notes ?: "")) {
-                pairedDrafts += CellDraft("transactions", paired.id, "notes", if (edit.notes.isEmpty()) SyncValue.Null else SyncValue.text(edit.notes))
-            }
-            drafts += pairedDrafts
         }
-        return drafts
+
+        if (account != row.accountId) cell(transactionId, "acct", SyncValue.text(account))
+        if (date != row.date && date != null) cell(transactionId, "date", SyncValue.int(date))
+        if (amount != row.amount) cell(transactionId, "amount", SyncValue.int(amount))
+        if (payee != row.payeeId) cell(transactionId, "description", SyncValue.textOrNull(payee))
+        if (category != row.categoryId) cell(transactionId, "category", SyncValue.textOrNull(category))
+        if (notes != row.notes) cell(transactionId, "notes", SyncValue.textOrNull(notes))
+        if (cleared != row.cleared) cell(transactionId, "cleared", SyncValue.bool(cleared))
+        if (transferId != row.transferId) cell(transactionId, "transferred_id", SyncValue.textOrNull(transferId))
+        return drafts + transferDrafts
     }
+
+    /** Actualist's `.snapshot` cells for a new paired transfer leg (uncleared, uncategorized). */
+    private fun snapshotLeg(id: String, account: String, date: Long, amount: Long, payee: String, notes: String?, transferId: String): List<CellDraft> = listOf(
+        "acct" to SyncValue.text(account),
+        "date" to SyncValue.int(date),
+        "amount" to SyncValue.int(amount),
+        "description" to SyncValue.text(payee),
+        "category" to SyncValue.Null,
+        "notes" to SyncValue.textOrNull(notes),
+        "cleared" to SyncValue.bool(false),
+        "reconciled" to SyncValue.bool(false),
+        "isParent" to SyncValue.bool(false),
+        "parent_id" to SyncValue.Null,
+        "isChild" to SyncValue.bool(false),
+        "transferred_id" to SyncValue.text(transferId),
+        "tombstone" to SyncValue.bool(false),
+    ).map { (column, value) -> CellDraft("transactions", id, column, value) }
 
     /**
      * Edits a split family, or turns a simple row into one. Follows Actual's
