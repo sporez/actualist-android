@@ -22,6 +22,14 @@ data class Settings(
     val serverUrl: String? = null,
     val hideAmounts: Boolean = false,
     val appSwitcherPrivacy: AppSwitcherPrivacy = AppSwitcherPrivacy.OFF,
+    /** Actualist's "Show Total Assigned": the month's assigned total under the Budget title. */
+    val showTotalAssigned: Boolean = false,
+    /** Actualist's "Hide Carryover Arrows": no rollover badge on the available pills. */
+    val hideCarryoverArrows: Boolean = false,
+    /** Actualist's "Swipe Between Months". */
+    val swipeBetweenMonths: Boolean = true,
+    /** Months shown side by side on wide screens: 0 is Auto (three months), otherwise 1 to 5. */
+    val monthsShown: Int = 0,
 )
 
 class AppSettings(context: Context) {
@@ -35,6 +43,10 @@ class AppSettings(context: Context) {
         serverUrl = prefs.getString("server_url", null),
         hideAmounts = prefs.getBoolean("hide_amounts", false),
         appSwitcherPrivacy = prefs.getString("app_switcher_privacy", null)?.let { runCatching { AppSwitcherPrivacy.valueOf(it) }.getOrNull() } ?: AppSwitcherPrivacy.OFF,
+        showTotalAssigned = prefs.getBoolean("show_total_assigned", false),
+        hideCarryoverArrows = prefs.getBoolean("hide_carryover_arrows", false),
+        swipeBetweenMonths = prefs.getBoolean("swipe_between_months", true),
+        monthsShown = prefs.getInt("months_shown", 0).coerceIn(0, 5),
     )
 
     fun update(transform: (Settings) -> Settings) {
@@ -45,6 +57,10 @@ class AppSettings(context: Context) {
             .putString("server_url", next.serverUrl)
             .putBoolean("hide_amounts", next.hideAmounts)
             .putString("app_switcher_privacy", next.appSwitcherPrivacy.name)
+            .putBoolean("show_total_assigned", next.showTotalAssigned)
+            .putBoolean("hide_carryover_arrows", next.hideCarryoverArrows)
+            .putBoolean("swipe_between_months", next.swipeBetweenMonths)
+            .putInt("months_shown", next.monthsShown)
             .apply()
         _settings.value = next
     }

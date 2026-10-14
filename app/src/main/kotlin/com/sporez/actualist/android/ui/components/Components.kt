@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,19 +49,39 @@ fun MoneyText(minorUnits: Long, modifier: Modifier = Modifier, colored: Boolean 
 
 /** Actualist's available-balance pill: green when funded, grey at zero, red when overspent. */
 @Composable
-fun BalancePill(minorUnits: Long, modifier: Modifier = Modifier) {
+fun BalancePill(minorUnits: Long, modifier: Modifier = Modifier, carryover: Boolean = false) {
     val colors = LocalMoneyColors.current
     val (background, foreground) = when {
         minorUnits > 0 -> colors.positiveContainer to colors.onPositiveContainer
         minorUnits < 0 -> colors.negativeContainer to colors.onNegativeContainer
         else -> colors.neutralContainer to colors.onNeutralContainer
     }
-    Box(
-        modifier = modifier
-            .background(background, RoundedCornerShape(10.dp))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    ) {
-        Text(money(minorUnits), color = foreground, style = MoneyTextStyle, maxLines = 1)
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .background(background, RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        ) {
+            Text(money(minorUnits), color = foreground, style = MoneyTextStyle, maxLines = 1)
+        }
+        // Actualist's carryover badge: a small arrow on the pill's top trailing corner.
+        if (carryover) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-4).dp)
+                    .size(13.dp)
+                    .background(background, androidx.compose.foundation.shape.CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    androidx.compose.material.icons.Icons.Filled.ChevronRight,
+                    contentDescription = "Rolls over",
+                    tint = foreground,
+                    modifier = Modifier.size(11.dp),
+                )
+            }
+        }
     }
 }
 

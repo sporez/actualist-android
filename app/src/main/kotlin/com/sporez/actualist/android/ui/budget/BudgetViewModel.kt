@@ -8,8 +8,12 @@ import com.sporez.actualist.core.budget.BudgetMonth
 import com.sporez.actualist.core.budget.HoldCommand
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.budget.MoveMoneyCommand
+import com.sporez.actualist.core.rules.CategoryLearning
 import com.sporez.actualist.core.store.BudgetSession
+import com.sporez.actualist.core.transactions.TransactionBatch
+import com.sporez.actualist.core.transactions.TransactionQuery
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -27,13 +31,49 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
         BudgetScreenState(budget.fetchBudgetMonth(month), budget.availableMonths(), budget.monthNote(month))
     }
 
-    /** The two months after the shown one, for the side-by-side columns on wide screens. */
-    val following = reloading(session, _month) { month ->
-        (1..2).map { budget.fetchBudgetMonth(Months.shifted(month, it)) }
+    private val _followingCount = MutableStateFlow(2)
+
+    /** The months after the shown one, for the side-by-side columns on wide screens (two unless the screen says otherwise). */
+    val following = reloading(session, combine(_month, _followingCount) { month, count -> month to count }) { (month, count) ->
+        (1..count).map { budget.fetchBudgetMonth(Months.shifted(month, it)) }
+    }
+
+    /** The shown month's uncategorized on-budget transactions, for the review list and the banner count. */
+    val uncategorized = reloading(session, _month) { month ->
+        ledger.transactions(TransactionQuery(uncategorizedOnly = true, month = month, limit = 500))
+    }
+
+    fun setFollowingCount(count: Int) {
+        _followingCount.value = count.coerceIn(0, 4)
     }
 
     fun showMonth(month: String) {
         _month.value = month
+    }
+
+    fun showToday() {
+        _month.value = Months.current()
+    }
+
+    /** Covers each overspent category from its chosen source (null is To Budget) in one batch: (category, source, amount). */
+    fun coverAll(items: List<Triple<String, String?, Long>>) = write(if (items.size == 1) "Covered" else "Covered ${items.size} categories") {
+        budgetWrites.move(month.value, items.map { (id, from, amount) -> MoveMoneyCommand(from, id, amount, MoveMoneyCommand.Kind.COVER) })
+    }
+
+    suspend fun categoryOptions(): List<com.sporez.actualist.android.ui.components.PickerOption> = try {
+        session.read {
+            ledger.categories(includeHidden = false).map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name, it.groupName) }
+        }
+    } catch (error: Exception) {
+        messages.show(error.message ?: "Categories could not be read.")
+        emptyList()
+    }
+
+    /** Gives one uncategorized transaction a category (the way a batch categorize does, then category learning). */
+    fun categorize(transactionId: String, categoryId: String) = write("Categorized") {
+        val result = TransactionBatch(database, clock).categorize(listOf(transactionId), categoryId)
+        if (result.changed == 0) error("That transaction cannot be categorized here.")
+        CategoryLearning(database).learn(setOf(transactionId), java.time.LocalDate.now())
     }
 
     fun previousMonth() {

@@ -129,6 +129,7 @@ fun SettingsScreen(
                 }
             }
         }
+        BudgetDisplayCard(settings)
         RolloverAllCard(session)
         SectionCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -151,6 +152,49 @@ fun syncDescription(status: SyncStatus): String = when (status) {
     is SyncStatus.Failed -> "Sync failed: ${status.message}" + if (status.pendingChanges > 0) " · ${status.pendingChanges} change(s) kept locally" else ""
 }
 
+
+/** Actualist's Budget display preferences: totals, rollover badges, month swiping and how many months show on wide screens. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun BudgetDisplayCard(settings: AppSettings) {
+    val current by settings.settings.collectAsState()
+    @Composable
+    fun toggle(title: String, detail: String, checked: Boolean, tag: String, onChange: (Boolean) -> Unit) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title)
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = checked, onCheckedChange = onChange, modifier = Modifier.testTag(tag))
+        }
+    }
+    SectionCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Budget display", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            toggle("Show total assigned", "Shows the month's assigned total under the title", current.showTotalAssigned, "show-total-assigned") { value ->
+                settings.update { it.copy(showTotalAssigned = value) }
+            }
+            toggle("Hide carryover arrows", "No rollover badge on available amounts", current.hideCarryoverArrows, "hide-carryover-arrows") { value ->
+                settings.update { it.copy(hideCarryoverArrows = value) }
+            }
+            toggle("Swipe between months", "Swipe sideways on the budget to change month", current.swipeBetweenMonths, "swipe-between-months") { value ->
+                settings.update { it.copy(swipeBetweenMonths = value) }
+            }
+            HorizontalDivider()
+            Text("Months shown on wide screens")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (count in 0..5) {
+                    androidx.compose.material3.FilterChip(
+                        selected = current.monthsShown == count,
+                        onClick = { settings.update { it.copy(monthsShown = count) } },
+                        label = { Text(if (count == 0) "Auto" else "$count") },
+                        modifier = Modifier.testTag("months-shown-$count"),
+                    )
+                }
+            }
+        }
+    }
+}
 
 /** Exports the open budget as a ZIP (a consistent, sanitized snapshot), as Actualist's Export does. */
 @Composable

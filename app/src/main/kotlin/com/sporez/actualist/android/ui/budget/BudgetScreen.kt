@@ -72,6 +72,7 @@ import com.sporez.actualist.android.ui.theme.MoneyTextStyle
 import com.sporez.actualist.core.budget.BudgetMonthCategory
 import com.sporez.actualist.core.budget.BudgetMonthCategoryGroup
 import com.sporez.actualist.core.budget.BudgetTable
+import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.money.Money
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -92,17 +93,32 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
     var showHidden by rememberSaveable { mutableStateOf(false) }
     var managingGroup by remember { mutableStateOf<String?>(null) }
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
+    var choosingMonth by remember { mutableStateOf(false) }
+    var reviewingCover by remember { mutableStateOf(false) }
+    var reviewingUncategorized by remember { mutableStateOf(false) }
+    val appSettings = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.sporez.actualist.android.ActualistApplication).container.settings
+    val display by appSettings.settings.collectAsState()
+    val uncategorizedState by viewModel.uncategorized.collectAsState()
+    val uncategorizedCount = (uncategorizedState as? Loadable.Ready)?.value?.size ?: 0
+    // Actualist's Months Shown: Auto is three months (the shown one and two more); a fixed count of N shows N.
+    val followingCount = if (display.monthsShown == 0) 2 else display.monthsShown - 1
 
     Column(Modifier.fillMaxSize().testTag("budget-screen")) {
-        MonthHeader(month, onPrevious = viewModel::previousMonth, onNext = viewModel::nextMonth)
+        MonthHeader(month, onPrevious = viewModel::previousMonth, onNext = viewModel::nextMonth, onChoose = { choosingMonth = true }, onToday = viewModel::showToday)
+        if (choosingMonth) {
+            MonthChooserDialog(month, onPick = { picked -> viewModel.showMonth(picked); choosingMonth = false }, onDismiss = { choosingMonth = false })
+        }
         when (val current = state) {
             Loadable.Loading -> LoadingBox()
             is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
             is Loadable.Ready -> {
                 val screen = current.value
                 // Wide windows (tablets, landscape) show the next months beside this one, as Actualist's iPad layout.
-                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-                val wide = maxWidth >= 840.dp
+                androidx.compose.foundation.layout.BoxWithConstraints(
+                    Modifier.fillMaxSize().monthSwipe(display.swipeBetweenMonths, onPrevious = viewModel::previousMonth, onNext = viewModel::nextMonth),
+                ) {
+                val wide = maxWidth >= 840.dp && followingCount > 0
+                androidx.compose.runtime.LaunchedEffect(wide, followingCount) { viewModel.setFollowingCount(if (wide) followingCount else 0) }
                 Row(Modifier.fillMaxSize()) {
                 LazyColumn(
                     Modifier.weight(1.3f).fillMaxHeight().testTag("budget-list"),
@@ -128,8 +144,25 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                             }
                         }
                     }
+                    if (display.showTotalAssigned) {
+                        item(key = "assigned") {
+                            val assigned = screen.month.categoryGroups.filter { !it.isIncome }.sumOf { it.budgeted }
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                                Text("Assigned", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(money(assigned), style = MoneyTextStyle, modifier = Modifier.testTag("month-assigned"))
+                            }
+                        }
+                    }
                     if (screen.overspent.isNotEmpty()) {
-                        item(key = "overspent") { OverspentRow(screen.overspent.size) { selectedCategory = screen.overspent.first().id } }
+                        item(key = "overspent") {
+                            OverspentRow(screen.overspent.size) {
+                                // Envelope budgets cover from To Budget or another category; tracking budgets just open the category.
+                                if (screen.month.table == BudgetTable.ENVELOPE) reviewingCover = true else selectedCategory = screen.overspent.first().id
+                            }
+                        }
+                    }
+                    if (uncategorizedCount > 0) {
+                        item(key = "uncategorized") { UncategorizedRow(uncategorizedCount) { reviewingUncategorized = true } }
                     }
                     for (group in screen.month.categoryGroups.filter { showHidden || !it.hidden }) {
                         val isCollapsed = collapsed[group.id] == true
@@ -141,7 +174,7 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                                 SectionCard {
                                     val visible = group.categories.filter { showHidden || !it.hidden }
                                     visible.forEachIndexed { index, category ->
-                                        CategoryRow(category) { selectedCategory = category.id }
+                                        CategoryRow(category, showCarryover = !display.hideCarryoverArrows) { selectedCategory = category.id }
                                         if (index < visible.lastIndex) HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                                     }
                                 }
@@ -159,7 +192,7 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                     }
                 }
                 if (wide) {
-                    FollowingMonths(screen, viewModel, collapsed, Modifier.weight(1f).fillMaxHeight()) { month, categoryId ->
+                    FollowingMonths(screen, viewModel, collapsed, Modifier.weight(maxOf(0.6f, followingCount / 2f)).fillMaxHeight()) { month, categoryId ->
                         // Editing a later month: switch to it and open the category there.
                         viewModel.showMonth(month)
                         selectedCategory = categoryId
@@ -181,6 +214,8 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                     )
                 }
                 if (showToBudget) ToBudgetSheet(screen, viewModel) { showToBudget = false }
+                if (reviewingCover) CoverReviewSheet(screen, viewModel) { reviewingCover = false }
+                if (reviewingUncategorized) UncategorizedReviewSheet(viewModel) { reviewingUncategorized = false }
                 if (addingCategory) AddCategoryDialog(screen, viewModel) { addingCategory = false }
                 managingGroup?.let { id ->
                     val group = screen.month.categoryGroups.firstOrNull { it.id == id }
@@ -192,10 +227,16 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
 }
 
 @Composable
-private fun MonthHeader(month: String, onPrevious: () -> Unit, onNext: () -> Unit) {
+private fun MonthHeader(month: String, onPrevious: () -> Unit, onNext: () -> Unit, onChoose: () -> Unit, onToday: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onPrevious, modifier = Modifier.testTag("month-previous")) { Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month") }
-        Text(monthTitle(month), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).testTag("month-title"), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(
+            monthTitle(month),
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.weight(1f).clickable(onClick = onChoose).padding(vertical = 8.dp).testTag("month-title"),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        if (month != Months.current()) TextButton(onClick = onToday, modifier = Modifier.testTag("month-today")) { Text("Today") }
         IconButton(onClick = onNext, modifier = Modifier.testTag("month-next")) { Icon(Icons.Filled.ChevronRight, contentDescription = "Next month") }
     }
 }
@@ -279,7 +320,7 @@ private fun GroupHeader(group: BudgetMonthCategoryGroup, collapsed: Boolean, onM
 }
 
 @Composable
-private fun CategoryRow(category: BudgetMonthCategory, onClick: () -> Unit) {
+private fun CategoryRow(category: BudgetMonthCategory, showCarryover: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 11.dp).testTag("category-${category.id}"),
         verticalAlignment = Alignment.CenterVertically,
@@ -290,7 +331,7 @@ private fun CategoryRow(category: BudgetMonthCategory, onClick: () -> Unit) {
             MoneyText(category.spent)
         } else {
             Text(money(category.budgeted), style = MoneyTextStyle, modifier = Modifier.padding(end = 10.dp))
-            Box(Modifier.width(100.dp), contentAlignment = Alignment.CenterEnd) { BalancePill(category.balance) }
+            Box(Modifier.width(100.dp), contentAlignment = Alignment.CenterEnd) { BalancePill(category.balance, carryover = showCarryover && category.carryover) }
         }
     }
 }
