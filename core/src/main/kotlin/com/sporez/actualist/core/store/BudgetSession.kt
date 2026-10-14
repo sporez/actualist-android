@@ -71,13 +71,22 @@ class BudgetSession(
      * Runs a local write. In demo mode the outbox is drained afterwards so nothing can
      * ever be uploaded; otherwise the change waits in the outbox for the next sync.
      */
-    suspend fun <T> write(block: BudgetSession.() -> T): T = writeLock.withLock {
-        withContext(io) {
-            val result = history.record { block() }
-            if (isDemo) database.drainAllPendingLocalMessages()
-            result
-        }.also { changed() }
+    suspend fun <T> write(block: BudgetSession.() -> T): T = finishing {
+        writeLock.withLock {
+            withContext(io) {
+                val result = history.record { block() }
+                if (isDemo) database.drainAllPendingLocalMessages()
+                result
+            }.also { changed() }
+        }
     }
+
+    /**
+     * Once a write has started it finishes, change notification included, even when the screen
+     * that asked for it goes away (its scope is cancelled): otherwise the commit could land
+     * while the screens that show it are never told to reload.
+     */
+    private suspend fun <T> finishing(block: suspend () -> T): T = withContext(kotlinx.coroutines.NonCancellable) { block() }
 
     /** The session's recorded gestures, newest first. */
     suspend fun historyItems(): List<UndoHistory.Item> = withContext(io) { history.items() }
@@ -88,17 +97,21 @@ class BudgetSession(
     /** Redoes the write undone last; false when there was nothing to redo. */
     suspend fun redo(): Boolean = historyStep { history.redo() != null }
 
-    private suspend fun historyStep(step: () -> Boolean): Boolean = writeLock.withLock {
-        withContext(io) {
-            val stepped = step()
-            if (isDemo) database.drainAllPendingLocalMessages()
-            stepped
-        }.also { changed() }
+    private suspend fun historyStep(step: () -> Boolean): Boolean = finishing {
+        writeLock.withLock {
+            withContext(io) {
+                val stepped = step()
+                if (isDemo) database.drainAllPendingLocalMessages()
+                stepped
+            }.also { changed() }
+        }
     }
 
     /** Runs a sync pass under the write lock, so no local write interleaves with it. */
-    suspend fun <T> syncing(block: BudgetSession.() -> T): T = writeLock.withLock {
-        withContext(io) { block() }.also { changed() }
+    suspend fun <T> syncing(block: BudgetSession.() -> T): T = finishing {
+        writeLock.withLock {
+            withContext(io) { block() }.also { changed() }
+        }
     }
 
     fun publishSyncStatus(status: SyncStatus) {
