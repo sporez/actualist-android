@@ -12,7 +12,7 @@ the bundled demo budget use synthetic data only.
 
 | Module | Contents |
 |---|---|
-| `core/` | Pure Kotlin/JVM engine: Actual's HLC timestamps, merkle trie, protobuf sync wire format, AES-256-GCM encryption, the SQLite budget database with CRDT apply and an atomic local-write outbox, envelope/tracking budget math, transactions, rules, schedules, reconciliation, CSV, the sync engine and the Actual server client. Runs in JVM unit tests and on Android through the bundled SQLite driver. |
+| `core/` | Pure Kotlin/JVM engine: Actual's HLC timestamps, merkle trie, protobuf sync wire format, AES-256-GCM encryption, the SQLite budget database with CRDT apply, an atomic local-write outbox and cell-level undo, envelope/tracking budget math and templates, transactions, splits, duplicate/merge, queries and saved filters, rules and category learning, schedules, reconciliation, import reconcile (CSV and SimpleFIN), account lifecycle and groups, the sync engine and the Actual server client. Runs in JVM unit tests and on Android through the bundled SQLite driver. |
 | `app/` | Jetpack Compose + Material 3 Android app on top of `core`. |
 
 The reference implementation and the exact commit this port follows are in
@@ -28,7 +28,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 |---|---|---|
 | Demo budget (no server, no credentials) | Done | — (JVM + emulator UI tests) |
 | Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
-| Wide screens: the next two months beside the edited one (read-only, tap to switch) | Done | device test (landscape) |
+| Wide screens: the next two months beside the edited one (tap a month or a cell to edit it there) | Done | device test (landscape) |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
 | Budget templates: preview, apply, edit with several entries (monthly, up to, by date, schedule, % of income, average, copy, goal) | Done (other kinds and options read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
 | Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge, make a schedule | Done | Transactions 21, TransactionCommand 39 |
@@ -40,8 +40,8 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Accounts: add, rename, notes, close (with balance transfer), reopen, SimpleFIN unlink, account groups | Done | AccountLifecycle 16; account-group tests ported from Actualist |
 | Reconciliation | Done | from Actualist's Reconciliation cases |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
-| Payees: rename, merge | Done | unit tests |
-| Reports: net worth, cash flow, spending | Done | UI screenshots |
+| Payees: rename, merge, category-learning switches | Done | unit tests |
+| Reports: net worth, cash flow, spending, Budget vs Spent; month switcher and drill-down to transactions | Done | device test |
 | Undo / redo of every local edit, History screen | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
 | SimpleFIN bank sync (through the Actual server, or the device bridge when the server does not host it, as Actualist) | Done: link, sync, unlink, connect on device | 5 provider-mapping cases; unit tests; real-server status check |
 | Background sync (WorkManager, hourly, shared session) | Done | device test |
@@ -62,12 +62,17 @@ installed locally.
 - **Build and unit test** (`.github/workflows/build.yml`): every push. Builds the
   debug APK, runs the JVM tests, uploads the APK (`actualist-android-debug-apk`)
   and test reports.
+- **Real Actual server** (`.github/workflows/real-server.yml`): on core changes. Runs a
+  disposable `actualbudget/actual-server:26.10.0` service container with a synthetic
+  password and drives login, new plain and encrypted budgets, ZIP import, download,
+  two-device sync and conflicts against it; fails if those tests were skipped.
 - **Android emulator tests** (`.github/workflows/emulator.yml`): manual dispatch
-  at milestones. Boots an API 34 emulator, installs the APK, cold-launches it, runs
-  the instrumentation/Compose UI suite (including a sign-in, download and sync flow
-  against a loopback Actual server inside the test process), kills the app process
-  to check the selected budget reopens, and uploads screenshots, logcat and results
-  (`emulator-results`).
+  at milestones (optional `test_filter` input for one class or method). Boots an API 34
+  emulator, installs the APK, cold-launches it, runs the instrumentation/Compose UI
+  suite (Compose v2 test API), including flows against a loopback Actual server inside
+  the test process and against the same disposable real actual-server exposed on the
+  device's loopback with `adb reverse`, kills the app process to check the selected
+  budget reopens, and uploads screenshots, logcat and results (`emulator-results`).
 
 With a local JDK 17 and Android SDK, `./gradlew :core:test :app:assembleDebug`
 works as usual.
