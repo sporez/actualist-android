@@ -1,0 +1,89 @@
+name: Real Actual server
+
+# Runs the core sync and new-budget tests against a disposable Actual server: the pinned
+# oracle version, a synthetic password, no persistent volume. Nothing real is ever stored.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "core/src/main/**"
+      - "core/src/test/kotlin/com/sporez/actualist/core/server/**"
+      - ".github/workflows/real-server.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-server:
+    name: Sync against actual-server 26.10.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      actual:
+        image: actualbudget/actual-server:26.10.0
+        ports:
+          - 5006:5006
+    env:
+      ACTUAL_TEST_SERVER_URL: http://localhost:5006
+      ACTUAL_TEST_SERVER_PASSWORD: ci-synthetic-password-1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Wait for the server and bootstrap a synthetic password
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5006/account/needs-bootstrap > /tmp/needs.json; then break; fi
+            sleep 2
+          done
+          cat /tmp/needs.json; echo
+          curl -sf -X POST -H 'Content-Type: application/json' \
+            -d "{\"password\":\"$ACTUAL_TEST_SERVER_PASSWORD\"}" \
+            http://localhost:5006/account/bootstrap > /dev/null
+          echo "bootstrapped"
+
+      - name: Run the real-server tests
+        run: ./gradlew --no-daemon --stacktrace :core:test --tests 'com.sporez.actualist.core.server.RealActualServerTest'
+
+      - name: Require that the test really ran (not skipped)
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, xml.etree.ElementTree as ET
+          files = glob.glob("core/build/test-results/test/TEST-*RealActualServerTest.xml")
+          if not files:
+              sys.exit("RealActualServerTest produced no report")
+          root = ET.parse(files[0]).getroot()
+          tests, skipped = int(root.get("tests")), int(root.get("skipped"))
+          print(f"tests={tests} skipped={skipped} failures={root.get('failures')} errors={root.get('errors')}")
+          if tests == 0 or skipped:
+              sys.exit("RealActualServerTest was skipped; the server was not reachable")
+          EOF
+
+      - name: Summarize
+        if: always()
+        run: python3 scripts/junit-summary.py core/build/test-results >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: real-server-test-reports
+          path: |
+            core/build/reports/tests/
+            core/build/test-results/
+          if-no-files-found: warn
+          retention-days: 14
