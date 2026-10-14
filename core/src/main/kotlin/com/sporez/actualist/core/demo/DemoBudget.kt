@@ -215,7 +215,7 @@ object DemoBudget {
         }
         // Two budget templates in Actual's stored goal_def shape (amounts in currency units).
         for ((id, monthly) in listOf("groceries" to 600, "entertainment" to 150)) {
-            cell("categories", id, "goal_def", SyncValue.text("""[{"type":"simple","monthly":$monthly,"limit":null,"priority":null,"directive":"template"}]"""))
+            cell("categories", id, "goal_def", SyncValue.text("""[{"type":"simple","monthly":$monthly,"limit":null,"priority":0,"directive":"template"}]"""))
             cell("categories", id, "template_settings", SyncValue.text("""{"source":"ui"}"""))
         }
         rule("demo-rule-cafe", "cafe", "dining")
