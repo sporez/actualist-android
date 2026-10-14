@@ -174,7 +174,7 @@ class ServerSyncFlowTest {
         }
 
         // The worker WorkManager runs in the background syncs it into the session the UI has open.
-        val worker = androidx.work.testing.TestListenableWorkerBuilder<com.sporez.actualist.android.sync.BackgroundSyncWorker>(context).build()
+        val worker = androidx.work.testing.TestListenableWorkerBuilder<com.sporez.actualist.android.sync.BackgroundSyncWorker>(context.applicationContext).build()
         val result = kotlinx.coroutines.runBlocking { worker.doWork() }
         org.junit.Assert.assertEquals(androidx.work.ListenableWorker.Result.success(), result)
         compose.waitUntil(30_000) { compose.onAllNodesWithText("Background Category").fetchSemanticsNodes().isNotEmpty() }
