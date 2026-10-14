@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -196,8 +197,17 @@ class DemoBudgetFlowTest {
         compose.waitForTag("schedule-edit-dialog")
         compose.onNodeWithTag("schedule-edit-name").performTextClearance()
         compose.onNodeWithTag("schedule-edit-name").performTextInput("Synthetic Streaming")
+        // Twice a month: several days of the month in one rule.
+        compose.onNodeWithTag("schedule-edit-pattern-days").performScrollTo().performClick()
+        compose.onNodeWithTag("schedule-edit-days").performScrollTo().performTextInput("15, 1")
         compose.onNodeWithTag("schedule-edit-save").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synthetic Streaming")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitOrCapture("schedule-days-described") { compose.onAllNodes(hasText("on the 1st, the 15th", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        // Reopened, the rule reads back into the same form.
+        compose.onNodeWithTag("schedule-edit-demo-schedule-streaming").performClick()
+        compose.waitForTag("schedule-edit-dialog")
+        compose.waitOrCapture("schedule-days-read-back") { compose.onAllNodes(hasTestTag("schedule-edit-days") and hasText("1, 15", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("14b-schedule-days")
     }
 
     @Test

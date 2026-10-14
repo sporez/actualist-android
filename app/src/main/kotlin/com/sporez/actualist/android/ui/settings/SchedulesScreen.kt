@@ -1,5 +1,7 @@
 package com.sporez.actualist.android.ui.settings
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -181,7 +183,7 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
         onDismissRequest = onDismiss,
         title = { Text("Add schedule") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("schedule-dialog")) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()).testTag("schedule-dialog")) {
                 androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("schedule-name"))
                 TextButton(onClick = { picking = "account" }, modifier = Modifier.testTag("schedule-account")) {
                     Text(choices?.first?.firstOrNull { it.id == accountId }?.title ?: "Choose an account")
@@ -358,7 +360,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
         onDismissRequest = onDismiss,
         title = { Text("Edit schedule") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("schedule-edit-dialog")) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()).testTag("schedule-edit-dialog")) {
                 androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("schedule-edit-name"))
                 if (isRange) {
                     Text("This schedule matches an amount range; edit the range in Actual.", style = MaterialTheme.typography.bodySmall)
@@ -411,8 +413,10 @@ data class RepeatOptions(
     val intervalText: String = "1",
     val end: String = "never",
     val endValue: String = "",
-    /** Monthly only: "none" (the start date's day), "lastDay", or "weekday" with [weekday] and [ordinal] (-1 is last). */
+    /** Monthly only: "none" (the start date's day), "lastDay", "days" with [daysText], or "weekday" with [weekday] and [ordinal] (-1 is last). */
     val pattern: String = "none",
+    /** Days of the month for "days", as "1, 15, last". */
+    val daysText: String = "",
     val weekday: com.sporez.actualist.core.rules.ScheduleWeekday = com.sporez.actualist.core.rules.ScheduleWeekday.FRIDAY,
     val ordinal: Int = 1,
     val skipWeekend: Boolean = false,
@@ -430,6 +434,7 @@ data class RepeatOptions(
         }
         val patterns = if (frequency != com.sporez.actualist.core.rules.ScheduleFrequency.MONTHLY) emptyList() else when (pattern) {
             "lastDay" -> listOf(com.sporez.actualist.core.rules.SchedulePattern.DayOfMonth(-1))
+            "days" -> com.sporez.actualist.core.rules.MonthDays.parse(daysText) ?: return null
             "weekday" -> listOf(com.sporez.actualist.core.rules.SchedulePattern.Weekday(weekday, ordinal))
             else -> emptyList()
         }
@@ -443,18 +448,18 @@ data class RepeatOptions(
     }
 
     companion object {
-        /** Null when the rule uses patterns this form cannot show (several, or a fixed day number). */
+        /** Null when the rule uses patterns this form cannot show (several weekdays, or weekdays mixed with days). */
         fun of(recurrence: com.sporez.actualist.core.rules.ScheduleRecurrence): RepeatOptions? {
             val base = when (val ending = recurrence.ending) {
                 is com.sporez.actualist.core.rules.ScheduleEnding.AfterOccurrences -> RepeatOptions(recurrence.interval.toString(), "count", ending.count.toString())
                 is com.sporez.actualist.core.rules.ScheduleEnding.OnDate -> RepeatOptions(recurrence.interval.toString(), "date", ending.dayId)
                 else -> RepeatOptions(recurrence.interval.toString())
             }.copy(skipWeekend = recurrence.skipWeekend, weekendAfter = recurrence.weekendAdjustment == com.sporez.actualist.core.rules.WeekendAdjustment.AFTER)
-            return when (val pattern = recurrence.patterns.singleOrNull()) {
-                null -> if (recurrence.patterns.isEmpty()) base else null
-                is com.sporez.actualist.core.rules.SchedulePattern.DayOfMonth -> if (pattern.day == -1) base.copy(pattern = "lastDay") else null
-                is com.sporez.actualist.core.rules.SchedulePattern.Weekday -> base.copy(pattern = "weekday", weekday = pattern.weekday, ordinal = pattern.ordinal)
-            }
+            if (recurrence.patterns.isEmpty()) return base
+            val pattern = recurrence.patterns.singleOrNull()
+            if (pattern is com.sporez.actualist.core.rules.SchedulePattern.Weekday) return base.copy(pattern = "weekday", weekday = pattern.weekday, ordinal = pattern.ordinal)
+            if (pattern == com.sporez.actualist.core.rules.SchedulePattern.DayOfMonth(-1)) return base.copy(pattern = "lastDay")
+            return com.sporez.actualist.core.rules.MonthDays.format(recurrence.patterns)?.let { base.copy(pattern = "days", daysText = it) }
         }
     }
 }
@@ -484,8 +489,8 @@ private fun RepeatFields(options: RepeatOptions, frequency: String, tag: String,
         }
     }
     if (frequency == "MONTHLY") {
-        Row {
-            for ((key, label) in listOf("none" to "Same day", "lastDay" to "Last day", "weekday" to "A weekday")) {
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+            for ((key, label) in listOf("none" to "Same day", "lastDay" to "Last day", "days" to "Days", "weekday" to "A weekday")) {
                 androidx.compose.material3.FilterChip(
                     selected = options.pattern == key,
                     onClick = { onChange(options.copy(pattern = key)) },
@@ -493,6 +498,16 @@ private fun RepeatFields(options: RepeatOptions, frequency: String, tag: String,
                     modifier = Modifier.padding(end = 4.dp).testTag("$tag-pattern-$key"),
                 )
             }
+        }
+        if (options.pattern == "days") {
+            androidx.compose.material3.OutlinedTextField(
+                options.daysText,
+                { onChange(options.copy(daysText = it)) },
+                label = { Text("Days of the month (e.g. 1, 15, last)") },
+                singleLine = true,
+                isError = options.daysText.isNotBlank() && com.sporez.actualist.core.rules.MonthDays.parse(options.daysText) == null,
+                modifier = Modifier.fillMaxWidth().testTag("$tag-days"),
+            )
         }
         if (options.pattern == "weekday") {
             androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
