@@ -13,8 +13,14 @@ class AppContainer(context: Context) {
     val secrets = SecretStore(context)
     val library = BudgetLibrary(context)
     val server = ServerConnection(settings, secrets, library)
+    val sessions = com.sporez.actualist.android.sync.SessionHub()
 }
 
 class ActualistApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        com.sporez.actualist.android.sync.BackgroundSyncWorker.schedule(this)
+    }
 }

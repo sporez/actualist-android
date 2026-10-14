@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sporez.actualist.android.ActualistApplication
+import com.sporez.actualist.core.demo.DemoBudget
 import com.sporez.actualist.core.store.BudgetSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,13 +34,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (selected == null) {
             _state.value = AppState.Onboarding
         } else {
-            openSession { container.library.open(selected) ?: error("The selected budget is no longer on this device.") }
+            openSession(selected) { container.library.open(selected) ?: error("The selected budget is no longer on this device.") }
         }
     }
 
-    fun openDemo() = openSession { container.library.openDemo() }
+    fun openDemo() = openSession(DemoBudget.FILE_ID) { container.library.openDemo() }
 
-    fun openBudget(id: String) = openSession { container.library.open(id) ?: error("That budget is not on this device.") }
+    fun openBudget(id: String) = openSession(id) { container.library.open(id) ?: error("That budget is not on this device.") }
 
     /** Deletes the demo file and builds a fresh one for today. */
     fun resetDemo() {
@@ -47,10 +48,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = AppState.Loading
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                current?.close()
-                container.library.delete(com.sporez.actualist.core.demo.DemoBudget.FILE_ID)
+                current?.let(container.sessions::release)
+                container.library.delete(DemoBudget.FILE_ID)
             }
-            openSession { container.library.openDemo() }
+            openSession(DemoBudget.FILE_ID) { container.library.openDemo() }
         }
     }
 
@@ -58,17 +59,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val current = (state.value as? AppState.Open)?.session
         container.settings.update { it.copy(selectedBudgetId = null) }
         _state.value = AppState.Onboarding
-        viewModelScope.launch(Dispatchers.IO) { current?.close() }
+        viewModelScope.launch(Dispatchers.IO) { current?.let(container.sessions::release) }
     }
 
-    private fun openSession(load: () -> BudgetSession) {
+    /** Sessions come from the process-wide [com.sporez.actualist.android.sync.SessionHub], shared with background sync. */
+    private fun openSession(budgetId: String, load: () -> BudgetSession) {
         val previous = (state.value as? AppState.Open)?.session
         _state.value = AppState.Loading
         viewModelScope.launch {
             try {
                 val session = withContext(Dispatchers.IO) {
-                    previous?.close()
-                    load()
+                    previous?.let(container.sessions::release)
+                    container.sessions.acquire(budgetId, load)
                 }
                 container.settings.update { it.copy(selectedBudgetId = session.budgetId) }
                 _state.value = AppState.Open(session)
@@ -79,6 +81,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        (state.value as? AppState.Open)?.session?.close()
+        (state.value as? AppState.Open)?.session?.let(container.sessions::release)
     }
 }

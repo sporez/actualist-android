@@ -142,4 +142,42 @@ class ServerSyncFlowTest {
         compose.waitForTag("settings-screen")
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synced", substring = true)).fetchSemanticsNodes().isNotEmpty() }
     }
+
+    @Test
+    fun backgroundSyncPullsAnotherDevicesChangeIntoTheOpenBudget() {
+        publishBudget()
+        compose.waitForTag("onboarding")
+        compose.onNodeWithTag("onboarding-connect").performClick()
+        compose.waitForTag("server-url-field")
+        compose.onNodeWithTag("server-url-field").performTextClearance()
+        compose.onNodeWithTag("server-url-field").performTextInput(server.url)
+        compose.onNodeWithTag("server-password-field").performTextInput(LoopbackActualServer.PASSWORD)
+        compose.onNodeWithTag("server-sign-in").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("Loopback Synthetic Budget").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Loopback Synthetic Budget").performClick()
+        compose.waitForTag("bottom-bar", 60_000)
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("Loopback Groceries").fetchSemanticsNodes().isNotEmpty() }
+
+        // Another device adds a category and syncs it to the server.
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val source = File(context.cacheDir, "loopback-source.sqlite")
+        BudgetDatabase.open(BundledSQLiteDriver(), source.absolutePath, "source0000000001").use { db ->
+            db.commitLocal(
+                listOf(
+                    CellDraft("categories", "cat-bg", "name", SyncValue.text("Background Category")),
+                    CellDraft("categories", "cat-bg", "cat_group", SyncValue.text("grp")),
+                    CellDraft("category_mapping", "cat-bg", "transferId", SyncValue.text("cat-bg")),
+                ),
+            )
+            SyncEngine(db, SyncTransport { body, _ -> server.sync(body) }, SyncConfiguration("loopback-file", "loopback-group", null, null))
+                .sync(LoopbackActualServer.TOKEN)
+        }
+
+        // The worker WorkManager runs in the background syncs it into the session the UI has open.
+        val worker = androidx.work.testing.TestListenableWorkerBuilder<com.sporez.actualist.android.sync.BackgroundSyncWorker>(context).build()
+        val result = kotlinx.coroutines.runBlocking { worker.doWork() }
+        org.junit.Assert.assertEquals(androidx.work.ListenableWorker.Result.success(), result)
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("Background Category").fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("23-background-sync")
+    }
 }
