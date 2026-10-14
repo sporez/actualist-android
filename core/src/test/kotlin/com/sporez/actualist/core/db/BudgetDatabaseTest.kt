@@ -222,9 +222,8 @@ class BudgetDatabaseTest {
     @Test
     fun outboxClockAndMerkleSurviveRestart() {
         val file = TestDatabases.tempFile()
-        val committed: List<SyncMessage>
-        TestDatabases.starter(clock = clock, file = file).use { database ->
-            committed = database.commitLocal(listOf(CellDraft("accounts", "acct-1", "name", SyncValue.text("Before restart"))))
+        val committed: List<SyncMessage> = TestDatabases.starter(clock = clock, file = file).use { database ->
+            database.commitLocal(listOf(CellDraft("accounts", "acct-1", "name", SyncValue.text("Before restart"))))
         }
         TestDatabases.reopen(file, clock = clock).use { database ->
             assertEquals(committed.last().timestamp, database.localClockTimestamp)

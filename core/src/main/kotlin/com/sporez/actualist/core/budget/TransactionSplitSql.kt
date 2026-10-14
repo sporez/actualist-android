@@ -5,7 +5,7 @@ package com.sporez.actualist.core.budget
  * ported from Actualist `TransactionSplitQueryExpressions` (`v_transactions_internal`
  * and `v_transactions_internal_alive`). Callers compose these into their own SQL.
  */
-class TransactionSplitSql(columns: Set<String>, val alias: String = "t") {
+class TransactionSplitSql(private val columns: Set<String>, val alias: String = "t") {
     private fun physical(names: List<String>, fallback: String) = names.firstOrNull { it in columns } ?: fallback
     private fun qualify(expression: String) =
         if (expression == "NULL" || expression == "0" || expression.contains(".") || expression.contains("(")) {

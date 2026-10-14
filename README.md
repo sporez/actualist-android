@@ -27,7 +27,7 @@ installed locally.
   debug APK, runs the JVM tests, uploads the APK (`actualist-android-debug-apk`)
   and test reports.
 - **Android emulator tests** (`.github/workflows/emulator.yml`): manual dispatch
-  and pushes to `main` touching app or core code. Boots an API 34 emulator,
+  at milestones. Boots an API 34 emulator,
   installs the APK, cold-launches it, runs the instrumentation/Compose UI suite
   and uploads screenshots, logcat and results (`emulator-results`).
 

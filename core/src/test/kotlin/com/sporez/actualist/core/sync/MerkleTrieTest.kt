@@ -111,7 +111,7 @@ class MerkleTrieTest {
     fun jsonRoundTripsInUpstreamShapeAndTruncatesToInt32() {
         val trie = trie(pruneMessages).pruned()
         assertEquals(trie, MerkleTrie.fromJson(trie.jsonString))
-        assert(trie.jsonString.contains("\"hash\":2496"))
+        org.junit.Assert.assertTrue(trie.jsonString.contains("\"hash\":2496"))
         val wide = MerkleTrie.fromJson("{\"hash\":4294967297,\"1\":{\"hash\":-5}}")!!
         assertEquals(1, wide.hash)
         assertEquals(-5, wide.children.getValue(1).hash)

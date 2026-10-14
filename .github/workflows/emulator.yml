@@ -1,18 +1,9 @@
 name: Android emulator tests
 
-# Emulator runs are expensive, so they run on demand and on pushes to main that touch
-# app or core code, never on documentation-only changes.
+# Emulator runs are expensive, so they run on demand at milestones rather than on
+# every push. Cheap compile and JVM checks run in build.yml.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "app/**"
-      - "core/src/main/**"
-      - "gradle/**"
-      - "*.gradle.kts"
-      - ".github/workflows/emulator.yml"
-      - "scripts/emulator-tests.sh"
 
 permissions:
   contents: read
