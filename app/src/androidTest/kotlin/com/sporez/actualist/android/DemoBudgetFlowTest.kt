@@ -12,8 +12,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -327,7 +326,7 @@ class DemoBudgetFlowTest {
             tag != null && tag.startsWith("transaction-") && tag != "transaction-list"
         }
         compose.waitUntil(30_000) { compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size >= 2 }
-        compose.onAllNodes(rowMatcher)[0].performTouchInput { longClick() }
+        compose.onAllNodes(rowMatcher)[0].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
         compose.waitForTag("selection-bar")
         compose.onAllNodes(rowMatcher)[1].performClick()
         compose.waitOrCapture("two-selected") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
@@ -335,7 +334,7 @@ class DemoBudgetFlowTest {
         // Clear first, then unclear: whatever the rows' state, the second action changes both.
         compose.onNodeWithTag("batch-clear").performClick()
         compose.waitForGone("selection-bar")
-        compose.onAllNodes(rowMatcher)[0].performTouchInput { longClick() }
+        compose.onAllNodes(rowMatcher)[0].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
         compose.waitForTag("selection-bar")
         compose.onAllNodes(rowMatcher)[1].performClick()
         compose.waitOrCapture("two-selected-again") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }

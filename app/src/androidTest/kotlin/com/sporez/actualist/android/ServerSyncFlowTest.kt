@@ -228,22 +228,30 @@ class ServerSyncFlowTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(returnUrl, returnUrl.startsWith("${context.packageName}://localhost/openid/"))
 
-        // Let the queued click coroutine open the browser before the redirect comes back (or show
-        // that no browser exists); otherwise the browser would open after sign-in and cover the app.
+        // Let the queued click coroutine open the browser, and let the browser finish taking the
+        // foreground (Chrome first dispatches inside this task, then moves to a task of its own),
+        // before the redirect comes back; otherwise the browser would cover the app after sign-in.
+        // If the device has no browser, the screen shows an error instead.
         val monitor = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
-        fun appResumed(): Boolean {
-            var resumed = false
+        fun appStopped(): Boolean {
+            var stopped = false
             InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                resumed = monitor.getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).any { it is MainActivity }
+                stopped = monitor.getActivitiesInStage(androidx.test.runner.lifecycle.Stage.STOPPED).any { it is MainActivity }
             }
-            return resumed
+            return stopped
         }
-        val deadline = System.currentTimeMillis() + 20_000
-        while (appResumed() && System.currentTimeMillis() < deadline) {
-            if (compose.onAllNodes(hasTestTag("server-error")).fetchSemanticsNodes().isNotEmpty()) break
+        val deadline = System.currentTimeMillis() + 30_000
+        var browserOpened = false
+        while (System.currentTimeMillis() < deadline) {
+            if (appStopped()) {
+                browserOpened = true
+                break
+            }
+            if (runCatching { compose.onAllNodes(hasTestTag("server-error")).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)) break
             runCatching { compose.waitForIdle() }
             Thread.sleep(250)
         }
+        if (browserOpened) Thread.sleep(3_000)
 
         fun deliver(uri: String) = context.startActivity(
             android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri))
