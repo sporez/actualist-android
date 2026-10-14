@@ -11,6 +11,11 @@ OUT="emulator-output"
 mkdir -p "$OUT/screenshots"
 
 adb wait-for-device
+# A loaded CI emulator can raise "isn't responding" dialogs for system apps (the launcher)
+# that cover the app under test. Hide them; they are not part of what is being tested.
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell settings put secure anr_show_background 0 || true
+adb shell settings put global show_first_crash_dialog 0 || true
 adb shell getprop ro.build.version.release > "$OUT/device-android-version.txt"
 adb shell getprop ro.product.model >> "$OUT/device-android-version.txt"
 
