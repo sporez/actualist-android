@@ -2,8 +2,8 @@ package com.sporez.actualist.core.widgets
 
 import com.sporez.actualist.core.budget.BudgetMonthCategory
 import com.sporez.actualist.core.transactions.Account
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import org.junit.Test
+import org.junit.Assert.assertEquals
 
 class WidgetShapingTest {
     private fun category(id: String, balance: Long, income: Boolean = false, hidden: Boolean = false) =
