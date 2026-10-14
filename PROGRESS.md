@@ -30,8 +30,8 @@ reconciliation, CSV, payees, bulk month actions. Remaining work is listed below.
 ## Latest CI
 
 - Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38513472719 — 1,122 JVM tests, 0 failures, 0 skipped (count from the run before, same tests); debug APK artifact `actualist-android-debug-apk`.
-- Emulator (API 34): https://github.com/sporez/actualist-android/actions/runs/38512580752 — **9/9 UI tests passed** (onboarding, every main screen, assign, add transaction, rule preview, reconcile, schedules, activity recreation, sign-in/download/edit/sync against a loopback server); process-death relaunch reopened the selected budget.
-- Open question: after reconciling, the display capture (UiAutomation) still showed the pre-reconcile balance while Compose semantics already held the new values (the test asserts them). A run comparing Compose's render with the display capture is in progress.
+- Emulator (API 34): https://github.com/sporez/actualist-android/actions/runs/38513696781 — **9/9 UI tests passed** (second consecutive 9/9; previous https://github.com/sporez/actualist-android/actions/runs/38512580752) (onboarding, every main screen, assign, add transaction, rule preview, reconcile, schedules, activity recreation, sign-in/download/edit/sync against a loopback server); process-death relaunch reopened the selected budget.
+- Resolved: an earlier after-reconcile display capture showed the old balance. Compose's render and a later display capture both show the new state; the stale frame was emulator compositing lag (software GPU) right after the dialog closed. Screenshots now use Compose's render whenever no dialog is open.
 
 ## Bugs found by the emulator (all fixed)
 
