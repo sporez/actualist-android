@@ -66,6 +66,11 @@ class DemoBudgetTest {
             )
             assertEquals("dining", result.categoryId)
             assertEquals(listOf("demo-rule-cafe"), result.appliedRuleIds)
+
+            // Three monthly schedules, created through the ported schedule writer.
+            val schedules = com.sporez.actualist.core.schedules.Schedules(database, TestClock()).list(anchor.toString())
+            assertEquals(setOf("Rent", "StreamFlix", "Phone bill"), schedules.map { it.name }.toSet())
+            assertTrue(schedules.all { it.isRecurring && it.nextDate != null && it.nextDate!! >= anchor.toString() })
         }
     }
 }

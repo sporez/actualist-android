@@ -44,6 +44,7 @@ fun SettingsScreen(
     onResetDemo: () -> Unit,
     onShowRules: () -> Unit,
     onShowPayees: () -> Unit,
+    onShowSchedules: () -> Unit,
 ) {
     val current by settings.settings.collectAsState()
     val syncStatus by session.syncStatus.collectAsState()
@@ -63,6 +64,7 @@ fun SettingsScreen(
                 Row {
                     TextButton(onClick = onShowRules, modifier = Modifier.testTag("show-rules")) { Text("Rules") }
                     TextButton(onClick = onShowPayees, modifier = Modifier.testTag("show-payees")) { Text("Payees") }
+                    TextButton(onClick = onShowSchedules, modifier = Modifier.testTag("show-schedules")) { Text("Schedules") }
                     TextButton(onClick = onCloseBudget, modifier = Modifier.testTag("close-budget")) { Text("Close budget") }
                 }
             }

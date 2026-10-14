@@ -161,6 +161,19 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun showsAndPostsSchedules() {
+        openDemo()
+        compose.onNodeWithTag("open-settings").performClick()
+        compose.waitForTag("settings-screen")
+        compose.onNodeWithTag("show-schedules").performClick()
+        compose.waitForTag("schedules-screen")
+        compose.onNodeWithText("Rent").assertExists()
+        compose.screenshot("14-schedules")
+        compose.onNodeWithTag("schedule-post-demo-schedule-streaming").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Posted StreamFlix")).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()

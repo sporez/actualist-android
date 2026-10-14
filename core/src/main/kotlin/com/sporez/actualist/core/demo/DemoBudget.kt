@@ -71,11 +71,11 @@ object DemoBudget {
     /** Creates the demo budget file at [path], built for [anchor]. */
     fun create(driver: SQLiteDriver, path: String, anchor: LocalDate, clock: Clock = Clock.SYSTEM): BudgetDatabase {
         val database = BudgetDatabase.createStarter(driver, path, NODE_ID, clock)
-        seed(database, anchor)
+        seed(database, anchor, clock)
         return database
     }
 
-    fun seed(database: BudgetDatabase, anchor: LocalDate) {
+    fun seed(database: BudgetDatabase, anchor: LocalDate, clock: Clock = Clock.SYSTEM) {
         val drafts = mutableListOf<CellDraft>()
         fun cell(dataset: String, row: String, column: String, value: SyncValue) {
             drafts += CellDraft(dataset, row, column, value)
@@ -217,7 +217,38 @@ object DemoBudget {
         rule("demo-rule-fuel", "gasstation", "transportation")
 
         database.commitLocal(drafts)
+        seedSchedules(database, anchor, clock)
         database.drainAllPendingLocalMessages()
+    }
+
+    /** Monthly schedules through the ported schedule writer, with deterministic ids. */
+    private fun seedSchedules(database: BudgetDatabase, anchor: LocalDate, clock: Clock) {
+        val schedules = com.sporez.actualist.core.schedules.Schedules(database, clock)
+        val start = YearMonth.from(anchor).minusMonths(6)
+        fun monthly(id: String, name: String, account: String, payee: String, amount: Long, day: Int) {
+            val recurrence = com.sporez.actualist.core.rules.ScheduleRecurrence(
+                startDayId = start.atDay(day).toString(),
+                frequency = com.sporez.actualist.core.rules.ScheduleFrequency.MONTHLY,
+            )
+            schedules.create(
+                com.sporez.actualist.core.schedules.ScheduleCreateCommand(
+                    identity = com.sporez.actualist.core.schedules.ScheduleCreateIdentity("demo-schedule-$id", "demo-schedule-rule-$id", "demo-schedule-next-$id"),
+                    name = name,
+                    definition = com.sporez.actualist.core.schedules.ScheduleDefinitionDraft(
+                        accountId = account,
+                        payeeMappingId = payee,
+                        amount = com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(amount),
+                        dateRule = com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(recurrence, "isapprox"),
+                    ),
+                    postsTransaction = false,
+                    customUpcomingLength = null,
+                    asOfDayId = anchor.toString(),
+                ),
+            )
+        }
+        monthly("rent", "Rent", "checking", "landlord", -180_000, 1)
+        monthly("streaming", "StreamFlix", "credit", "streamflix", -1_599, 5)
+        monthly("phone", "Phone bill", "checking", "telco", -4_500, 9)
     }
 
     /** Small deterministic generator so the demo never depends on platform randomness. */
