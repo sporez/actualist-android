@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -226,6 +227,23 @@ class ServerSyncFlowTest {
         val returnUrl = server.openIdReturnUrl!!
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(returnUrl, returnUrl.startsWith("${context.packageName}://localhost/openid/"))
+
+        // Let the queued click coroutine open the browser before the redirect comes back (or show
+        // that no browser exists); otherwise the browser would open after sign-in and cover the app.
+        val monitor = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+        fun appResumed(): Boolean {
+            var resumed = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                resumed = monitor.getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).any { it is MainActivity }
+            }
+            return resumed
+        }
+        val deadline = System.currentTimeMillis() + 20_000
+        while (appResumed() && System.currentTimeMillis() < deadline) {
+            if (compose.onAllNodes(hasTestTag("server-error")).fetchSemanticsNodes().isNotEmpty()) break
+            runCatching { compose.waitForIdle() }
+            Thread.sleep(250)
+        }
 
         fun deliver(uri: String) = context.startActivity(
             android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri))
