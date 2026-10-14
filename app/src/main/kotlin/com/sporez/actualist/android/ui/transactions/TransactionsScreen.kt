@@ -157,6 +157,10 @@ class TransactionsViewModel(
         _query.value = _query.value.copy(search = text)
     }
 
+    fun setStatus(status: com.sporez.actualist.core.query.StatusFilter) {
+        _query.value = _query.value.copy(status = if (_query.value.status == status) com.sporez.actualist.core.query.StatusFilter.ALL else status)
+    }
+
     fun toggleUncategorized() {
         _query.value = _query.value.copy(uncategorizedOnly = !_query.value.uncategorizedOnly)
     }
@@ -359,6 +363,25 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                             label = { Text("Uncategorized (${list.uncategorizedCount})") },
                             modifier = Modifier.padding(horizontal = 14.dp).testTag("uncategorized-filter"),
                         )
+                    }
+                    androidx.compose.foundation.lazy.LazyRow(
+                        Modifier.fillMaxWidth().testTag("status-filters"),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val statuses = listOf(
+                            com.sporez.actualist.core.query.StatusFilter.UNCLEARED to "Uncleared",
+                            com.sporez.actualist.core.query.StatusFilter.CLEARED to "Cleared",
+                            com.sporez.actualist.core.query.StatusFilter.RECONCILED to "Reconciled",
+                        )
+                        items(statuses, key = { it.first.raw }) { (status, label) ->
+                            FilterChip(
+                                selected = query.status == status,
+                                onClick = { viewModel.setStatus(status) },
+                                label = { Text(label) },
+                                modifier = Modifier.testTag("status-${status.raw}"),
+                            )
+                        }
                     }
                     FilterChipsRow(list, viewModel)
                     list.filterProblem?.let { ErrorBanner(it, Modifier.padding(horizontal = 14.dp)) }

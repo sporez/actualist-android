@@ -59,6 +59,8 @@ data class TransactionQuery(
     val month: String? = null,
     val categoryId: String? = null,
     val limit: Int = 500,
+    /** Actualist's feed status filter (All, Uncleared, Cleared, Reconciled), as the query engine defines it. */
+    val status: com.sporez.actualist.core.query.StatusFilter = com.sporez.actualist.core.query.StatusFilter.ALL,
 )
 
 /**
@@ -154,6 +156,12 @@ class LedgerReads(private val database: BudgetDatabase) {
         query.month?.let {
             predicates += "${normalizedMonthSql(split.date)} = ?"
             args += it
+        }
+        when (query.status) {
+            com.sporez.actualist.core.query.StatusFilter.UNCLEARED -> predicates += "IFNULL(${split.cleared}, 0) = 0 AND IFNULL(${split.reconciled}, 0) = 0"
+            com.sporez.actualist.core.query.StatusFilter.CLEARED -> predicates += "${split.cleared} = 1 AND IFNULL(${split.reconciled}, 0) = 0"
+            com.sporez.actualist.core.query.StatusFilter.RECONCILED -> predicates += "IFNULL(${split.reconciled}, 0) = 1"
+            com.sporez.actualist.core.query.StatusFilter.ALL, com.sporez.actualist.core.query.StatusFilter.UNCATEGORIZED -> {}
         }
         if (query.uncategorizedOnly) {
             predicates += "(${split.category} IS NULL OR ${split.category} = '') AND ${split.isParent} = 0 AND ${split.transferredId} IS NULL AND a.offbudget = 0"
