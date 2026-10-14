@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -91,8 +92,12 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
             is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
             is Loadable.Ready -> {
                 val screen = current.value
+                // Wide windows (tablets, landscape) show the next months beside this one, as Actualist's iPad layout.
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+                val wide = maxWidth >= 840.dp
+                Row(Modifier.fillMaxSize()) {
                 LazyColumn(
-                    Modifier.fillMaxSize().testTag("budget-list"),
+                    Modifier.weight(1.3f).fillMaxHeight().testTag("budget-list"),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 14.dp, end = 14.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
@@ -138,6 +143,9 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                     item(key = "add-category") {
                         TextButton(onClick = { addingCategory = true }, modifier = Modifier.testTag("add-category")) { Text("Add category") }
                     }
+                }
+                if (wide) FollowingMonths(screen, viewModel, collapsed, Modifier.weight(1f).fillMaxHeight())
+                }
                 }
                 val category = selectedCategory?.let { id -> screen.month.category(id) }
                 if (category != null) {
@@ -673,5 +681,50 @@ private fun CategoryNoteField(categoryId: String, viewModel: BudgetViewModel) {
     androidx.compose.material3.OutlinedTextField(text, { text = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("category-notes"))
     if (text.trim() != original.orEmpty()) {
         TextButton(onClick = { viewModel.saveCategoryNote(categoryId, text); original = text.trim() }, modifier = Modifier.testTag("category-notes-save")) { Text("Save notes") }
+    }
+}
+
+
+/** Read-only columns for the next two months: each category's budgeted amount and balance. */
+@Composable
+private fun FollowingMonths(screen: BudgetScreenState, viewModel: BudgetViewModel, collapsed: Map<String, Boolean>, modifier: Modifier) {
+    val state by viewModel.following.collectAsState()
+    val months = (state as? Loadable.Ready)?.value ?: return
+    LazyColumn(
+        modifier.testTag("budget-following"),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(end = 14.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "months") {
+            Row {
+                for (month in months) {
+                    TextButton(onClick = { viewModel.showMonth(month.month) }, modifier = Modifier.weight(1f).testTag("following-${month.month}")) {
+                        Text(monthTitle(month.month), maxLines = 1)
+                    }
+                }
+            }
+        }
+        for (group in screen.month.categoryGroups.filter { !it.hidden }) {
+            item(key = "group-${group.id}") {
+                Text(group.name, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
+            }
+            if (collapsed[group.id] != true) {
+                item(key = "card-${group.id}") {
+                    SectionCard {
+                        for (category in group.categories.filter { !it.hidden }) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                for (month in months) {
+                                    val value = month.category(category.id)
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                        Text(money(value?.budgeted ?: 0L), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        MoneyText(value?.balance ?: 0L, colored = true)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

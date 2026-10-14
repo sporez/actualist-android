@@ -413,6 +413,23 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun wideScreensShowTheNextMonthsBesideThisOne() {
+        openDemo()
+        compose.onNodeWithTag("budget-following").assertDoesNotExist()
+        // A phone in landscape is wider than 840dp: the side-by-side layout appears.
+        compose.activityRule.scenario.onActivity { it.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+        try {
+            compose.waitOrCapture("following-months") { compose.onAllNodes(hasTestTag("budget-following")).fetchSemanticsNodes().isNotEmpty() }
+            compose.screenshot("32-landscape-months")
+            val next = java.time.YearMonth.now().plusMonths(1).toString()
+            compose.onNodeWithTag("following-$next").performClick()
+            compose.waitOrCapture("switched-month") { compose.onAllNodes(hasTestTag("following-${java.time.YearMonth.parse(next).plusMonths(1)}")).fetchSemanticsNodes().isNotEmpty() }
+        } finally {
+            compose.activityRule.scenario.onActivity { it.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+        }
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()

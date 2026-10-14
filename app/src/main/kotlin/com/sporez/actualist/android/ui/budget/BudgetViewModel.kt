@@ -27,6 +27,11 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
         BudgetScreenState(budget.fetchBudgetMonth(month), budget.availableMonths(), budget.monthNote(month))
     }
 
+    /** The two months after the shown one, for the side-by-side columns on wide screens. */
+    val following = reloading(session, _month) { month ->
+        (1..2).map { budget.fetchBudgetMonth(Months.shifted(month, it)) }
+    }
+
     fun showMonth(month: String) {
         _month.value = month
     }
