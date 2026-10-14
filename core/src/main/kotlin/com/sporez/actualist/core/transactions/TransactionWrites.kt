@@ -31,6 +31,20 @@ data class TransactionDraft(
 
 data class SplitDraft(val categoryId: String?, val amount: Long, val notes: String? = null)
 
+/** One child of an edited split; a null [id] adds a new child. */
+data class SplitEdit(val id: String?, val categoryId: String?, val amount: Long, val notes: String? = null)
+
+/** The whole family after an edit; children not listed are removed. */
+data class SplitFamilyEdit(
+    val amount: Long,
+    val splits: List<SplitEdit>,
+    val date: LocalDate? = null,
+    val payeeId: String? = null,
+    val payeeName: String? = null,
+    val notes: String? = null,
+    val cleared: Boolean? = null,
+)
+
 /** Field changes to an existing simple or transfer row. Null leaves a field unchanged. */
 data class TransactionEdit(
     val date: LocalDate? = null,
@@ -424,6 +438,88 @@ class TransactionWrites(
             drafts += pairedDrafts
         }
         return drafts
+    }
+
+    /**
+     * Edits a split family, or turns a simple row into one. Follows Actual's
+     * `updateTransaction` for families: children take the parent's date, account and
+     * cleared state, a child whose payee matched the old parent payee follows the new one,
+     * removed children are tombstoned and new ones are written whole. The children must add
+     * up to the parent amount.
+     */
+    fun updateSplitDrafts(transactionId: String, edit: SplitFamilyEdit): List<CellDraft> {
+        val parent = loadRow(transactionId)?.takeIf { !it.tombstone } ?: throw LocalFirstException.InvalidLocalWrite("missing transaction")
+        if (parent.isChild) throw LocalFirstException.InvalidLocalWrite("edit the whole split transaction instead")
+        if (parent.transferId != null) throw LocalFirstException.InvalidLocalWrite("transfers cannot be split")
+        if (parent.reconciled) throw LocalFirstException.InvalidLocalWrite("reconciled transactions are locked")
+        if (edit.splits.isEmpty()) throw LocalFirstException.InvalidLocalWrite("a split needs at least one category")
+        val total = edit.splits.sumOf { it.amount }
+        if (total != edit.amount) {
+            throw LocalFirstException.InvalidLocalWrite("split amounts ($total) do not add up to the transaction (${edit.amount})")
+        }
+        val accountId = parent.accountId ?: throw LocalFirstException.InvalidLocalWrite("missing account")
+        val offBudget = accountOffBudget(accountId)
+        edit.splits.forEach { split -> if (!offBudget) split.categoryId?.let(::validateCategory) }
+        val children = if (parent.isParent) {
+            sql.query("SELECT id FROM transactions WHERE parent_id = ? AND (tombstone IS NULL OR tombstone = 0)", transactionId)
+                .mapNotNull { it.string("id") }.mapNotNull(::loadRow)
+        } else {
+            emptyList()
+        }
+        if (children.any { it.reconciled }) throw LocalFirstException.InvalidLocalWrite("reconciled transactions are locked")
+
+        val drafts = mutableListOf<CellDraft>()
+        fun cell(id: String, column: String, value: SyncValue) {
+            drafts += CellDraft("transactions", id, column, value)
+        }
+        val date = edit.date?.let(Months::packedDate)?.toLong() ?: parent.date ?: throw LocalFirstException.InvalidLocalWrite("missing date")
+        val cleared = edit.cleared ?: parent.cleared
+        var payee = parent.payeeId
+        if (edit.payeeId != null || !edit.payeeName.isNullOrBlank()) {
+            val (payeeId, payeeDrafts) = resolveOrCreatePayeeDrafts(edit.payeeId, edit.payeeName ?: "")
+            if (transferAccountIdOf(payeeId) != null) throw LocalFirstException.InvalidLocalWrite("transfers cannot be split")
+            drafts += payeeDrafts
+            payee = payeeId
+        }
+        // Parent row.
+        if (!parent.isParent) cell(transactionId, "isParent", SyncValue.bool(true))
+        if (parent.categoryId != null) cell(transactionId, "category", SyncValue.Null)
+        if (date != parent.date) cell(transactionId, "date", SyncValue.int(date))
+        if (edit.amount != parent.amount) cell(transactionId, "amount", SyncValue.int(edit.amount))
+        if (payee != parent.payeeId) cell(transactionId, "description", SyncValue.textOrNull(payee))
+        if (edit.notes != null && edit.notes != (parent.notes ?: "")) cell(transactionId, "notes", if (edit.notes.isEmpty()) SyncValue.Null else SyncValue.text(edit.notes))
+        if (cleared != parent.cleared) cell(transactionId, "cleared", SyncValue.bool(cleared))
+
+        val existing = children.associateBy { it.id }
+        val keptIds = edit.splits.mapNotNull { it.id }.toSet()
+        edit.splits.forEachIndexed { index, split ->
+            val category = if (offBudget) null else split.categoryId
+            val child = split.id?.let { existing[it] }
+            if (child == null) {
+                drafts += snapshotCells(
+                    newId(), accountId, date.toInt(), split.amount, payee, category, split.notes, cleared,
+                    isParent = false, parentId = transactionId, sortOrder = -(index + 1).toDouble(),
+                )
+            } else {
+                val childPayee = if (child.payeeId == parent.payeeId) payee else child.payeeId
+                if (child.date != date) cell(child.id, "date", SyncValue.int(date))
+                if (child.accountId != accountId) cell(child.id, "acct", SyncValue.text(accountId))
+                if (child.cleared != cleared) cell(child.id, "cleared", SyncValue.bool(cleared))
+                if (childPayee != child.payeeId) cell(child.id, "description", SyncValue.textOrNull(childPayee))
+                if (category != child.categoryId) cell(child.id, "category", SyncValue.textOrNull(category))
+                if (split.amount != child.amount) cell(child.id, "amount", SyncValue.int(split.amount))
+                if ((split.notes ?: "") != (child.notes ?: "")) cell(child.id, "notes", SyncValue.textOrNull(split.notes?.ifEmpty { null }))
+            }
+        }
+        for (child in children) {
+            if (child.id !in keptIds) cell(child.id, "tombstone", SyncValue.bool(true))
+        }
+        return drafts
+    }
+
+    fun updateSplit(transactionId: String, edit: SplitFamilyEdit): TransactionWriteResult {
+        val result = database.commitLocal { updateSplitDrafts(transactionId, edit) to Unit }
+        return TransactionWriteResult(transactionId, result.messages)
     }
 
     /** Tombstones a row; a transfer's paired row and a split parent's children go with it. */

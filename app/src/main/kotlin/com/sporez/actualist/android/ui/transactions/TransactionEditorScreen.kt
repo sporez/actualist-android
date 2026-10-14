@@ -128,6 +128,10 @@ class TransactionEditorViewModel(
         }
     }
 
+    fun saveSplit(edit: com.sporez.actualist.core.transactions.SplitFamilyEdit) = launchWrite {
+        session.write { transactionWrites.updateSplit(transactionId!!, edit) }
+    }
+
     fun delete() = launchWrite { session.write { transactionWrites.delete(transactionId!!) } }
 
     private fun launchWrite(block: suspend () -> Unit) {
@@ -144,7 +148,7 @@ class TransactionEditorViewModel(
 
 private val dateLabel = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
 
-private class SplitLine(val categoryId: String?, val amountText: String)
+private class SplitLine(val categoryId: String?, val amountText: String, val id: String? = null)
 
 @Composable
 fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () -> Unit) {
@@ -168,8 +172,13 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     var cleared by rememberSaveable { mutableStateOf(existing?.cleared ?: false) }
     var dateEpochDay by rememberSaveable { mutableStateOf((existing?.date ?: LocalDate.now()).toEpochDay()) }
     var picking by remember { mutableStateOf<String?>(null) }
-    var splitting by rememberSaveable { mutableStateOf(false) }
-    var splits by remember { mutableStateOf(listOf(SplitLine(null, ""), SplitLine(null, ""))) }
+    var splitting by rememberSaveable { mutableStateOf(existing?.isParent == true) }
+    var splits by remember {
+        mutableStateOf(
+            existing?.takeIf { it.isParent }?.children?.map { SplitLine(it.categoryId, Money.format(kotlin.math.abs(it.amount), symbol = "", grouping = false), it.id) }
+                ?: listOf(SplitLine(null, ""), SplitLine(null, "")),
+        )
+    }
 
     val account = loaded.accounts.firstOrNull { it.id == accountId }
     val payee = loaded.payees.firstOrNull { it.id == payeeId }
@@ -182,7 +191,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     val splitAmounts = splits.map { line -> Money.parse(line.amountText)?.let { if (outflow) -kotlin.math.abs(it) else kotlin.math.abs(it) } }
     val splitRemaining = (signed ?: 0) - splitAmounts.sumOf { it ?: 0 }
     val canSave = signed != null && account != null && (!splitting || (splitAmounts.all { it != null } && splitRemaining == 0L))
-    val editingSplit = existing?.isParent == true || existing?.isChild == true
+    val editingSplit = existing?.isChild == true
 
     Column(Modifier.fillMaxSize().testTag("transaction-editor")) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -191,6 +200,19 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             Button(
                 enabled = canSave && !editingSplit,
                 onClick = {
+                    if (existing != null && splitting) {
+                        viewModel.saveSplit(
+                            com.sporez.actualist.core.transactions.SplitFamilyEdit(
+                                amount = signed!!,
+                                splits = splits.mapIndexed { i, line -> com.sporez.actualist.core.transactions.SplitEdit(line.id, line.categoryId, splitAmounts[i]!!) },
+                                date = LocalDate.ofEpochDay(dateEpochDay),
+                                payeeId = payeeId.takeIf { it != existing.payeeId },
+                                payeeName = newPayeeName.takeIf { payeeId == null && it.isNotBlank() },
+                                notes = notes,
+                                cleared = cleared,
+                            ),
+                        )
+                    } else {
                     val draft = TransactionDraft(
                         accountId = accountId!!,
                         date = LocalDate.ofEpochDay(dateEpochDay),
@@ -204,13 +226,14 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                         splits = if (splitting) splits.mapIndexed { i, line -> SplitDraft(line.categoryId, splitAmounts[i]!!) } else emptyList(),
                     )
                     viewModel.save(draft)
+                    }
                 },
                 modifier = Modifier.testTag("editor-save"),
             ) { Text("Save") }
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             error?.let { ErrorBanner(it, Modifier.testTag("editor-error")) }
-            if (editingSplit) ErrorBanner("Editing split transactions is not supported yet. You can delete and re-create it.")
+            if (editingSplit) ErrorBanner("This is part of a split. Open the whole transaction to edit it.")
             if (existing?.reconciled == true) ErrorBanner("This transaction is reconciled and locked.")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 SegmentedButton(selected = outflow, onClick = { outflow = true }, shape = SegmentedButtonDefaults.itemShape(0, 2), modifier = Modifier.testTag("editor-outflow")) { Text("Outflow") }
@@ -228,7 +251,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 Checkbox(checked = cleared, onCheckedChange = { cleared = it }, modifier = Modifier.testTag("editor-cleared"))
                 Text("Cleared")
             }
-            if (existing == null && !isTransfer && !offBudget) {
+            if (!isTransfer && !offBudget && existing?.isParent != true && existing?.isTransfer != true) {
                 OutlinedButton(onClick = { splitting = !splitting }, modifier = Modifier.fillMaxWidth().testTag("editor-split-toggle")) {
                     Text(if (splitting) "Don't split" else "Split across categories")
                 }
@@ -238,7 +261,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             FieldButton("Split ${index + 1} category", loaded.categories.firstOrNull { it.id == line.categoryId }?.name ?: "Uncategorized", "split-category-$index") { picking = "split-$index" }
-                            AmountField(line.amountText, { text -> splits = splits.toMutableList().also { it[index] = SplitLine(line.categoryId, text) } }, label = "Amount", tag = "split-amount-$index")
+                            AmountField(line.amountText, { text -> splits = splits.toMutableList().also { it[index] = SplitLine(line.categoryId, text, line.id) } }, label = "Amount", tag = "split-amount-$index")
                         }
                     }
                 }
@@ -318,7 +341,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 options = listOf(PickerOption(null, "Uncategorized")) + loaded.categories.map { PickerOption(it.id, it.name, it.groupName) },
                 searchable = true,
                 onPick = { option ->
-                    splits = splits.toMutableList().also { it[index] = SplitLine(option.id, it[index].amountText) }
+                    splits = splits.toMutableList().also { it[index] = SplitLine(option.id, it[index].amountText, it[index].id) }
                     picking = null
                 },
                 onDismiss = { picking = null },
