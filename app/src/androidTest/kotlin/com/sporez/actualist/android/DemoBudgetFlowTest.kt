@@ -280,6 +280,10 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("category-template").performClick()
         compose.waitForTag("template-amount")
         compose.onNodeWithTag("template-amount").performTextInput("80.00")
+        // A second entry: a balance goal next to the monthly amount (it assigns nothing itself).
+        compose.onNodeWithTag("template-add-entry").performClick()
+        compose.waitForTag("template-amount-1")
+        compose.onNodeWithTag("template-amount-1").performTextInput("500.00")
         compose.screenshot("19-template-editor")
         compose.onNodeWithTag("template-save").performClick()
         compose.waitForGone("category-sheet")
