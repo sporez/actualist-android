@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -80,6 +81,25 @@ class TransactionsViewModel(private val session: BudgetSession, accountId: Strin
 
     fun toggleUncategorized() {
         _query.value = _query.value.copy(uncategorizedOnly = !_query.value.uncategorizedOnly)
+    }
+
+    /** Cleared balance for the reconcile dialog, read fresh each time it opens. */
+    suspend fun clearedBalance(): Long? = _query.value.accountId?.let { id -> session.read { com.sporez.actualist.core.transactions.Reconciliation(database, clock).snapshot(id).clearedBalance } }
+
+    fun reconcile(bankBalance: Long, finish: Boolean) {
+        val accountId = _query.value.accountId ?: return
+        viewModelScope.launch {
+            try {
+                session.write {
+                    val reconciliation = com.sporez.actualist.core.transactions.Reconciliation(database, clock)
+                    reconciliation.createAdjustment(accountId, bankBalance, java.time.LocalDate.now())
+                    if (finish) reconciliation.finish(accountId, bankBalance)
+                }
+                messages.show(if (finish) "Reconciled and locked" else "Adjustment added")
+            } catch (error: Exception) {
+                messages.show(error.message ?: "Reconciliation failed.")
+            }
+        }
     }
 
     fun exportFilename(): String = com.sporez.actualist.core.csv.CsvExport.filename(System.currentTimeMillis())
@@ -141,11 +161,14 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
     val resolver = LocalContext.current.contentResolver
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let { viewModel.exportCsv(resolver, it) } }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importCsv(resolver, it) } }
+    var reconciling by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (reconciling) ReconcileDialog(viewModel) { reconciling = false }
     Box(Modifier.fillMaxSize().testTag("transactions-screen")) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { exportLauncher.launch(viewModel.exportFilename()) }, modifier = Modifier.testTag("export-csv")) { Text("Export CSV") }
                 if (query.accountId != null) {
+                    TextButton(onClick = { reconciling = true }, modifier = Modifier.testTag("reconcile")) { Text("Reconcile") }
                     TextButton(onClick = { importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }, modifier = Modifier.testTag("import-csv")) { Text("Import CSV") }
                 }
                 message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).testTag("transactions-message")) }
@@ -249,4 +272,37 @@ private fun TransactionItem(row: TransactionRow, showAccount: Boolean, onOpen: (
             }
         }
     }
+}
+
+
+@Composable
+private fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
+    var cleared by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Long?>(null) }
+    var balanceText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(Unit) { cleared = viewModel.clearedBalance() }
+    val bank = com.sporez.actualist.core.money.Money.parse(balanceText)
+    val difference = if (bank != null && cleared != null) bank - cleared!! else null
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reconcile account") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Cleared balance: " + (cleared?.let { com.sporez.actualist.core.money.Money.format(it) } ?: "…"), modifier = Modifier.testTag("reconcile-cleared"))
+                com.sporez.actualist.android.ui.components.AmountField(balanceText, { balanceText = it }, label = "Bank statement balance", tag = "reconcile-balance")
+                difference?.let {
+                    Text(
+                        if (it == 0L) "Balanced. Finishing locks every cleared transaction." else "Difference ${com.sporez.actualist.core.money.Money.format(it)} will be added as a cleared adjustment.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("reconcile-difference"),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = bank != null && cleared != null, onClick = { viewModel.reconcile(bank!!, finish = true); onDismiss() }, modifier = Modifier.testTag("reconcile-finish")) {
+                Text(if (difference == 0L) "Finish" else "Adjust and finish")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
