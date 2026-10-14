@@ -1,6 +1,8 @@
 package com.sporez.actualist.android.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,7 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 data class RuleSummary(val id: String, val stage: String, val conditions: List<String>, val join: String, val actions: List<String>)
 
-/** Read-only list of the budget's rules, with ids resolved to names. Editing rules is not ported. */
+/** The budget's rules, with ids resolved to names. Tap one to edit it; [RuleEditorScreen] edits. */
 class RulesViewModel(session: BudgetSession) : ViewModel() {
     val rules = reloading(session, MutableStateFlow(Unit)) {
         val names = HashMap<String, String>()
@@ -63,24 +65,26 @@ class RulesViewModel(session: BudgetSession) : ViewModel() {
 }
 
 @Composable
-fun RulesScreen(viewModel: RulesViewModel) {
+fun RulesScreen(viewModel: RulesViewModel, onEdit: (String?) -> Unit) {
     val state by viewModel.rules.collectAsState()
     when (val current = state) {
         Loadable.Loading -> LoadingBox()
         is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
-        is Loadable.Ready -> if (current.value.isEmpty()) {
-            MessageBox("No rules", "Rules created in Actual appear here and run in the transaction editor.")
-        } else {
-            LazyColumn(Modifier.fillMaxSize().testTag("rules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(current.value, key = { it.id }) { rule ->
-                    SectionCard {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("If (${rule.join})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            rule.conditions.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                            Text("Then", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            rule.actions.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                            Text("Stage: ${rule.stage}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+        is Loadable.Ready -> LazyColumn(Modifier.fillMaxSize().testTag("rules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                androidx.compose.material3.OutlinedButton(onClick = { onEdit(null) }, modifier = Modifier.fillMaxWidth().testTag("rule-add")) { Text("Add rule") }
+            }
+            if (current.value.isEmpty()) {
+                item { Text("No rules yet. Rules run in the transaction editor, on CSV import and on reconciliation adjustments.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            items(current.value, key = { it.id }) { rule ->
+                SectionCard(Modifier.clickable { onEdit(rule.id) }.testTag("rule-${rule.id}")) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("If (${rule.join})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        rule.conditions.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                        Text("Then", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        rule.actions.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                        Text("Stage: ${rule.stage}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

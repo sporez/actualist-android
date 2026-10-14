@@ -104,6 +104,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                         when {
                             route == "settings" -> "Settings"
                             route == "rules" -> "Rules"
+                            route.startsWith("rule-edit") -> "Rule"
                             route == "payees" -> "Payees"
                             route == "schedules" -> "Schedules"
                             route.startsWith("account/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Account"
@@ -198,7 +199,15 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
             composable("rules") {
                 val vm = viewModel(key = "rules-$key") { com.sporez.actualist.android.ui.settings.RulesViewModel(session) }
-                com.sporez.actualist.android.ui.settings.RulesScreen(vm)
+                com.sporez.actualist.android.ui.settings.RulesScreen(vm) { id -> navController.navigate(if (id == null) "rule-edit" else "rule-edit?id=${encode(id)}") }
+            }
+            composable(
+                "rule-edit?id={id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { backStack ->
+                val id = backStack.arguments?.getString("id")
+                val vm = viewModel(key = "rule-edit-$id-$key") { com.sporez.actualist.android.ui.settings.RuleEditorViewModel(session, id) }
+                com.sporez.actualist.android.ui.settings.RuleEditorScreen(vm) { navController.popBackStack() }
             }
             composable("server") {
                 ServerScreen(container.server, onDownloaded = { app.openBudget(it.id) }, onCancel = { navController.popBackStack() })
