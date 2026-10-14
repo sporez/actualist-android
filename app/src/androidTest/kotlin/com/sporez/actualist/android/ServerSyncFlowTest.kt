@@ -179,18 +179,18 @@ class ServerSyncFlowTest {
         // Run the worker off the test thread and keep pumping the composition: under the v2 test
         // API the screen's own sync coroutine resumes only when the test thread advances it, and it
         // may hold the session's write lock the worker needs (blocking here would deadlock).
-        var result: androidx.work.ListenableWorker.Result? = null
+        val result = java.util.concurrent.atomic.AtomicReference<androidx.work.ListenableWorker.Result?>(null)
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
         Thread {
             try {
-                result = kotlinx.coroutines.runBlocking { worker.doWork() }
+                result.set(kotlinx.coroutines.runBlocking { worker.doWork() })
             } catch (error: Throwable) {
                 failure.set(error)
             }
         }.start()
-        compose.waitUntil(60_000) { result != null || failure.get() != null }
+        compose.waitUntil(60_000) { result.get() != null || failure.get() != null }
         failure.get()?.let { throw it }
-        org.junit.Assert.assertEquals(androidx.work.ListenableWorker.Result.success(), result)
+        org.junit.Assert.assertEquals(androidx.work.ListenableWorker.Result.success(), result.get())
         compose.waitUntil(30_000) { compose.onAllNodesWithText("Background Category").fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("23-background-sync")
     }
