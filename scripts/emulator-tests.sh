@@ -11,6 +11,16 @@ OUT="emulator-output"
 mkdir -p "$OUT/screenshots"
 
 adb wait-for-device
+# Let a freshly booted emulator finish starting up before anything is measured: an activity
+# launched while the system is still settling was once recreated mid-test.
+for _ in $(seq 1 90); do
+  [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+  sleep 2
+done
+adb shell input keyevent 82 || true
+# Fixed portrait (tests that need landscape request it themselves).
+adb shell settings put system accelerometer_rotation 0 || true
+adb shell settings put system user_rotation 0 || true
 # A loaded CI emulator can raise "isn't responding" dialogs for system apps (the launcher)
 # that cover the app under test. Hide them; they are not part of what is being tested.
 adb shell settings put global hide_error_dialogs 1 || true
@@ -33,6 +43,9 @@ if ! adb shell pidof "$APP_ID" > /dev/null; then
   exit 1
 fi
 adb shell am force-stop "$APP_ID"
+
+# A short settle after the smoke launch, so the suite does not start during background dexopt.
+sleep 15
 
 # Instrumentation and Compose UI tests. When the job runs a disposable Actual server, expose
 # it on the device's own loopback (the only place the app allows plain http) and pass it on.
