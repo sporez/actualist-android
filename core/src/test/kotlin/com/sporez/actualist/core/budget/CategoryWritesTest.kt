@@ -15,9 +15,9 @@ class CategoryWritesTest {
     fun shoveMatchesActualistsSortOrderRules() {
         assertEquals(SortOrder.Result(16_384.0, emptyList()), SortOrder.shove(emptyList(), null))
         val items = listOf(SortOrder.Item("a", 16_384.0), SortOrder.Item("b", 32_768.0))
-        assertEquals(8_192.0, SortOrder.shove(items, "a").sortOrder)
-        assertEquals(24_576.0, SortOrder.shove(items, "b").sortOrder)
-        assertEquals(49_152.0, SortOrder.shove(items, null).sortOrder)
+        assertEquals(8_192.0, SortOrder.shove(items, "a").sortOrder, 0.0)
+        assertEquals(24_576.0, SortOrder.shove(items, "b").sortOrder, 0.0)
+        assertEquals(49_152.0, SortOrder.shove(items, null).sortOrder, 0.0)
         // No room left before the target: the target and later rows are renumbered.
         val tight = listOf(SortOrder.Item("a", 1.0), SortOrder.Item("b", 2.0))
         val result = SortOrder.shove(tight, "a")
