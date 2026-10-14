@@ -53,13 +53,15 @@ data class RuleLine(val field: String, val op: String, val value: String)
 
 /** The fields and operators this editor offers (a subset of what the engine evaluates). */
 object RuleEditorFields {
-    val conditionFields = listOf("payee", "imported_payee", "notes", "account", "category", "amount")
+    val conditionFields = listOf("payee", "imported_payee", "notes", "account", "category", "amount", "date")
     val actionFields = listOf("category", "payee", "notes", "cleared")
 
     fun conditionOps(field: String): List<String> = when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf")
         com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "isNot", "contains", "doesNotContain", "matches")
         com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "isapprox", "isbetween", "gt", "gte", "lt", "lte")
+        // Plain dates only; Actual's recurring date values stay view-only.
+        com.sporez.actualist.core.rules.RuleValueKind.DATE -> listOf("is", "isapprox", "gt", "gte", "lt", "lte")
         else -> emptyList()
     }
 
@@ -92,12 +94,21 @@ object RuleEditorFields {
     /** Whether a condition's typed value is complete for its field and operator. */
     fun conditionValid(line: RuleLine): Boolean = when {
         line.value.isBlank() -> false
+        RuleFields.valueKind(line.field) == com.sporez.actualist.core.rules.RuleValueKind.DATE ->
+            com.sporez.actualist.core.rules.RuleCondition(line.field, line.op, RuleValue.Text(line.value.trim()), "date").canRoundTripAndEvaluate
         RuleFields.valueKind(line.field) != com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> true
         line.op == "isbetween" -> rangeParts(line.value).let { (low, high) -> Money.parse(low) != null && Money.parse(high) != null }
         else -> Money.parse(line.value) != null
     }
 
-    fun opLabel(op: String) = when (op) {
+    fun opLabel(op: String, field: String = "") = if (field == "date") when (op) {
+        "isapprox" -> "is around"
+        "gt" -> "is after"
+        "gte" -> "is on or after"
+        "lt" -> "is before"
+        "lte" -> "is on or before"
+        else -> op
+    } else when (op) {
         "isNot" -> "is not"
         "oneOf" -> "is one of"
         "notOneOf" -> "is not one of"
@@ -189,6 +200,7 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
     } else when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> RuleValue.Num((Money.parse(text) ?: error("Enter an amount like -12.34")).toDouble())
         com.sporez.actualist.core.rules.RuleValueKind.BOOLEAN -> RuleValue.Bool(text == "true")
+        com.sporez.actualist.core.rules.RuleValueKind.DATE -> RuleValue.Text(text.trim())
         else -> RuleValue.Text(text)
     }
 
@@ -326,7 +338,7 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                 onDismiss = { picking = null },
             ) else PickerDialog(
                 title = "Operator",
-                options = RuleEditorFields.conditionOps(line.field).map { PickerOption(it, RuleEditorFields.opLabel(it)) },
+                options = RuleEditorFields.conditionOps(line.field).map { PickerOption(it, RuleEditorFields.opLabel(it, line.field)) },
                 onPick = { option ->
                     val op = option.id!!
                     // Switching between a single value and a list or range clears the value.
@@ -379,7 +391,7 @@ private fun LineCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = { onPick("field") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-field")) { Text(RuleEditorFields.label(line.field)) }
                 if (kind == "condition") {
-                    TextButton(onClick = { onPick("op") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-op")) { Text(RuleEditorFields.opLabel(line.op)) }
+                    TextButton(onClick = { onPick("op") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-op")) { Text(RuleEditorFields.opLabel(line.op, line.field)) }
                 } else if (line.field == "notes") {
                     TextButton(onClick = { onPick("op") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-op")) { Text(RuleEditorFields.actionOpLabel(line.op)) }
                 } else {
@@ -408,7 +420,13 @@ private fun LineCard(
                     onValueChange = { onChange(line.copy(value = it)) },
                     enabled = enabled,
                     singleLine = true,
-                    label = { Text(if (valueKind == com.sporez.actualist.core.rules.RuleValueKind.NUMBER) "Amount (negative for outflow)" else "Text") },
+                    label = {
+                        Text(when (valueKind) {
+                            com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> "Amount (negative for outflow)"
+                            com.sporez.actualist.core.rules.RuleValueKind.DATE -> "Date (YYYY-MM-DD, YYYY-MM or YYYY)"
+                            else -> "Text"
+                        })
+                    },
                     modifier = Modifier.fillMaxWidth().testTag("rule-$kind-$index-text"),
                 )
             }

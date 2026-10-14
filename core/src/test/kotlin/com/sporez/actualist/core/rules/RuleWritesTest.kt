@@ -89,6 +89,28 @@ class RuleWritesTest {
     }
 
     @Test
+    fun plainDateConditionsRoundTripAndMatch() {
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
+            val draft = RuleDraft(
+                stage = RuleStage.NORMAL,
+                join = RuleConditionJoin.AND,
+                conditions = listOf(RuleCondition("date", "gte", RuleValue.Text("2026-10-10"), "date")),
+                actions = listOf(RuleAction("set", "notes", RuleValue.Text("Since the tenth"), "string")),
+            )
+            val month = draft.copy(conditions = listOf(RuleCondition("date", "is", RuleValue.Text("2026-09"), "date")), actions = listOf(RuleAction("set", "notes", RuleValue.Text("September"), "string")))
+            assertTrue(draft.canRoundTripAndEvaluate && month.canRoundTripAndEvaluate)
+            val (id, _) = RuleWrites(database) { "rule-date" }.create(draft)
+            RuleWrites(database) { "rule-month" }.create(month)
+            val engine = RuleEngine(database)
+            assertEquals(draft, engine.fetchRules().first { it.id == id }.draft)
+            assertEquals("Since the tenth", engine.run(RuleTransactionInput(accountId = "checking", date = LocalDate.of(2026, 10, 10), amount = -100), day).notes)
+            assertTrue(id !in engine.run(RuleTransactionInput(accountId = "checking", date = LocalDate.of(2026, 10, 9), amount = -100), day).appliedRuleIds)
+            assertEquals("September", engine.run(RuleTransactionInput(accountId = "checking", date = LocalDate.of(2026, 9, 30), amount = -100), day).notes)
+            assertTrue(!RuleCondition("date", "gt", RuleValue.Text("2026-13-01"), "date").canRoundTripAndEvaluate)
+        }
+    }
+
+    @Test
     fun amountBetweenRoundTripsAndMatchesEitherOrder() {
         DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
             val range = RuleValue.Obj(mapOf("num1" to RuleValue.Num(-1_000.0), "num2" to RuleValue.Num(-5_000.0)))
