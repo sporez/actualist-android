@@ -263,18 +263,24 @@ class BudgetReads(private val database: BudgetDatabase) {
         return Timeline(snapshots, previous)
     }
 
-    fun categoryBudgets(month: String): Map<String, Pair<Long, Boolean>> = categoryBudgetsByMonth()[month].orEmpty()
+    /** One month's budget rows (month-filtered, so a month view never scans every month). */
+    fun categoryBudgets(month: String): Map<String, Pair<Long, Boolean>> = budgetRows(month)[month].orEmpty()
 
-    fun categoryBudgetsByMonth(): Map<String, Map<String, Pair<Long, Boolean>>> {
+    fun categoryBudgetsByMonth(): Map<String, Map<String, Pair<Long, Boolean>>> = budgetRows(null)
+
+    private fun budgetRows(onlyMonth: String?): Map<String, Map<String, Pair<Long, Boolean>>> {
         val table = budgetTable().tableName
         if (!database.tableExists(table)) return emptyMap()
         val columns = database.columnSet(table)
         val amount = if ("amount" in columns) "amount" else "0"
         val carryover = if ("carryover" in columns) "carryover" else "0"
         val result = HashMap<String, HashMap<String, Pair<Long, Boolean>>>()
+        val monthFilter = if (onlyMonth != null) " AND ${normalizedMonthSql("month")} = ?" else ""
+        val args: Array<Any?> = if (onlyMonth != null) arrayOf(onlyMonth) else emptyArray()
         for (row in sql.query(
             "SELECT ${normalizedMonthSql("month")} AS month, category AS category_id, $amount AS amount, $carryover AS carryover " +
-                "FROM ${Sql.quoted(table)} WHERE month IS NOT NULL",
+                "FROM ${Sql.quoted(table)} WHERE month IS NOT NULL$monthFilter",
+            *args,
         )) {
             val month = row.string("month") ?: continue
             val category = row.string("category_id") ?: continue
@@ -283,10 +289,13 @@ class BudgetReads(private val database: BudgetDatabase) {
         return result
     }
 
-    fun categorySpending(month: String): Map<String, Long> = categorySpendingByMonth()[month].orEmpty()
+    /** One month's activity per category (month-filtered). */
+    fun categorySpending(month: String): Map<String, Long> = spendingRows(month)[month].orEmpty()
 
     /** Live non-parent on-budget activity per month and category, through `category_mapping`. */
-    fun categorySpendingByMonth(): Map<String, Map<String, Long>> {
+    fun categorySpendingByMonth(): Map<String, Map<String, Long>> = spendingRows(null)
+
+    private fun spendingRows(onlyMonth: String?): Map<String, Map<String, Long>> {
         if (!database.tableExists("transactions") || !database.tableExists("accounts")) return emptyMap()
         val split = TransactionSplitSql(database.columnSet("transactions"))
         val mappingColumn = categoryMappingTransferColumn()
@@ -304,8 +313,10 @@ class BudgetReads(private val database: BudgetDatabase) {
             WHERE ${split.liveInlinePredicate()}
               AND ${split.category} IS NOT NULL
               AND a.offbudget = 0
+              ${if (onlyMonth != null) "AND $month = ?" else ""}
             GROUP BY $month, $mapped
             """.trimIndent(),
+            *(if (onlyMonth != null) arrayOf<Any?>(onlyMonth) else emptyArray()),
         )) {
             val m = row.string("month") ?: continue
             val category = row.string("category_id") ?: continue
