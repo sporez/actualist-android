@@ -41,7 +41,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Reconciliation | Done | from Actualist's Reconciliation cases |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
 | Payees: rename, merge, category-learning switches | Done | unit tests |
-| Reports: net worth, cash flow, spending, Budget vs Spent; month switcher and drill-down to transactions | Done | device test |
+| Reports: net worth, cash flow, spending, Budget vs Spent; month switcher and drill-down to transactions; Report Explorer (range, accounts, categories, transfers) | Done | explorer totals checked against ledger sums (JVM); device test |
 | Undo / redo of every local edit, History screen | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
 | SimpleFIN bank sync (through the Actual server, or the device bridge when the server does not host it, as Actualist) | Done: link, sync, unlink, connect on device | 5 provider-mapping cases; unit tests; real-server status check |
 | Background sync (WorkManager, hourly, shared session) | Done | device test |
