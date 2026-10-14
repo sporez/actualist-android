@@ -135,6 +135,135 @@ class BudgetWrites(private val database: BudgetDatabase) {
 
     // endregion
 
+    // region Bulk month actions (Actual v26.10.0 `budget/actions.ts`; Actualist has none of these)
+
+    /** `copyPreviousMonth`: last month's budgets for visible expense categories. */
+    fun copyPreviousMonthDrafts(month: String): List<CellDraft> {
+        val monthValue = Months.actualMonthValue(month)
+        val table = reads.budgetTable()
+        val columns = database.requiredColumns(table.tableName, listOf("month", "category", "amount"))
+        val previous = Months.shifted(monthValue, -1)
+        return sql.query(
+            """
+            SELECT b.category AS category, b.amount AS amount, c.is_income AS is_income, c.hidden AS hidden, g.hidden AS group_hidden
+            FROM ${Sql.quoted(table.tableName)} b
+            LEFT JOIN categories c ON b.category = c.id
+            LEFT JOIN category_groups g ON c.cat_group = g.id
+            WHERE c.tombstone = 0 AND b.month = ?
+            """.trimIndent(),
+            previous,
+        ).filter { row ->
+            !(row.bool("is_income") && table == BudgetTable.ENVELOPE) && !row.bool("hidden") && !row.bool("group_hidden")
+        }.flatMap { row -> assignCellDrafts(row.string("category")!!, row.longOr0("amount"), monthValue, table, columns) }
+    }
+
+    /** `setZero`: every live expense category (income too on tracking budgets) to zero. */
+    fun setZeroDrafts(month: String): List<CellDraft> {
+        val monthValue = Months.actualMonthValue(month)
+        val table = reads.budgetTable()
+        val columns = database.requiredColumns(table.tableName, listOf("month", "category", "amount"))
+        return sql.query("SELECT id, is_income FROM categories WHERE tombstone = 0 ORDER BY id")
+            .filter { !(it.bool("is_income") && table == BudgetTable.ENVELOPE) }
+            .flatMap { assignCellDrafts(it.string("id")!!, 0, monthValue, table, columns) }
+    }
+
+    /**
+     * `set3MonthAvg`: each visible category's average activity over up to three months before
+     * [month] (never past the month before [currentMonth], never before its first activity),
+     * sign-flipped for expenses and rounded like JavaScript `Math.round`.
+     */
+    fun setAverageDrafts(month: String, currentMonth: String, maxMonths: Int = 3): List<CellDraft> {
+        val monthValue = Months.actualMonthValue(month)
+        val table = reads.budgetTable()
+        val columns = database.requiredColumns(table.tableName, listOf("month", "category", "amount"))
+        val categories = sql.query(
+            "SELECT c.id AS id, c.is_income AS is_income FROM categories c LEFT JOIN category_groups g ON c.cat_group = g.id " +
+                "WHERE c.tombstone = 0 AND c.hidden = 0 AND g.hidden = 0 ORDER BY c.id",
+        )
+        val spendingCache = HashMap<String, Map<String, Long>>()
+        return categories.filter { !(it.bool("is_income") && table == BudgetTable.ENVELOPE) }.flatMap { row ->
+            val id = row.string("id")!!
+            var average = categoryAverage(month, currentMonth, maxMonths, id, table, spendingCache)
+            if (!row.bool("is_income")) average = -average
+            assignCellDrafts(id, average, monthValue, table, columns)
+        }
+    }
+
+    private fun categoryAverage(month: String, currentMonth: String, maxMonths: Int, categoryId: String, table: BudgetTable, cache: HashMap<String, Map<String, Long>>): Long {
+        val previous = Months.previous(month)
+        val firstMonth = if (previous >= currentMonth) Months.previous(currentMonth) else previous
+        val endValue = Months.monthInt(firstMonth)
+        val split = TransactionSplitSql(database.columnSet("transactions"))
+        val firstActivity = sql.queryLong(
+            """
+            SELECT MIN(month) FROM (
+              SELECT month FROM ${Sql.quoted(table.tableName)} WHERE category = ? AND month <= ?
+              UNION ALL
+              SELECT CAST(${split.date} / 100 AS INTEGER) AS month
+              FROM transactions t ${split.parentJoin()} LEFT JOIN accounts a ON a.id = ${split.account}
+              WHERE ${split.liveEffectivePredicate()} AND ${split.category} = ? AND CAST(${split.date} / 100 AS INTEGER) <= ? AND a.offbudget = 0
+            )
+            """.trimIndent(),
+            categoryId, endValue, categoryId, endValue,
+        )?.let { Months.monthId(it.toInt()) }
+        val months = mutableListOf<String>()
+        var cursor = firstMonth
+        repeat(maxMonths) {
+            if (firstActivity != null && cursor < firstActivity) return@repeat
+            months += cursor
+            cursor = Months.previous(cursor)
+        }
+        // `return@repeat` only skips an iteration; once below the first activity every later month is too.
+        val counted = if (firstActivity == null) months else months.filter { it >= firstActivity }
+        if (counted.isEmpty()) return 0
+        val sum = counted.sumOf { m -> cache.getOrPut(m) { reads.categorySpending(m) }[categoryId] ?: 0L }
+        return jsRound(sum.toDouble() / counted.size)
+    }
+
+    /** JavaScript `Math.round`: halves round toward positive infinity. */
+    private fun jsRound(value: Double): Long = Math.floor(value + 0.5).toLong()
+
+    /** `copyUntilYearEnd`: this month's budget into each later month through December (and [createdThrough]). */
+    fun copyUntilYearEndDrafts(month: String, categoryId: String, createdThrough: String): List<CellDraft> {
+        val monthValue = Months.actualMonthValue(month)
+        val table = reads.budgetTable()
+        val columns = database.requiredColumns(table.tableName, listOf("month", "category", "amount"))
+        validateCategory(categoryId)
+        val amount = reads.categoryBudgets(month)[categoryId]?.first ?: 0L
+        val yearEnd = monthValue / 100 * 100 + 12
+        val last = minOf(yearEnd, Months.monthInt(createdThrough))
+        val drafts = mutableListOf<CellDraft>()
+        var cursor = Months.next(monthValue)
+        while (cursor <= last) {
+            drafts += assignCellDrafts(categoryId, amount, cursor, table, columns)
+            cursor = Months.next(cursor)
+        }
+        return drafts
+    }
+
+    /**
+     * `coverOverbudgeted`: takes up to the To Budget shortfall (or [amount]) from a category's
+     * positive leftover. Actual also writes a "Reassigned" month note (OP-32: not written here).
+     */
+    fun coverOverbudgetedDrafts(month: String, categoryId: String, amount: Long? = null): List<CellDraft> {
+        val monthValue = Months.actualMonthValue(month)
+        val table = reads.budgetTable()
+        if (table == BudgetTable.TRACKING) throw LocalFirstException.UnsupportedBudgetAction()
+        val columns = database.requiredColumns(table.tableName, listOf("month", "category", "amount"))
+        validateCategory(categoryId)
+        val budgetMonth = reads.fetchBudgetMonth(month)
+        val category = budgetMonth.category(categoryId) ?: throw LocalFirstException.InvalidLocalWrite("missing category")
+        val amountToCover = amount?.let { -it } ?: budgetMonth.toBudget
+        if (amountToCover >= 0 || category.balance <= 0) return emptyList()
+        val coverable = minOf(kotlin.math.abs(amountToCover), category.balance)
+        return assignCellDrafts(categoryId, category.budgeted - coverable, monthValue, table, columns)
+    }
+
+    fun applyBulk(month: String, block: BudgetWrites.() -> List<CellDraft>): List<SyncMessage> =
+        database.commitLocal { block() to Unit }.messages
+
+    // endregion
+
     // region Carryover
 
     /** Actual applies rollover changes through the existing budget horizon. */

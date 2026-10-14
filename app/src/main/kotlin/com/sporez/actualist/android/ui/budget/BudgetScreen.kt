@@ -366,6 +366,13 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
             if (month.forNextMonth != 0L) {
                 TextButton(onClick = { viewModel.releaseHold(); onDismiss() }, modifier = Modifier.testTag("release-hold")) { Text("Release ${money(month.forNextMonth)} hold") }
             }
+            HorizontalDivider()
+            Text("Whole month", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row {
+                TextButton(onClick = { viewModel.copyPreviousMonth(); onDismiss() }, modifier = Modifier.testTag("copy-previous-month")) { Text("Copy last month") }
+                TextButton(onClick = { viewModel.setThreeMonthAverage(); onDismiss() }, modifier = Modifier.testTag("three-month-average")) { Text("3-month avg") }
+                TextButton(onClick = { viewModel.setZero(); onDismiss() }, modifier = Modifier.testTag("set-zero")) { Text("Zero all") }
+            }
         }
     }
     if (picking) {

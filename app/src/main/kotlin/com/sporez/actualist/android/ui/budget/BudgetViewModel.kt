@@ -63,6 +63,14 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun hideCategory(categoryId: String) = write("Hidden") { com.sporez.actualist.core.budget.CategoryWrites(database).setCategoryHidden(categoryId, true) }
 
+    fun copyPreviousMonth() = write("Copied last month's budget") { budgetWrites.applyBulk(month.value) { copyPreviousMonthDrafts(month.value) } }
+
+    fun setThreeMonthAverage() = write("Set to 3-month averages") {
+        budgetWrites.applyBulk(month.value) { setAverageDrafts(month.value, Months.current()) }
+    }
+
+    fun setZero() = write("Set all budgets to zero") { budgetWrites.applyBulk(month.value) { setZeroDrafts(month.value) } }
+
     fun hold(amount: Long) = write("Held for next month") { budgetWrites.hold(month.value, HoldCommand.Hold(amount)) }
 
     fun releaseHold() = write("Hold released") { budgetWrites.hold(month.value, HoldCommand.Reset) }

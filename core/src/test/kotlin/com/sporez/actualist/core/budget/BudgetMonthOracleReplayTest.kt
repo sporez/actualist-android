@@ -49,10 +49,12 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
             contract["cases"]!!.jsonArray.associate { it.jsonObject.str("id") to it.jsonObject }
         }
 
-        val oracleOnlyCaseIds = setOf(
-            "copy-previous-month", "set-zero", "set-3month-avg", "cover-overbudgeted",
-            "copy-until-year-end", "tracking-move-money-oracle-only",
-        )
+        /**
+         * Oracle-only in Actualist. The five bulk actions are implemented here (ports of Actual's
+         * `budget/actions.ts`) and replayed; tracking move money stays refused, as in Actualist.
+         */
+        val oracleOnlyCaseIds = setOf("tracking-move-money-oracle-only")
+        val bulkActionCaseIds = setOf("copy-previous-month", "set-zero", "set-3month-avg", "cover-overbudgeted", "copy-until-year-end")
 
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
@@ -102,6 +104,11 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
         data class Hold(val month: String, val amount: Long) : Kind()
         data class Reset(val month: String) : Kind()
         data class IncomeCarryoverReset(val month: String) : Kind()
+        data class CopyPrevious(val month: String) : Kind()
+        data class SetZero(val month: String) : Kind()
+        data class ThreeMonthAverage(val month: String) : Kind()
+        data class CopyUntilYearEnd(val month: String, val categoryId: String) : Kind()
+        data class CoverOverbudgeted(val month: String, val categoryId: String, val amount: Long?) : Kind()
     }
 
     private class Action(
@@ -222,6 +229,11 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
                 is Kind.Hold -> writes.holdDrafts(reads.holdReview(kind.month), HoldCommand.Hold(kind.amount))
                 is Kind.Reset -> writes.holdDrafts(reads.holdReview(kind.month), HoldCommand.Reset)
                 is Kind.IncomeCarryoverReset -> writes.resetIncomeCarryoverDrafts(kind.month)
+                is Kind.CopyPrevious -> writes.copyPreviousMonthDrafts(kind.month)
+                is Kind.SetZero -> writes.setZeroDrafts(kind.month)
+                is Kind.ThreeMonthAverage -> writes.setAverageDrafts(kind.month, Months.id(2026, 10))
+                is Kind.CopyUntilYearEnd -> writes.copyUntilYearEndDrafts(kind.month, kind.categoryId, createdThrough)
+                is Kind.CoverOverbudgeted -> writes.coverOverbudgetedDrafts(kind.month, kind.categoryId, kind.amount)
             }
             drafts += planned
             planned to Unit
@@ -271,6 +283,15 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
                 )
                 "budget/reset-hold" -> Kind.Reset(args.str("month"))
                 "budget/reset-income-carryover" -> Kind.IncomeCarryoverReset(args.str("month"))
+                "budget/copy-previous-month" -> Kind.CopyPrevious(args.str("month"))
+                "budget/set-zero" -> Kind.SetZero(args.str("month"))
+                "budget/set-3month-avg" -> Kind.ThreeMonthAverage(args.str("month"))
+                "budget/copy-until-year-end" -> Kind.CopyUntilYearEnd(args.str("month"), args.str("category"))
+                "budget/cover-overbudgeted" -> Kind.CoverOverbudgeted(
+                    args.str("month"),
+                    args.str("category"),
+                    (args["amount"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.let { it.longOrNull ?: it.doubleOrNull?.toLong() },
+                )
                 else -> error("$handler is not replayed")
             }
             actions += Action(index, kind, cells(step), step.objects("stateAfter"), null)
@@ -427,7 +448,8 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
     fun everyContractCaseIsReplayedOrListedOracleOnly() {
         if (caseId != caseIds().first()) return
         assertEquals(86, cases.size)
-        assertEquals(80, caseIds().size)
+        assertEquals(85, caseIds().size)
+        assertTrue(caseIds().containsAll(bulkActionCaseIds))
         assertTrue(cases.keys.containsAll(oracleOnlyCaseIds))
     }
 }
