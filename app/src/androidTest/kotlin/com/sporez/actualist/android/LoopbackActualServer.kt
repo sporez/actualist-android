@@ -58,7 +58,7 @@ class LoopbackActualServer(
     /** The sync handler, also used directly to seed the server before the app downloads. */
     fun sync(body: ByteArray): ByteArray = synchronized(lock) {
         val request = SyncProto.decodeRequest(body)
-        require((request.fileId == fileId || request.fileId in uploadedNames) && request.groupId == groupId) { "wrong file or group" }
+        require((request.fileId == fileId || uploadedNames.containsKey(request.fileId)) && request.groupId == groupId) { "wrong file or group" }
         val reply = messages.tailMap(request.since, false).values.toList()
         for (envelope in request.messages) {
             if (envelope.timestamp !in messages) {
