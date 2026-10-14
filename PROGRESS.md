@@ -46,9 +46,9 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38572536759 — 3,010 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38572536728 — 4/4, none skipped (login, plain and encrypted new budgets, imported ZIP as a new budget, download, two-device sync, conflicts, merkle agreement, SimpleFIN routes unconfigured).
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38573203981 — 25/25, none skipped (every main screen, undo/redo and History, editor and rule preview, rule editor, reconcile, schedules, multi-select, templates, account groups, reports drill-down, widget, landscape side-by-side months, loopback-server flows incl. new budget, background sync, SimpleFIN, OpenID, and the app against the real actual-server via `adb reverse`); process-death relaunch reopened the selected budget.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38581710015 — 3,026 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38577166032 — 4/4, none skipped.
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38581649460 — 25/25, none skipped; process-death relaunch reopened the selected budget. One earlier round failed 12 tests in a cascade: the first test's activity was recreated while the new emulator was still settling, and its stray view model kept the demo session open across later tests' data resets (SQLITE_READONLY_DBMOVED). Resets now close every hub session first, and the script waits for boot completion, fixes portrait and settles before the suite.
 
 ## Known limitations
 
