@@ -8,6 +8,20 @@ import java.util.regex.PatternSyntaxException
  * (Swift `NSRegularExpression`) treats `\w`, `\d` and `\s` as Unicode classes, so the Java
  * flag for that is always on.
  */
+/**
+ * Java's regex needs `UNICODE_CHARACTER_CLASS` for Unicode `\w`, `\s` and `\d` (matching
+ * ICU, which Actualist's NSRegularExpression uses). Android's regex is ICU-based, is already
+ * Unicode-aware, and rejects the flag, so it is only used where the platform accepts it.
+ */
+internal object PlatformRegex {
+    val unicodeFlag: Int = try {
+        Pattern.compile("a", Pattern.UNICODE_CHARACTER_CLASS)
+        Pattern.UNICODE_CHARACTER_CLASS
+    } catch (e: IllegalArgumentException) {
+        0
+    }
+}
+
 object RuleRegexCache {
     private const val CAPACITY = 128
     private val expressions = HashMap<String, Pattern?>()
@@ -17,7 +31,7 @@ object RuleRegexCache {
         if (expressions.containsKey(pattern)) return expressions[pattern]
         if (expressions.size >= CAPACITY) expressions.clear()
         val compiled = try {
-            Pattern.compile(pattern, Pattern.UNICODE_CHARACTER_CLASS)
+            Pattern.compile(pattern, PlatformRegex.unicodeFlag)
         } catch (e: PatternSyntaxException) {
             null
         }

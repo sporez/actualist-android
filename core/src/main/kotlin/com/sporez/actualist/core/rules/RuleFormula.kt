@@ -49,7 +49,7 @@ object RuleFormulaEvaluator {
 
     private val balanceOfExpression = Pattern.compile(
         "BALANCE_OF\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\"\\s*\\)",
-        Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CHARACTER_CLASS,
+        Pattern.CASE_INSENSITIVE or PlatformRegex.unicodeFlag,
     )
 
     fun extractBalanceOfLiterals(formula: String): List<String> {

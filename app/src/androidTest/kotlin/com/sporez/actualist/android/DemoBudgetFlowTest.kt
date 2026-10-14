@@ -89,6 +89,8 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("assign-field").performTextInput("350.00")
         compose.onNodeWithTag("assign-save").performClick()
         compose.waitForGone("category-sheet")
+        // The banner scrolled out of the lazy list while the sheet was open.
+        compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("to-budget-banner"))
         compose.waitUntil(30_000) { toBudgetText() != before }
         assertNotEquals(before, toBudgetText())
         compose.screenshot("08-after-assign")

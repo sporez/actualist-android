@@ -172,7 +172,7 @@ object RuleConditionEvaluator {
                     "matches" -> RuleRegexCache.expression(expectedText)?.matcher(actualText)?.find() ?: false
                     "hasTags", "hasAnyTag" -> {
                         val tagMatches = extractTags(expectedText).map { tag ->
-                            val pattern = Pattern.compile("(?<!#)" + Pattern.quote(tag) + "([\\s#]|$)", Pattern.UNICODE_CHARACTER_CLASS)
+                            val pattern = Pattern.compile("(?<!#)" + Pattern.quote(tag) + "([\\s#]|$)", PlatformRegex.unicodeFlag)
                             pattern.matcher(actualText).find()
                         }
                         if (operation == "hasTags") tagMatches.all { it } else tagMatches.any { it }
@@ -264,7 +264,7 @@ object RuleConditionEvaluator {
     private fun normalizedExpectedText(value: String, kind: RuleValueKind?): String =
         if (kind == RuleValueKind.STRING) value.lowercase() else value
 
-    private val tagExpression = Pattern.compile("#*([^#\\s]+)", Pattern.UNICODE_CHARACTER_CLASS)
+    private val tagExpression = Pattern.compile("#*([^#\\s]+)", PlatformRegex.unicodeFlag)
 
     private fun extractTags(value: String): List<String> {
         val seen = LinkedHashSet<String>()

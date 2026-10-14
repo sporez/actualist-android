@@ -31,10 +31,16 @@ fun ComposeTestRule.waitForGone(tag: String, timeoutMillis: Long = 30_000) {
     waitUntil(timeoutMillis) { onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty() }
 }
 
-/** Saves the current screen as a PNG the emulator workflow pulls as an artifact. */
-fun SemanticsNodeInteractionsProvider.screenshot(name: String) {
-    val bitmap = onRoot().captureToImage().asAndroidBitmap()
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
+/**
+ * Saves the whole screen (dialogs and sheets included) as a PNG the emulator workflow pulls
+ * as an artifact. Uses UiAutomation: Compose's `captureToImage` fails while a dialog is open.
+ */
+fun ComposeTestRule.screenshot(name: String) {
+    waitForIdle()
+    val instrumentation = InstrumentationRegistry.getInstrumentation()
+    val bitmap = instrumentation.uiAutomation.takeScreenshot()
+        ?: onRoot().captureToImage().asAndroidBitmap()
+    val context = instrumentation.targetContext
     val directory = File(context.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
     File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
 }
