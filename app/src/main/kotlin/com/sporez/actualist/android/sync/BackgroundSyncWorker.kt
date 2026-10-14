@@ -9,9 +9,15 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.sporez.actualist.android.ActualistApplication
+import com.sporez.actualist.android.notifications.TransactionAlertNotifier
+import com.sporez.actualist.android.notifications.TransactionAlertPrefs
+import com.sporez.actualist.core.notifications.PendingNewTransactionSource
+import com.sporez.actualist.core.notifications.PendingNewTransactions
+import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.store.SyncStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,12 +35,39 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             container.sessions.acquire(id) { container.library.open(id) ?: error("The selected budget is no longer on this device.") }
         }
         return try {
+            val pending = PendingNewTransactions(session.database)
+            val before = withContext(Dispatchers.IO) { pending.liveTransactionAccounts() }
             val status = container.server.sync(session)
+            withContext(Dispatchers.IO) { recordNewTransactions(session, pending, before) }
             com.sporez.actualist.android.widget.WidgetData.refresh(applicationContext)
             if (status is SyncStatus.Failed) Result.retry() else Result.success()
         } finally {
             withContext(Dispatchers.IO) { container.sessions.release(session) }
         }
+    }
+
+    /**
+     * Transactions that appeared during this pass are the ones other devices (or the bank) added,
+     * since nothing edits locally while the app is in the background. They are recorded as
+     * pending-new; one notification is posted when alerts are on, otherwise the delivery is
+     * suppressed (the rows still show the "new" marker).
+     */
+    private fun recordNewTransactions(session: BudgetSession, pending: PendingNewTransactions, before: Map<String, String>) {
+        val fresh = pending.newSince(before)
+        if (fresh.isEmpty()) return
+        val alerts = TransactionAlertPrefs.isEnabled(applicationContext)
+        val notificationId = UUID.randomUUID().toString()
+        val added = pending.record(fresh, PendingNewTransactionSource.REMOTE_SYNC, notificationId, alreadyAcknowledged = false)
+        if (added == 0) return
+        if (alerts) {
+            val delivery = pending.delivery()
+            if (delivery != null && TransactionAlertNotifier.post(applicationContext)) {
+                pending.acknowledgeDelivery(delivery.transactionIds)
+            }
+        } else {
+            pending.suppressDeliveries()
+        }
+        session.changed()
     }
 
     companion object {

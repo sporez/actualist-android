@@ -3,6 +3,8 @@
 
     <!-- Only for the user's own Actual server. The demo budget never uses the network. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- New Transaction Alerts (Android 13+ asks when the user turns them on). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".ActualistApplication"

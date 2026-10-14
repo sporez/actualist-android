@@ -69,6 +69,8 @@ data class TransactionListState(
     val savedFilters: List<com.sporez.actualist.core.query.SavedFilter> = emptyList(),
     /** Set when the active saved filter cannot run here (an operator this port does not support). */
     val filterProblem: String? = null,
+    /** Transactions a sync brought in that have not been looked at yet (local only; Actualist's "new" marker). */
+    val pendingNewIds: Set<String> = emptySet(),
 )
 
 /** Conditions applied to the feed, saved or not. */
@@ -125,7 +127,18 @@ class TransactionsViewModel(
             uncategorizedCount = if (q.accountId == null && q.categoryId == null) ledger.uncategorizedCount() else 0,
             savedFilters = filters,
             filterProblem = problem,
+            pendingNewIds = runCatching { com.sporez.actualist.core.notifications.PendingNewTransactions(database).pendingIds(q.accountId) }.getOrDefault(emptySet()),
         )
+    }
+
+    /** Marks the new transactions shown as reviewed, as Actualist does when the feed goes away. */
+    fun reviewShown(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        val accountId = _query.value.accountId
+        val database = session.database
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { com.sporez.actualist.core.notifications.PendingNewTransactions(database).review(ids, accountId) }
+        }
     }
 
     /** Picks a saved filter (a second tap clears it); its conditions become the applied ones. */
@@ -572,6 +585,10 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
     val state by viewModel.state.collectAsState()
     val query by viewModel.query.collectAsState()
     val message by viewModel.messages.message.collectAsState()
+    val latestPendingNew by androidx.compose.runtime.rememberUpdatedState((state as? Loadable.Ready)?.value?.pendingNewIds.orEmpty())
+    androidx.compose.runtime.DisposableEffect(viewModel) {
+        onDispose { viewModel.reviewShown(latestPendingNew) }
+    }
     val resolver = LocalContext.current.contentResolver
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let { viewModel.exportCsv(resolver, it) } }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importCsv(resolver, it) } }
@@ -645,6 +662,7 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                             list.rows,
                             showAccount = query.accountId == null,
                             selected = selected,
+                            pendingNew = list.pendingNewIds,
                             onOpen = { row -> if (selected.isNotEmpty()) viewModel.toggleSelected(row.id) else onOpen(row) },
                             onLongPress = { row -> viewModel.toggleSelected(row.id) },
                         )
@@ -663,6 +681,7 @@ private fun TransactionList(
     rows: List<TransactionRow>,
     showAccount: Boolean,
     selected: Set<String>,
+    pendingNew: Set<String>,
     onOpen: (TransactionRow) -> Unit,
     onLongPress: (TransactionRow) -> Unit,
 ) {
@@ -681,7 +700,7 @@ private fun TransactionList(
             item(key = "rows-$day") {
                 SectionCard {
                     dayRows.forEachIndexed { index, row ->
-                        TransactionItem(row, showAccount, row.id in selected, onOpen, onLongPress)
+                        TransactionItem(row, showAccount, row.id in selected, row.id in pendingNew, onOpen, onLongPress)
                         if (index < dayRows.lastIndex) HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -695,6 +714,7 @@ private fun TransactionItem(
     row: TransactionRow,
     showAccount: Boolean,
     isSelected: Boolean,
+    isNew: Boolean,
     onOpen: (TransactionRow) -> Unit,
     onLongPress: (TransactionRow) -> Unit,
 ) {
@@ -712,6 +732,9 @@ private fun TransactionItem(
                 Spacer(Modifier.width(6.dp))
             }
             Text(row.displayPayee.ifBlank { "No payee" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+            if (isNew) {
+                Text("New", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp).testTag("new-marker-${row.id}"))
+            }
             MoneyText(row.amount, colored = true)
         }
         val detail = buildList {
