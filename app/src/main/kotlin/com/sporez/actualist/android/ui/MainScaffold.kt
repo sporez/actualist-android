@@ -2,7 +2,16 @@
 
 package com.sporez.actualist.android.ui
 
-import  androidx.compose.foundation.layout.statusBarsPadding androidx.compose.foundation.layout.fillMaxWidth androidx.compose.foundation.layout.Row androidx.compose.foundation.layout.Arrangement androidx.compose.ui.Alignment androidx.compose.runtime.remember androidx.compose.runtime.mutableStateOf androidx.compose.runtime.setValue androidx.compose.material3.MaterialTheme androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
