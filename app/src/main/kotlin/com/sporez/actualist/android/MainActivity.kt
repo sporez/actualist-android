@@ -17,7 +17,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import com.sporez.actualist.android.ui.AppState
 import com.sporez.actualist.android.ui.AppViewModel
 import com.sporez.actualist.android.ui.MainScaffold
@@ -34,11 +38,33 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { ActualistApp() }
         handleOpenIdReturn(intent)
+        handleShortcut(intent)
+        AppShortcuts.publish(this)
+        val settings = (application as ActualistApplication).container.settings
+        lifecycleScope.launch {
+            settings.settings.map { it.appSwitcherPrivacy }.distinctUntilChanged().collect { applyPrivacy(it) }
+        }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         handleOpenIdReturn(intent)
+        handleShortcut(intent)
+    }
+
+    /** "When backgrounded" blanks only the recents thumbnail (API 33+; older devices fall back to the secure flag). */
+    private fun applyPrivacy(mode: com.sporez.actualist.android.data.AppSwitcherPrivacy) {
+        val secure = mode == com.sporez.actualist.android.data.AppSwitcherPrivacy.ALWAYS ||
+            (mode == com.sporez.actualist.android.data.AppSwitcherPrivacy.WHEN_BACKGROUNDED && android.os.Build.VERSION.SDK_INT < 33)
+        if (secure) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(mode == com.sporez.actualist.android.data.AppSwitcherPrivacy.OFF)
+    }
+
+    /** A launcher shortcut names a screen; the scaffold opens it once a budget is open. */
+    private fun handleShortcut(intent: android.content.Intent?) {
+        val route = intent?.getStringExtra(AppShortcuts.EXTRA_ROUTE) ?: return
+        AppShortcuts.pending.value = route
+        intent.removeExtra(AppShortcuts.EXTRA_ROUTE)
     }
 
     /** The OpenID redirect back from the browser: `<applicationId>://localhost/openid/<nonce>/openid-cb?token=`. */

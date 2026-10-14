@@ -74,6 +74,19 @@ private fun decode(text: String): String = text
 @Composable
 fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewModel) {
     val navController = rememberNavController()
+    // A launcher shortcut's screen, once the budget is open.
+    val shortcutRoute by com.sporez.actualist.android.AppShortcuts.pending.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(shortcutRoute) {
+        val route = shortcutRoute?.takeIf { it in com.sporez.actualist.android.AppShortcuts.routes } ?: return@LaunchedEffect
+        com.sporez.actualist.android.AppShortcuts.pending.value = null
+        navController.navigate(route) {
+            if (route != "transaction-new") {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route ?: "budget"
     val isTab = tabs.any { it.route == route }

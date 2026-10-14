@@ -8,12 +8,20 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class ThemeMode { SYSTEM, DARK, LIGHT }
 
+/** Actualist's App Switcher privacy modes, mapped to Android's recents thumbnail controls. */
+enum class AppSwitcherPrivacy(val title: String, val detail: String) {
+    OFF("Off", "Never hide app contents in the recent apps screen."),
+    WHEN_BACKGROUNDED("When backgrounded", "Hide contents in the recent apps screen; screenshots still work."),
+    ALWAYS("Always", "Hide contents in the recent apps screen and block screenshots and screen recording."),
+}
+
 /** Non-secret app preferences. Credentials live in [SecretStore], never here. */
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.DARK,
     val selectedBudgetId: String? = null,
     val serverUrl: String? = null,
     val hideAmounts: Boolean = false,
+    val appSwitcherPrivacy: AppSwitcherPrivacy = AppSwitcherPrivacy.OFF,
 )
 
 class AppSettings(context: Context) {
@@ -26,6 +34,7 @@ class AppSettings(context: Context) {
         selectedBudgetId = prefs.getString("selected_budget", null),
         serverUrl = prefs.getString("server_url", null),
         hideAmounts = prefs.getBoolean("hide_amounts", false),
+        appSwitcherPrivacy = prefs.getString("app_switcher_privacy", null)?.let { runCatching { AppSwitcherPrivacy.valueOf(it) }.getOrNull() } ?: AppSwitcherPrivacy.OFF,
     )
 
     fun update(transform: (Settings) -> Settings) {
@@ -35,6 +44,7 @@ class AppSettings(context: Context) {
             .putString("selected_budget", next.selectedBudgetId)
             .putString("server_url", next.serverUrl)
             .putBoolean("hide_amounts", next.hideAmounts)
+            .putString("app_switcher_privacy", next.appSwitcherPrivacy.name)
             .apply()
         _settings.value = next
     }
