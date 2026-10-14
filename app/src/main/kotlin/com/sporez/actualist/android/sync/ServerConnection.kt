@@ -60,6 +60,9 @@ class ServerConnection(
 
     private fun token(): String = secrets.getString(SecretStore.SERVER_TOKEN) ?: throw ServerException.AuthenticationFailed()
 
+    /** The active login methods [serverUrl] advertises (`password`, `openid`, `header`). */
+    suspend fun loginMethods(serverUrl: String): List<String> = withContext(Dispatchers.IO) { client(serverUrl).loginMethods() }
+
     suspend fun signIn(serverUrl: String, password: String) = withContext(Dispatchers.IO) {
         val client = client(serverUrl)
         val methods = client.loginMethods()

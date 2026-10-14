@@ -85,6 +85,21 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
     var encrypted by remember { mutableStateOf<RemoteFile?>(null) }
     var budgetPassword by remember { mutableStateOf("") }
     var headersText by remember { mutableStateOf(server.savedCustomHeaders()?.second.orEmpty()) }
+    // As Actualist: offer only the sign-in methods the server advertises. Null until known (or if the
+    // lookup fails), when both are offered.
+    var loginMethods by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(url, headersText) {
+        loginMethods = null
+        val candidate = url.trim()
+        if (server.isSignedIn || !Regex("^https?://[^/\\s]+.*").matches(candidate) || candidate.length <= 8) return@LaunchedEffect
+        kotlinx.coroutines.delay(600)
+        loginMethods = runCatching {
+            server.saveCustomHeaders(candidate, headersText)
+            server.loginMethods(candidate)
+        }.getOrNull()
+    }
+    val offersPassword = loginMethods?.contains("password") ?: true
+    val offersOpenId = loginMethods?.contains("openid") ?: true
 
     fun load() {
         scope.launch {
@@ -143,8 +158,9 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                 maxLines = 4,
                 modifier = Modifier.fillMaxWidth().testTag("server-custom-headers"),
             )
-            OutlinedTextField(password, { password = it }, label = { Text("Server password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth().testTag("server-password-field"))
-            Button(
+            unsupportedLoginMessage(loginMethods)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("server-login-unsupported")) }
+            if (offersPassword) OutlinedTextField(password, { password = it }, label = { Text("Server password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth().testTag("server-password-field"))
+            if (offersPassword) Button(
                 enabled = !busy && url.length > 8 && password.isNotEmpty(),
                 onClick = {
                     scope.launch {
@@ -164,7 +180,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                 },
                 modifier = Modifier.fillMaxWidth().testTag("server-sign-in"),
             ) { Text("Sign in") }
-            OutlinedButton(
+            if (offersOpenId) OutlinedButton(
                 enabled = !busy && url.length > 8,
                 onClick = {
                     scope.launch {
@@ -255,5 +271,15 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
             Button(onClick = { download(file, budgetPassword) }, enabled = budgetPassword.isNotEmpty() && !busy) { Text("Unlock and download") }
         }
         TextButton(onClick = onCancel, modifier = Modifier.testTag("server-cancel")) { Text("Cancel") }
+    }
+}
+
+/** Actualist's wording when a server offers neither password nor OpenID sign-in. */
+fun unsupportedLoginMessage(methods: List<String>?): String? {
+    if (methods == null || "password" in methods || "openid" in methods) return null
+    return when {
+        "header" in methods -> "This server uses header authentication, which this app does not support yet."
+        methods.isEmpty() -> "This server did not advertise a supported authentication method."
+        else -> "This server uses an unsupported authentication method: ${methods.joinToString(", ")}."
     }
 }

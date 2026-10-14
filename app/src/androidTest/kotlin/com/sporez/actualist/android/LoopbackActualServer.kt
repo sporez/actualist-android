@@ -34,6 +34,9 @@ class LoopbackActualServer(
     var openIdReturnUrl: String? = null
     private var trie = MerkleTrie.EMPTY
     @Volatile var budgetZip: ByteArray = ByteArray(0)
+    /** The `/account/login-methods` answer; a test can make this a header-only server. */
+    @Volatile var loginMethodsJson: String =
+        """{"status":"ok","methods":[{"method":"password","active":1,"displayName":"Password"},{"method":"openid","active":1,"displayName":"OpenID"}]}"""
     @Volatile private var running = true
     val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
 
@@ -98,7 +101,7 @@ class LoopbackActualServer(
             path == "/account/login-methods" -> Triple(
                 200,
                 "application/json",
-                """{"status":"ok","methods":[{"method":"password","active":1,"displayName":"Password"},{"method":"openid","active":1,"displayName":"OpenID"}]}""".toByteArray(),
+                loginMethodsJson.toByteArray(),
             )
             path == "/account/login" && String(body).contains("\"loginMethod\":\"openid\"") -> {
                 openIdReturnUrl = Regex("\"returnUrl\":\"([^\"]+)\"").find(String(body))?.groupValues?.get(1)

@@ -124,6 +124,21 @@ class ServerSyncFlowTest {
     }
 
     @Test
+    fun explainsAHeaderAuthenticationServerInsteadOfAskingForAPassword() {
+        server.loginMethodsJson = """{"status":"ok","methods":[{"method":"header","active":1,"displayName":"Header"}]}"""
+        compose.waitForTag("onboarding")
+        compose.onNodeWithTag("onboarding-connect").performClick()
+        compose.waitForTag("server-url-field")
+        compose.onNodeWithTag("server-url-field").performTextClearance()
+        compose.onNodeWithTag("server-url-field").performTextInput(server.url)
+        compose.waitForTag("server-login-unsupported", 30_000)
+        compose.onNodeWithText("header authentication", substring = true).assertExists()
+        assertTrue(compose.onAllNodes(hasTestTag("server-password-field")).fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodes(hasTestTag("server-openid")).fetchSemanticsNodes().isEmpty())
+        compose.screenshot("22b-header-auth")
+    }
+
+    @Test
     fun createsANewBudgetOnTheServer() {
         compose.waitForTag("onboarding")
         compose.onNodeWithTag("onboarding-connect").performClick()
