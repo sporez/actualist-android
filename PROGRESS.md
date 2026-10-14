@@ -29,7 +29,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 ## Completed milestones
 
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
-- Report Explorer over the ported query engine (date range, accounts, categories, transfers; totals, per-category, matching transactions). Its JVM test is green (build https://github.com/sporez/actualist-android/actions/runs/38586991961); its device steps were added to the reports test and had not yet run on the emulator when this was written.
+- Report Explorer over the ported query engine (date range, accounts, categories, transfers; totals, per-category, matching transactions). Its JVM test checks totals against ledger sums; its device steps (part of the reports test) passed on the emulator in https://github.com/sporez/actualist-android/actions/runs/38591078296.
 - SimpleFIN direct bridge (device-claimed access key) when the server does not host SimpleFIN; templates with several entries in the template editor; a 50,000-transaction performance smoke test.
 - Wide screens (840dp and up) show the next two months beside the edited one; schedule and "up to" templates in the template editor.
 - Category learning (Actual's `updateCategoryRules`) after editor and batch categorization, with budget-wide and per-payee switches; schedule every-N intervals, monthly last-day / nth-weekday patterns, weekend handling and end rules; percentage-of-income templates.
