@@ -60,6 +60,28 @@ class RuleWritesTest {
     }
 
     @Test
+    fun oneOfAndApproximateConditionsRoundTripAndMatch() {
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
+            val draft = RuleDraft(
+                stage = RuleStage.NORMAL,
+                join = RuleConditionJoin.AND,
+                conditions = listOf(
+                    RuleCondition("account", "oneOf", RuleValue.Arr(listOf(RuleValue.Text("checking"), RuleValue.Text("credit"))), "id"),
+                    RuleCondition("amount", "isapprox", RuleValue.Num(-5_000.0), "number"),
+                ),
+                actions = listOf(RuleAction("set", "notes", RuleValue.Text("Approximately fifty"), "string")),
+            )
+            val (id, _) = RuleWrites(database) { "rule-oneof" }.create(draft)
+            val engine = RuleEngine(database)
+            assertEquals(draft, engine.fetchRules().first { it.id == id }.draft)
+            val hit = engine.run(RuleTransactionInput(accountId = "credit", date = day, amount = -5_100), day)
+            assertEquals("Approximately fifty", hit.notes)
+            val miss = engine.run(RuleTransactionInput(accountId = "savings", date = day, amount = -5_000), day)
+            assertTrue(id !in miss.appliedRuleIds)
+        }
+    }
+
+    @Test
     fun rulesTheEngineCannotEvaluateAreRefused() {
         TestDatabases.starter(clock = TestClock()).use { database ->
             val bad = RuleDraft(RuleStage.NORMAL, RuleConditionJoin.AND, listOf(RuleCondition("notes", "contains", RuleValue.Text(""), "string")), listOf(RuleAction("set", "notes", RuleValue.Text("x"), "string")))

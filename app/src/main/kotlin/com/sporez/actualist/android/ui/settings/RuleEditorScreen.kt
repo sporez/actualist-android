@@ -57,9 +57,9 @@ object RuleEditorFields {
     val actionFields = listOf("category", "payee", "notes", "cleared")
 
     fun conditionOps(field: String): List<String> = when (RuleFields.valueKind(field)) {
-        com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot")
+        com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf")
         com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "contains", "doesNotContain", "matches")
-        com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "gt", "gte", "lt", "lte")
+        com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "isapprox", "gt", "gte", "lt", "lte")
         else -> emptyList()
     }
 
@@ -68,8 +68,14 @@ object RuleEditorFields {
         else -> field.replaceFirstChar { it.uppercase() }
     }
 
+    /** Operators whose value is a list of ids (stored as a JSON array, edited as a set of picks). */
+    fun isMulti(op: String) = op == "oneOf" || op == "notOneOf"
+
     fun opLabel(op: String) = when (op) {
         "isNot" -> "is not"
+        "oneOf" -> "is one of"
+        "notOneOf" -> "is not one of"
+        "isapprox" -> "is approximately"
         "doesNotContain" -> "does not contain"
         "matches" -> "matches (regex)"
         "gt" -> "is greater than"
@@ -131,7 +137,7 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
         val draft = RuleDraft(
             stage = RuleStage.NORMAL,
             join = join,
-            conditions = conditions.map { RuleCondition(it.field, it.op, value(it.field, it.value), RuleFields.valueKind(it.field)?.raw) },
+            conditions = conditions.map { RuleCondition(it.field, it.op, value(it.field, it.value, it.op), RuleFields.valueKind(it.field)?.raw) },
             actions = actions.map { RuleAction("set", it.field, value(it.field, it.value), RuleFields.valueKind(it.field)?.raw) },
         )
         session.write { if (ruleId == null) RuleWrites(database).create(draft) else RuleWrites(database).update(ruleId, draft) }
@@ -139,7 +145,9 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
 
     fun delete() = launch { session.write { RuleWrites(database).delete(ruleId!!) } }
 
-    private fun value(field: String, text: String): RuleValue = when (RuleFields.valueKind(field)) {
+    private fun value(field: String, text: String, op: String = "set"): RuleValue = if (RuleEditorFields.isMulti(op)) {
+        RuleValue.Arr(text.split(',').filter { it.isNotBlank() }.map { RuleValue.Text(it) })
+    } else when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> RuleValue.Num((Money.parse(text) ?: error("Enter an amount like -12.34")).toDouble())
         com.sporez.actualist.core.rules.RuleValueKind.BOOLEAN -> RuleValue.Bool(text == "true")
         else -> RuleValue.Text(text)
@@ -159,6 +167,7 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
     companion object {
         /** The form's text for a stored value: amounts are minor units shown as decimals. */
         fun text(field: String, value: RuleValue): String = when {
+            value is RuleValue.Arr -> value.values.mapNotNull { it.string }.joinToString(",")
             RuleFields.valueKind(field) == com.sporez.actualist.core.rules.RuleValueKind.NUMBER ->
                 value.integer?.let { Money.format(it, symbol = "", grouping = false) } ?: ""
             value is RuleValue.Bool -> value.value.toString()
@@ -260,7 +269,11 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
             "op" -> PickerDialog(
                 title = "Operator",
                 options = RuleEditorFields.conditionOps(line.field).map { PickerOption(it, RuleEditorFields.opLabel(it)) },
-                onPick = { option -> set(line.copy(op = option.id!!)) },
+                onPick = { option ->
+                    val op = option.id!!
+                    // Switching between a single id and a list clears the value.
+                    set(line.copy(op = op, value = if (RuleEditorFields.isMulti(op) != RuleEditorFields.isMulti(line.op)) "" else line.value))
+                },
                 onDismiss = { picking = null },
             )
             "value" -> PickerDialog(
@@ -273,7 +286,16 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                     else -> emptyList()
                 },
                 searchable = true,
-                onPick = { option -> set(line.copy(value = option.id ?: "")) },
+                onPick = { option ->
+                    val id = option.id ?: ""
+                    if (RuleEditorFields.isMulti(line.op)) {
+                        // Each pick adds or removes one id from the list.
+                        val ids = line.value.split(',').filter { it.isNotBlank() }
+                        set(line.copy(value = (if (id in ids) ids - id else ids + id).joinToString(",")))
+                    } else {
+                        set(line.copy(value = id))
+                    }
+                },
                 onDismiss = { picking = null },
             )
         }
@@ -309,6 +331,7 @@ private fun LineCard(
                     Text(when {
                         line.value.isBlank() -> "Choose…"
                         line.field == "cleared" -> if (line.value == "true") "Cleared" else "Not cleared"
+                        RuleEditorFields.isMulti(line.op) -> line.value.split(',').filter { it.isNotBlank() }.joinToString(", ") { names[it] ?: it } + "  (tap to add or remove)"
                         else -> names[line.value] ?: line.value
                     })
                 }
