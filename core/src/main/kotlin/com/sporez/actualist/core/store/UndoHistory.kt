@@ -12,14 +12,14 @@ import com.sporez.actualist.core.sync.SyncMessage
  * and resurrects the rows they created. Like Actual, the history lives in memory only and is
  * lost when the budget closes.
  *
- * Unlike Actual, a gesture whose cells were written again since (by a later local edit or a
- * synced change) cannot be undone or redone: Actual would silently overwrite the newer value.
- * This is Actualist's intended OP-76.
+ * Unlike Actual, a gesture whose rows changed since (a later local edit or a synced change to
+ * any row it touched) cannot be undone or redone: Actual would silently overwrite the newer
+ * values. This is Actualist's intended OP-76, which also compares whole rows.
  */
 class UndoHistory(private val database: BudgetDatabase, private val limit: Int = 100) {
     private class Entry(val batches: List<UndoBatch>) {
-        /** The messages whose values must still be in place for the next undo or redo. */
-        var current: List<SyncMessage> = batches.flatMap { it.messages }
+        /** The touched rows as they must still be for the next undo or redo. */
+        var rows: Map<Pair<String, String>, Map<String, String>?> = merged(batches)
     }
 
     private val entries = ArrayList<Entry>()
@@ -56,10 +56,8 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     fun undo(): List<SyncMessage>? {
         if (!canUndo) return null
         val entry = entries[cursor - 1]
-        requireUnchanged(entry.current, "This change was edited again since, so it can no longer be undone.")
-        val cells = entry.batches.flatMap { it.undoCells }.reversed()
-        val written = database.commitLocal(cells)
-        entry.current = written
+        requireUnchanged(entry.rows, "This change was edited again since, so it can no longer be undone.")
+        val written = commitCapturing(entry, entry.batches.flatMap { it.undoCells }.reversed())
         cursor -= 1
         return written
     }
@@ -68,11 +66,22 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     fun redo(): List<SyncMessage>? {
         if (!canRedo) return null
         val entry = entries[cursor]
-        requireUnchanged(entry.current, "This budget changed since the undo, so it can no longer be redone.")
-        val cells = entry.batches.flatMap { it.redoCells }
-        val written = database.commitLocal(cells)
-        entry.current = written
+        requireUnchanged(entry.rows, "This budget changed since the undo, so it can no longer be redone.")
+        val written = commitCapturing(entry, entry.batches.flatMap { it.redoCells })
         cursor += 1
+        return written
+    }
+
+    /** Commits [cells] and records the rows they leave as the entry's next expected state. */
+    private fun commitCapturing(entry: Entry, cells: List<com.sporez.actualist.core.db.CellDraft>): List<SyncMessage> {
+        val captured = mutableListOf<UndoBatch>()
+        recording = captured
+        val written = try {
+            database.commitLocal(cells)
+        } finally {
+            recording = null
+        }
+        entry.rows = entry.rows + merged(captured)
         return written
     }
 
@@ -81,28 +90,17 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
         cursor = 0
     }
 
-    /**
-     * Every cell must still hold the value [messages] left in it (the last write per cell). Values,
-     * not timestamps: undoing a later gesture legitimately rewrites cells an earlier one set.
-     */
-    private fun requireUnchanged(messages: List<SyncMessage>, reason: String) {
-        val latest = LinkedHashMap<Triple<String, String, String>, String>()
-        for (message in messages) latest[Triple(message.dataset, message.row, message.column)] = message.serializedValue
-        for ((cell, serialized) in latest) {
-            if (!sameValue(database.cellValue(cell.first, cell.second, cell.third).serialized, serialized)) {
-                throw LocalFirstException.InvalidLocalWrite(reason)
-            }
+    private fun requireUnchanged(rows: Map<Pair<String, String>, Map<String, String>?>, reason: String) {
+        for ((key, expected) in rows) {
+            if (database.rowSnapshot(key.first, key.second) != expected) throw LocalFirstException.InvalidLocalWrite(reason)
         }
     }
 
-    /** SQLite may store a number written as text in a numeric column; compare the payloads. */
-    private fun sameValue(stored: String, written: String): Boolean {
-        if (stored == written) return true
-        val a = stored.substringAfter(':')
-        val b = written.substringAfter(':')
-        if (stored.startsWith("0:") || written.startsWith("0:")) return false
-        val x = a.toDoubleOrNull()
-        val y = b.toDoubleOrNull()
-        return a == b || (x != null && y != null && x == y)
+    private companion object {
+        fun merged(batches: List<UndoBatch>): Map<Pair<String, String>, Map<String, String>?> {
+            val rows = LinkedHashMap<Pair<String, String>, Map<String, String>?>()
+            for (batch in batches) rows.putAll(batch.rowsAfter)
+            return rows
+        }
     }
 }

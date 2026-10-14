@@ -15,13 +15,20 @@ class UndoBatch(
     /** In forward order; history concatenates the batches of a gesture and reverses them. */
     val undoCells: List<CellDraft>,
     val redoCells: List<CellDraft>,
+    /** Every touched row as the batch left it; undo and redo require these rows unchanged. */
+    val rowsAfter: Map<Pair<String, String>, Map<String, String>?> = emptyMap(),
 ) {
     companion object {
         private val budgetTables = setOf("zero_budget_months", "zero_budgets", "reflect_budgets")
         private val reversibleBudgetColumns = setOf("buffered", "amount", "carryover")
         private val mappingTables = setOf("category_mapping", "payee_mapping")
 
-        fun of(messages: List<SyncMessage>, drafts: List<CellDraft>, oldRows: Map<Pair<String, String>, SqlRow?>): UndoBatch {
+        fun of(
+            messages: List<SyncMessage>,
+            drafts: List<CellDraft>,
+            oldRows: Map<Pair<String, String>, SqlRow?>,
+            rowsAfter: Map<Pair<String, String>, Map<String, String>?> = emptyMap(),
+        ): UndoBatch {
             val undo = drafts.mapNotNull { draft -> undoCell(draft, oldRows[draft.dataset to draft.row]) }
             val resurrect = LinkedHashSet<Pair<String, String>>()
             for (draft in drafts) {
@@ -31,7 +38,7 @@ class UndoBatch(
                 }
             }
             val redo = drafts + resurrect.map { (dataset, row) -> CellDraft(dataset, row, "tombstone", SyncValue.int(0)) }
-            return UndoBatch(messages, undo, redo)
+            return UndoBatch(messages, undo, redo, rowsAfter)
         }
 
         fun undoCell(draft: CellDraft, oldRow: SqlRow?): CellDraft? {

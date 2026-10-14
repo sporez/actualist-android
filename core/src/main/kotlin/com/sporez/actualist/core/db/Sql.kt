@@ -9,6 +9,8 @@ import kotlin.concurrent.withLock
 class SqlRow(private val values: Map<String, Any?>) {
     operator fun get(name: String): Any? = values[name]
 
+    val columns: Set<String> get() = values.keys
+
     fun string(name: String): String? = when (val value = values[name]) {
         null -> null
         is String -> value

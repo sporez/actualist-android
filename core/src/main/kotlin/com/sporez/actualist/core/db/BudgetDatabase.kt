@@ -356,7 +356,7 @@ class BudgetDatabase private constructor(
             }
             persistMerkleTrie(trie.pruned(), clock)
             committedClock = clock
-            if (recordUndo) undoBatch = UndoBatch.of(committed, drafts, oldRows)
+            if (recordUndo) undoBatch = UndoBatch.of(committed, drafts, oldRows, oldRows.keys.associateWith { (dataset, row) -> rowSnapshot(dataset, row) })
             CommitResult(outcome, committed)
         }
         localClock = committedClock
@@ -371,10 +371,11 @@ class BudgetDatabase private constructor(
     @Volatile
     var undoListener: ((UndoBatch) -> Unit)? = null
 
-    /** A cell's stored value as a [SyncValue] (Null when the row does not exist). */
-    fun cellValue(dataset: String, row: String, column: String): SyncValue = UndoBatch.sqlToSyncValue(
-        sql.queryOne("SELECT ${Sql.quoted(column)} AS v FROM ${Sql.quoted(dataset)} WHERE id = ? LIMIT 1", row)?.get("v"),
-    )
+    /** A row as serialized cell values (column to `N:`/`S:`/`0:` form); null when it does not exist. */
+    fun rowSnapshot(dataset: String, row: String): Map<String, String>? =
+        sql.queryOne("SELECT * FROM ${Sql.quoted(dataset)} WHERE id = ? LIMIT 1", row)?.let { stored ->
+            stored.columns.associateWith { column -> UndoBatch.sqlToSyncValue(stored[column]).serialized }
+        }
 
     fun commitLocal(drafts: List<CellDraft>, nowMillis: Long = clock.nowMillis()): List<SyncMessage> =
         commitLocal(nowMillis) { drafts to Unit }.messages
