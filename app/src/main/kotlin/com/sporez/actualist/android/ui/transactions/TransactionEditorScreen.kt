@@ -147,6 +147,35 @@ class TransactionEditorViewModel(
         session.write { com.sporez.actualist.core.commands.TransactionCommands(database, clock).duplicate(listOf(transactionId!!)) }
     }
 
+    /**
+     * Turns this transaction into a schedule, as Actualist's "Make schedule" does: same account,
+     * payee and (approximate) amount, repeating from the transaction's date.
+     */
+    fun makeSchedule(frequency: com.sporez.actualist.core.rules.ScheduleFrequency) = launchWrite {
+        val row = data.value?.existing ?: error("missing transaction")
+        val start = row.date ?: error("This transaction has no date.")
+        session.write {
+            com.sporez.actualist.core.schedules.Schedules(database, clock).create(
+                com.sporez.actualist.core.schedules.ScheduleCreateCommand(
+                    identity = com.sporez.actualist.core.schedules.ScheduleCreateIdentity.make(),
+                    name = row.displayPayee.ifBlank { null },
+                    definition = com.sporez.actualist.core.schedules.ScheduleDefinitionDraft(
+                        accountId = row.accountId,
+                        payeeMappingId = row.payeeId,
+                        amount = com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(row.amount),
+                        dateRule = com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(
+                            com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), frequency),
+                            "isapprox",
+                        ),
+                    ),
+                    postsTransaction = false,
+                    customUpcomingLength = null,
+                    asOfDayId = java.time.LocalDate.now().toString(),
+                ),
+            )
+        }
+    }
+
     /** Same-account, same-amount rows: the pairs Actual's merge is meant for. */
     suspend fun mergeCandidates(): List<TransactionRow> {
         val row = data.value?.existing ?: return emptyList()
@@ -359,6 +388,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 Row {
                     TextButton(onClick = { viewModel.duplicate() }, modifier = Modifier.testTag("editor-duplicate")) { Text("Duplicate") }
                     TextButton(onClick = { picking = "merge" }, modifier = Modifier.testTag("editor-merge")) { Text("Merge with…") }
+                    if (!existing.isParent) TextButton(onClick = { picking = "schedule" }, modifier = Modifier.testTag("editor-make-schedule")) { Text("Schedule…") }
                     TextButton(onClick = { viewModel.delete() }, modifier = Modifier.testTag("editor-delete")) {
                         Text("Delete", color = MaterialTheme.colorScheme.error)
                     }
@@ -418,6 +448,19 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 dismissButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
             ) { DatePicker(state = state) }
         }
+        "schedule" -> PickerDialog(
+            title = "Repeat this transaction",
+            options = listOf(
+                PickerOption(com.sporez.actualist.core.rules.ScheduleFrequency.WEEKLY.name, "Every week"),
+                PickerOption(com.sporez.actualist.core.rules.ScheduleFrequency.MONTHLY.name, "Every month"),
+                PickerOption(com.sporez.actualist.core.rules.ScheduleFrequency.YEARLY.name, "Every year"),
+            ),
+            onPick = { option ->
+                picking = null
+                option.id?.let { viewModel.makeSchedule(com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(it)) }
+            },
+            onDismiss = { picking = null },
+        )
         "merge" -> {
             var candidates by remember { mutableStateOf<List<TransactionRow>?>(null) }
             var confirmFor by remember { mutableStateOf<String?>(null) }

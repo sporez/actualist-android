@@ -345,6 +345,41 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun turnsATransactionIntoASchedule() {
+        openDemo()
+        val scheduleCards = androidx.compose.ui.test.SemanticsMatcher("a schedule edit button") { node ->
+            node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)?.startsWith("schedule-edit-") == true &&
+                node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag) != "schedule-edit-dialog"
+        }
+        fun countSchedules(): Int {
+            compose.onNodeWithTag("open-settings").performClick()
+            compose.waitForTag("show-schedules")
+            compose.onNodeWithTag("show-schedules").performClick()
+            compose.waitForTag("schedules-screen")
+            compose.waitUntil(30_000) { compose.onAllNodes(scheduleCards).fetchSemanticsNodes().isNotEmpty() }
+            val count = compose.onAllNodes(scheduleCards).fetchSemanticsNodes().size
+            compose.onNodeWithTag("nav-back").performClick()
+            compose.onNodeWithTag("nav-back").performClick()
+            compose.waitForTag("bottom-bar")
+            return count
+        }
+        val before = countSchedules()
+        compose.onNodeWithTag("tab-accounts").performClick()
+        compose.waitForTag("budget-accounts")
+        compose.onNodeWithTag("account-checking").performClick()
+        compose.waitForTag("transaction-list")
+        compose.onAllNodes(hasText("Payroll Inc", substring = true))[0].performClick()
+        compose.waitForTag("editor-make-schedule")
+        compose.onNodeWithTag("editor-make-schedule").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Every month")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Every month").performClick()
+        compose.waitForTag("transaction-list")
+        compose.onNodeWithTag("nav-back").performClick()
+        compose.waitForTag("bottom-bar")
+        compose.waitOrCapture("schedule-made") { countSchedules() > before }
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()
