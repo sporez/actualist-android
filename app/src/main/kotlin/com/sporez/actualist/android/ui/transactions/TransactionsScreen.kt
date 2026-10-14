@@ -102,6 +102,33 @@ class TransactionsViewModel(private val session: BudgetSession, accountId: Strin
         }
     }
 
+    /** The close review for this account (what closing would do, or why it cannot yet). */
+    suspend fun closeReview(destinationId: String?, categoryId: String?): com.sporez.actualist.core.transactions.AccountCloseReview? =
+        _query.value.accountId?.let { id -> session.read { com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).review(id, destinationId, categoryId) } }
+
+    suspend fun closeChoices(): Pair<List<com.sporez.actualist.core.transactions.Account>, List<com.sporez.actualist.core.transactions.CategoryOption>> =
+        session.read { ledger.accounts(includeClosed = false) to ledger.categories(includeHidden = true).filter { !it.isIncome } }
+
+    fun closeAccount(destinationId: String?, categoryId: String?) = accountWrite("Account closed") {
+        com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).close(it, destinationId, categoryId, java.time.LocalDate.now())
+    }
+
+    fun reopenAccount() = accountWrite("Account reopened") { com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).reopen(it) }
+
+    fun renameAccount(name: String) = accountWrite("Renamed") { com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).rename(it, name) }
+
+    private fun accountWrite(done: String, block: BudgetSession.(String) -> Any?) {
+        val accountId = _query.value.accountId ?: return
+        viewModelScope.launch {
+            try {
+                session.write { block(accountId) }
+                messages.show(done)
+            } catch (error: Exception) {
+                messages.show(error.message ?: "The account could not be changed.")
+            }
+        }
+    }
+
     fun exportFilename(): String = com.sporez.actualist.core.csv.CsvExport.filename(System.currentTimeMillis())
 
     /** Writes Actual's CSV export format for this account (or every account) to [uri]. */
@@ -163,12 +190,18 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importCsv(resolver, it) } }
     var reconciling by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     if (reconciling) ReconcileDialog(viewModel) { reconciling = false }
+    var managing by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (managing) {
+        val current = (state as? Loadable.Ready)?.value?.account
+        if (current != null) AccountDialog(current, viewModel) { managing = false }
+    }
     Box(Modifier.fillMaxSize().testTag("transactions-screen")) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { exportLauncher.launch(viewModel.exportFilename()) }, modifier = Modifier.testTag("export-csv")) { Text("Export CSV") }
                 if (query.accountId != null) {
                     TextButton(onClick = { reconciling = true }, modifier = Modifier.testTag("reconcile")) { Text("Reconcile") }
+                    TextButton(onClick = { managing = true }, modifier = Modifier.testTag("manage-account")) { Text("Account") }
                     TextButton(onClick = { importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }, modifier = Modifier.testTag("import-csv")) { Text("Import CSV") }
                 }
                 message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).testTag("transactions-message")) }
@@ -311,4 +344,81 @@ private fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> U
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+
+/** Rename, close (moving any balance to another account, as Actual does) or reopen. */
+@Composable
+private fun AccountDialog(account: Account, viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
+    var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(account.name) }
+    var destinationId by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var categoryId by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var picking by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var review by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.sporez.actualist.core.transactions.AccountCloseReview?>(null) }
+    var choices by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<Pair<List<Account>, List<com.sporez.actualist.core.transactions.CategoryOption>>?>(null)
+    }
+    androidx.compose.runtime.LaunchedEffect(destinationId, categoryId) {
+        review = viewModel.closeReview(destinationId, categoryId)
+        if (choices == null) choices = viewModel.closeChoices()
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(account.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("account-rename"))
+                TextButton(onClick = { viewModel.renameAccount(name); onDismiss() }, enabled = name.isNotBlank() && name.trim() != account.name) { Text("Rename") }
+                androidx.compose.material3.HorizontalDivider()
+                if (account.closed) {
+                    TextButton(onClick = { viewModel.reopenAccount(); onDismiss() }, modifier = Modifier.testTag("reopen-account")) { Text("Reopen account") }
+                } else {
+                    val r = review
+                    when (r?.action) {
+                        com.sporez.actualist.core.transactions.AccountCloseAction.DeleteEmpty -> Text("No transactions: closing deletes this account.", style = MaterialTheme.typography.bodySmall)
+                        com.sporez.actualist.core.transactions.AccountCloseAction.CloseAtZero -> Text("The balance is zero.", style = MaterialTheme.typography.bodySmall)
+                        else -> if (r != null && r.balance != 0L) {
+                            Text("Move the ${com.sporez.actualist.core.money.Money.format(r.balance)} balance to:", style = MaterialTheme.typography.bodySmall)
+                            val accounts = choices?.first.orEmpty().filter { it.id != account.id }
+                            TextButton(onClick = { picking = "account" }, modifier = Modifier.testTag("close-destination")) {
+                                Text(accounts.firstOrNull { it.id == destinationId }?.name ?: "Choose an account")
+                            }
+                            if (r.blockers.contains(com.sporez.actualist.core.transactions.AccountCloseBlocker.CATEGORY_REQUIRED) || categoryId != null) {
+                                TextButton(onClick = { picking = "category" }, modifier = Modifier.testTag("close-category")) {
+                                    Text(choices?.second.orEmpty().firstOrNull { it.id == categoryId }?.name ?: "Choose a category")
+                                }
+                            }
+                        }
+                    }
+                    r?.blockers?.filter { it != com.sporez.actualist.core.transactions.AccountCloseBlocker.DESTINATION_REQUIRED }?.firstOrNull()?.let {
+                        Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(
+                        onClick = { viewModel.closeAccount(destinationId, categoryId); onDismiss() },
+                        enabled = r?.action != null,
+                        modifier = Modifier.testTag("close-account"),
+                    ) { Text(if (r?.action == com.sporez.actualist.core.transactions.AccountCloseAction.DeleteEmpty) "Delete account" else "Close account", color = MaterialTheme.colorScheme.error) }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+    when (picking) {
+        "account" -> com.sporez.actualist.android.ui.components.PickerDialog(
+            title = "Move balance to",
+            options = choices?.first.orEmpty().filter { it.id != account.id }.map {
+                com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name, if (it.offBudget) "Off budget" else "On budget")
+            },
+            onPick = { destinationId = it.id; picking = null },
+            onDismiss = { picking = null },
+        )
+        "category" -> com.sporez.actualist.android.ui.components.PickerDialog(
+            title = "Category",
+            options = choices?.second.orEmpty().map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name, it.groupName) },
+            searchable = true,
+            onPick = { categoryId = it.id; picking = null },
+            onDismiss = { picking = null },
+        )
+    }
 }

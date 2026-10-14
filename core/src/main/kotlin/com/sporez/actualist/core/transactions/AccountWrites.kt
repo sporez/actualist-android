@@ -12,7 +12,7 @@ import java.util.UUID
 /**
  * Account lifecycle writes, following Actual's `createAccount`: the account row, its
  * transfer payee (empty name, `transfer_acct`), the payee mapping, and an opening balance
- * row when a balance is given. Rename and close/reopen write single cells.
+ * row when a balance is given. Rename, close and reopen live in [AccountLifecycle].
  */
 class AccountWrites(
     private val database: BudgetDatabase,
@@ -48,28 +48,5 @@ class AccountWrites(
             drafts to Unit
         }
         return Created(accountId, result.messages)
-    }
-
-    fun rename(accountId: String, name: String): List<SyncMessage> {
-        val trimmed = name.trim()
-        if (trimmed.isEmpty()) throw LocalFirstException.InvalidLocalWrite("missing account name")
-        return database.commitLocal {
-            requireAccount(accountId)
-            listOf(CellDraft("accounts", accountId, "name", SyncValue.text(trimmed))) to Unit
-        }.messages
-    }
-
-    /** Closing is only allowed at a zero balance; Actual otherwise asks where the money goes. */
-    fun setClosed(accountId: String, closed: Boolean): List<SyncMessage> = database.commitLocal {
-        requireAccount(accountId)
-        if (closed) {
-            val balance = LedgerReads(database).accounts().firstOrNull { it.id == accountId }?.balance ?: 0
-            if (balance != 0L) throw LocalFirstException.InvalidLocalWrite("move the balance out before closing this account")
-        }
-        listOf(CellDraft("accounts", accountId, "closed", SyncValue.bool(closed))) to Unit
-    }.messages
-
-    private fun requireAccount(accountId: String) {
-        if (!database.liveRowExists("accounts", accountId)) throw LocalFirstException.InvalidLocalWrite("missing account")
     }
 }
