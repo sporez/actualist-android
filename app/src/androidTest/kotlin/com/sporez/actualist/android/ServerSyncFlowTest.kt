@@ -227,7 +227,6 @@ class ServerSyncFlowTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(returnUrl, returnUrl.startsWith("${context.packageName}://localhost/openid/"))
 
-        // A forged callback with another nonce is refused and does not sign in.
         fun deliver(uri: String) = context.startActivity(
             android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri))
                 .setPackage(context.packageName)
