@@ -4,6 +4,9 @@ import com.sporez.actualist.core.LocalFirstException
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.db.BudgetDatabase
 import com.sporez.actualist.core.db.CellDraft
+import com.sporez.actualist.core.rules.RuleEngine
+import com.sporez.actualist.core.rules.RuleTransactionInput
+import com.sporez.actualist.core.transactions.SplitDraft
 import com.sporez.actualist.core.transactions.TransactionDraft
 import com.sporez.actualist.core.transactions.TransactionWrites
 import java.math.BigDecimal
@@ -288,11 +291,22 @@ object CsvImportMapper {
  * missing). A row is skipped as a duplicate when the account already holds a live row with
  * the same date, amount and imported payee, or the same imported id.
  *
- * Partial port: Actualist runs the full import-reconcile matcher (fuzzy matching, rules,
- * review) that this port does not have.
+ * The budget's rules run on each row (imported text as `imported_payee`), as in Actual. Partial
+ * port: Actualist's fuzzy import-reconcile matcher and review step are not ported.
  */
-class CsvImporter(private val database: BudgetDatabase, private val writes: TransactionWrites) {
-    data class Plan(val drafts: List<CellDraft>, val imported: Int, val duplicates: Int)
+class CsvImporter(
+    private val database: BudgetDatabase,
+    private val writes: TransactionWrites,
+    private val rules: RuleEngine? = RuleEngine(database),
+    private val today: LocalDate = LocalDate.now(),
+) {
+    data class Plan(
+        val drafts: List<CellDraft>,
+        val imported: Int,
+        val duplicates: Int,
+        val ruleDeleted: Int = 0,
+        val rulesApplied: Set<String> = emptySet(),
+    )
 
     fun plan(accountId: String, rows: List<CsvImportRow>): Plan {
         val sql = database.sql
@@ -310,6 +324,8 @@ class CsvImporter(private val database: BudgetDatabase, private val writes: Tran
         val createdPayees = HashMap<String, String>()
         var imported = 0
         var duplicates = 0
+        var ruleDeleted = 0
+        val rulesApplied = sortedSetOf<String>()
         for (row in rows) {
             val key = Triple(Months.packedDate(row.date).toLong(), row.amount, row.payeeName.ifEmpty { null }?.lowercase())
             if ((row.importedId != null && row.importedId in importedIds) || key in seen) {
@@ -330,7 +346,7 @@ class CsvImporter(private val database: BudgetDatabase, private val writes: Tran
                     payeeId = id
                 }
             }
-            val draft = TransactionDraft(
+            var draft = TransactionDraft(
                 accountId = accountId,
                 date = row.date,
                 amount = row.amount,
@@ -340,10 +356,42 @@ class CsvImporter(private val database: BudgetDatabase, private val writes: Tran
                 importedPayee = row.payeeName.ifEmpty { null },
                 importedId = row.importedId,
             )
-            drafts += writes.simpleDrafts(draft, java.util.UUID.randomUUID().toString(), payeeId)
+            // Actual runs the budget's rules on every imported row, with the raw text as imported_payee.
+            val ruled = rules?.run(
+                RuleTransactionInput(
+                    accountId = accountId,
+                    date = draft.date,
+                    amount = draft.amount,
+                    payeeId = payeeId,
+                    payeeName = row.payeeName,
+                    categoryId = draft.categoryId,
+                    notes = draft.notes,
+                    cleared = draft.cleared,
+                    importedPayee = draft.importedPayee,
+                ),
+                today,
+            )
+            if (ruled != null && ruled.appliedRuleIds.isNotEmpty()) {
+                if (ruled.deletesTransaction) {
+                    ruleDeleted++
+                    continue
+                }
+                if (ruled.payeeId != null && ruled.payeeId != payeeId && database.liveRowExists("payees", ruled.payeeId)) payeeId = ruled.payeeId
+                draft = draft.copy(
+                    date = ruled.date,
+                    amount = ruled.amount,
+                    categoryId = if (offBudget || ruled.splits.isNotEmpty()) null else ruled.categoryId,
+                    notes = ruled.notes,
+                    cleared = ruled.cleared,
+                    splits = if (offBudget) emptyList() else ruled.splits.map { SplitDraft(it.categoryId, it.amount, it.notes) },
+                )
+                ruled.appliedRuleIds.forEach { rulesApplied += it }
+            }
+            val id = java.util.UUID.randomUUID().toString()
+            drafts += if (draft.splits.isNotEmpty()) writes.splitDrafts(draft, id, payeeId) else writes.simpleDrafts(draft, id, payeeId)
             imported++
         }
-        return Plan(drafts, imported, duplicates)
+        return Plan(drafts, imported, duplicates, ruleDeleted, rulesApplied)
     }
 
     /** Parses, maps and commits a file in one transaction; nothing is written on any error. */

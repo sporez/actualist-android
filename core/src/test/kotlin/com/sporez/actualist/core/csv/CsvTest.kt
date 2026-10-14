@@ -152,4 +152,26 @@ class CsvTest {
             assertEquals(accounts.getValue(target).balance, ledger.accounts().first { it.id == target }.balance)
         }
     }
+
+    @Test
+    fun importedRowsRunTheBudgetsRules() {
+        val clock = TestClock()
+        val day = LocalDate.of(2026, 10, 15)
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, clock).use { database ->
+            database.sql.execute(
+                "INSERT INTO rules (id, stage, conditions_op, conditions, actions, tombstone) VALUES (?, NULL, 'and', ?, ?, 0)",
+                "import-rule",
+                """[{"op":"contains","field":"imported_payee","value":"whole foods","type":"string"}]""",
+                """[{"op":"set","field":"category","value":"groceries","type":"id"}]""",
+            )
+            val csv = "Date,Payee,Notes,Amount\n2026-10-14,WHOLE FOODS #123,,-42.50\n2026-10-14,Daily Grind,,-4.75\n2026-10-14,Unmatched Shop,,-9.99\n"
+            val plan = CsvImporter(database, TransactionWrites(database, clock), today = day).import("checking", csv)
+            assertEquals(3, plan.imported)
+            assertEquals(setOf("import-rule", "demo-rule-cafe"), plan.rulesApplied)
+            val rows = LedgerReads(database).transactions(TransactionQuery(accountId = "checking", limit = 10_000)).filter { it.date == LocalDate.of(2026, 10, 14) }
+            assertEquals("groceries", rows.single { it.amount == -4_250L }.categoryId)
+            assertEquals("dining", rows.single { it.amount == -475L }.categoryId)
+            assertNull(rows.single { it.amount == -999L }.categoryId)
+        }
+    }
 }
