@@ -54,8 +54,13 @@ class CategoryLearningTest {
             db.commitLocal(listOf(CellDraft("payees", payee, "learn_categories", SyncValue.bool(false))))
             writes.update(newer[0], TransactionEdit(categoryId = "groceries"))
             assertTrue(learning.drafts(newer, day).isEmpty())
-            db.commitLocal(listOf(CellDraft("payees", payee, "learn_categories", SyncValue.bool(true)), CellDraft("preferences", "learn-categories", "value", SyncValue.text("false"))))
+            assertTrue(payee in learning.payeesNotLearning())
+            learning.setPayeeLearns(payee, true)
+            learning.setEnabled(false)
+            assertTrue(!learning.enabled())
             assertTrue(learning.drafts(newer, day).isEmpty())
+            learning.setEnabled(true)
+            assertTrue(learning.drafts(newer, day).isNotEmpty())
         }
     }
 }

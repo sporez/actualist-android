@@ -93,6 +93,25 @@ class CategoryLearning(private val database: BudgetDatabase, private val newId: 
         return drafts
     }
 
+    /** Payees whose learning is switched off. */
+    fun payeesNotLearning(): Set<String> =
+        if (!database.tableExists("payees") || "learn_categories" !in database.columnSet("payees")) emptySet()
+        else sql.query("SELECT id FROM payees WHERE learn_categories = 0 AND (tombstone IS NULL OR tombstone = 0)").mapNotNull { it.string("id") }.toSet()
+
+    /** The budget-wide `learn-categories` preference, as Actualist writes it. */
+    fun setEnabled(enabled: Boolean): List<com.sporez.actualist.core.sync.SyncMessage> = database.commitLocal {
+        val drafts = mutableListOf(CellDraft("preferences", "learn-categories", "value", com.sporez.actualist.core.sync.SyncValue.text(enabled.toString())))
+        if (!database.rowExists("preferences", "learn-categories") && "tombstone" in database.columnSet("preferences")) {
+            drafts += CellDraft("preferences", "learn-categories", "tombstone", com.sporez.actualist.core.sync.SyncValue.bool(false))
+        }
+        drafts to Unit
+    }.messages
+
+    fun setPayeeLearns(payeeId: String, learns: Boolean): List<com.sporez.actualist.core.sync.SyncMessage> = database.commitLocal {
+        if (!database.liveRowExists("payees", payeeId)) throw com.sporez.actualist.core.LocalFirstException.InvalidLocalWrite("missing payee")
+        listOf(CellDraft("payees", payeeId, "learn_categories", com.sporez.actualist.core.sync.SyncValue.bool(learns))) to Unit
+    }.messages
+
     /** Commits what [drafts] plans, in its own batch (callers run it in the same session write as the edit). */
     fun learn(changedTransactionIds: Collection<String>, today: LocalDate): List<com.sporez.actualist.core.sync.SyncMessage> =
         database.commitLocal { drafts(changedTransactionIds, today) to Unit }.messages
