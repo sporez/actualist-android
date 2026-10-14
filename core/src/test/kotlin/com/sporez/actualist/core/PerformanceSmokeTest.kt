@@ -58,8 +58,13 @@ class PerformanceSmokeTest {
                 assertTrue("$label took ${millis}ms (limit $limitMillis)", millis < limitMillis)
                 return value
             }
-            val month = timed("budget month", 5_000) { BudgetReads(database).fetchBudgetMonth("2026-10") }
+            val reads = BudgetReads(database)
+            val month = timed("budget month", 5_000) { reads.fetchBudgetMonth("2026-10") }
             assertEquals(40, month.categories.count { !it.isIncome })
+            // Moving to another month reuses the memoized inputs; a write invalidates them.
+            timed("adjacent month (memoized inputs)", 5_000) { reads.fetchBudgetMonth("2026-09") }
+            com.sporez.actualist.core.budget.BudgetWrites(database).assign("2026-10", "c0-0", 99_999)
+            assertEquals(99_999L, reads.fetchBudgetMonth("2026-10").category("c0-0")!!.budgeted)
             timed("transaction list (500)", 3_000) { LedgerReads(database).transactions(TransactionQuery(limit = 500)) }
             timed("account balances", 2_000) { LedgerReads(database).accounts() }
             timed("reports dashboard", 5_000) { ReportReads(database).dashboard("2026-10", "2026-10-15") }

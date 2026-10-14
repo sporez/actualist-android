@@ -200,7 +200,19 @@ class BudgetReads(private val database: BudgetDatabase) {
         val previous: Map<String, CategoryValue>,
     )
 
-    fun categoryValueInputs(): Inputs {
+    private var inputsCache: Pair<Long, Inputs>? = null
+
+    /**
+     * The recurrence inputs, memoized by SQLite's `total_changes()` for this connection: every
+     * write in the app goes through the one connection, so an unchanged count means unchanged
+     * data, and moving between months reuses the two grouped scans.
+     */
+    fun categoryValueInputs(): Inputs = sql.locked {
+        val version = sql.queryLong("SELECT total_changes()") ?: -1L
+        inputsCache?.takeIf { it.first == version }?.second ?: loadInputs().also { inputsCache = version to it }
+    }
+
+    private fun loadInputs(): Inputs {
         val table = budgetTable()
         return Inputs(
             table = table,
