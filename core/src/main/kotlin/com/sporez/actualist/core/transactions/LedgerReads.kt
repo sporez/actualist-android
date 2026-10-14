@@ -167,7 +167,7 @@ class LedgerReads(private val database: BudgetDatabase) {
             predicates += "(lower(COALESCE(p.name, '')) LIKE ? OR lower(COALESCE(ta.name, '')) LIKE ? OR lower(COALESCE(${split.notes}, '')) LIKE ? " +
                 "OR lower(COALESCE(cat.name, '')) LIKE ? OR CAST(abs(${split.amount}) AS TEXT) LIKE ?)"
             val like = "%" + text.lowercase() + "%"
-            args += listOf(like, like, like, like, "%" + text.filter { it.isDigit() }.ifEmpty { "\u0000" } + "%")
+            args.addAll(listOf(like, like, like, like, "%" + text.filter { it.isDigit() }.ifEmpty { "\u0000" } + "%"))
         }
         args += query.limit
         val rows = sql.query(
