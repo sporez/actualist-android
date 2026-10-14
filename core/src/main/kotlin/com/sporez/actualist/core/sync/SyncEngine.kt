@@ -120,6 +120,10 @@ class SyncEngine(
         val remote = decode(combined)
         val localTimeChanged = database.localClockTimestamp != clockBefore
         val applied = database.applyRemoteMessages(remote, clock.nowMillis())
+        // While later outbox batches are unsent, the local trie holds changes the server
+        // has not seen, so the tries cannot match yet: compare after the last batch.
+        // (Upstream sends every pending change in one request and never reaches this.)
+        if (database.pendingLocalMessageCount() > 0) return applied
         return repullUntilMerkleMatches(token, applied, merkle, localTimeChanged)
     }
 
