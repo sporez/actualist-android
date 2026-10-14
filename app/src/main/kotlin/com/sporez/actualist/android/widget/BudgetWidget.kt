@@ -10,7 +10,6 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.provideContent
-import androidx.glance.appwidget.updateAll
 import androidx.glance.background
 import androidx.glance.layout.Column
 import androidx.glance.layout.Spacer
@@ -20,7 +19,6 @@ import androidx.glance.layout.padding
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import com.sporez.actualist.android.ActualistApplication
 import com.sporez.actualist.android.AppContainer
 import com.sporez.actualist.android.MainActivity
@@ -31,11 +29,11 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 /** What the widget shows: the selected budget's To Budget this month and its net worth. */
-data class WidgetSummary(val budgetName: String, val month: String, val toBudget: Long, val netWorth: Long, val hideAmounts: Boolean)
+data class WidgetSummary(val budgetName: String, val month: String, val toBudget: Long, val netWorth: Long, val hideAmounts: Boolean, val dark: Boolean = true)
 
 object WidgetData {
     /** Reads through the session hub, so an open budget is shared rather than opened twice. */
-    suspend fun load(container: AppContainer, today: LocalDate = LocalDate.now()): WidgetSummary? = withContext(Dispatchers.IO) {
+    suspend fun load(container: AppContainer, today: LocalDate = LocalDate.now(), context: Context? = null): WidgetSummary? = withContext(Dispatchers.IO) {
         val settings = container.settings.settings.value
         val id = settings.selectedBudgetId ?: return@withContext null
         val session = container.sessions.acquire(id) { container.library.open(id) ?: error("The selected budget is no longer on this device.") }
@@ -48,6 +46,7 @@ object WidgetData {
                     toBudget = budget.fetchBudgetMonth(month).toBudget,
                     netWorth = ledger.accounts().filter { !it.closed }.sumOf { it.balance },
                     hideAmounts = settings.hideAmounts,
+                    dark = context?.let { WidgetPalette.resolve(it, settings.themeMode).dark } ?: (settings.themeMode != com.sporez.actualist.android.data.ThemeMode.LIGHT),
                 )
             }
         } finally {
@@ -57,24 +56,25 @@ object WidgetData {
 
     /** Redraws every placed widget; cheap when none is placed. */
     suspend fun refresh(context: Context) {
-        runCatching { BudgetWidget().updateAll(context) }
+        Widgets.updateAll(context)
     }
 }
 
 class BudgetWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val container = (context.applicationContext as ActualistApplication).container
-        val summary = runCatching { WidgetData.load(container) }.getOrNull()
+        val summary = runCatching { WidgetData.load(container, context = context) }.getOrNull()
         provideContent { Content(summary) }
     }
 
     @androidx.compose.runtime.Composable
     private fun Content(summary: WidgetSummary?) {
-        val text = ColorProvider(androidx.compose.ui.graphics.Color(0xFFE6E6E6))
-        val muted = ColorProvider(androidx.compose.ui.graphics.Color(0xFFA0A0A0))
+        val palette = WidgetPalette(summary?.dark ?: true)
+        val text = palette.text
+        val muted = palette.muted
         fun amount(value: Long) = if (summary?.hideAmounts == true) "•••" else Money.format(value)
         Column(
-            GlanceModifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF1E1F22)).padding(14.dp)
+            GlanceModifier.fillMaxSize().background(palette.background).padding(14.dp)
                 .clickable(actionStartActivity<MainActivity>()),
         ) {
             if (summary == null) {

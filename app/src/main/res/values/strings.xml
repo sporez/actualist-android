@@ -2,4 +2,10 @@
     <string name="app_name">Actualist (Exp)</string>
     <string name="widget_name">Budget overview</string>
     <string name="widget_description">To Budget and net worth for the selected budget</string>
+    <string name="needs_attention_widget_name">Needs attention</string>
+    <string name="needs_attention_widget_description">Overspent categories and uncategorized transactions</string>
+    <string name="recent_transactions_widget_name">Recent transactions</string>
+    <string name="recent_transactions_widget_description">The latest transactions</string>
+    <string name="account_balances_widget_name">Account balances</string>
+    <string name="account_balances_widget_description">Balances of your on-budget accounts</string>
 </resources>

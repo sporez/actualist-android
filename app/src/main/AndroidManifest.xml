@@ -43,6 +43,39 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/budget_widget_info" />
         </receiver>
+        <receiver
+            android:name=".widget.AccountBalancesWidgetReceiver"
+            android:exported="true"
+            android:label="@string/account_balances_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/account_balances_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.RecentTransactionsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/recent_transactions_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/recent_transactions_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.NeedsAttentionWidgetReceiver"
+            android:exported="true"
+            android:label="@string/needs_attention_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/needs_attention_widget_info" />
+        </receiver>
     </application>
 
 </manifest>
