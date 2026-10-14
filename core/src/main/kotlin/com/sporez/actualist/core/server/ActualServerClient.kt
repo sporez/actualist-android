@@ -97,6 +97,26 @@ class ActualServerClient(
         }
     }
 
+    /**
+     * Starts an OpenID login (Actualist `beginOpenIDLogin`): the server answers with the identity
+     * provider URL to open in a browser, which finally redirects to [returnUrl]`/openid-cb?token=`.
+     */
+    fun beginOpenIdLogin(returnUrl: String, firstTimeLoginPassword: String? = null): String {
+        val payload = buildJsonObject {
+            put("loginMethod", "openid")
+            put("returnUrl", returnUrl)
+            firstTimeLoginPassword?.let { put("password", it) }
+        }.toString()
+        val text = execute(request("account/login").post(payload.toRequestBody(JSON)).build()) { it.bodyText() }
+        val root = parse(text)
+        val url = (root["returnUrl"] as? JsonPrimitive)?.contentOrNull
+            ?: ((root["data"] as? JsonObject)?.get("returnUrl") as? JsonPrimitive)?.contentOrNull
+            ?: throw ServerException.InvalidResponse()
+        val parsed = url.toHttpUrlOrNull() ?: throw OpenIdException("The server returned an invalid sign-in address.")
+        if (parsed.scheme != "http" && parsed.scheme != "https") throw OpenIdException("The server returned an invalid sign-in address.")
+        return url
+    }
+
     /** Password login; returns the session token. */
     fun login(password: String): String {
         val payload = buildJsonObject {
