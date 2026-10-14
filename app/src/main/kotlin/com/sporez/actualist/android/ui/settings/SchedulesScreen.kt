@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,6 +46,41 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
     fun post(item: ScheduleListItem) = write("Posted ${item.name}") { Schedules(database, clock).postNow(item.id, today()) }
     fun skip(item: ScheduleListItem) = write("Skipped to the next date") { Schedules(database, clock).skipNextDate(item.id) }
     fun complete(item: ScheduleListItem) = write("Completed") { Schedules(database, clock).complete(item.id) }
+    suspend fun choices(): Pair<List<com.sporez.actualist.android.ui.components.PickerOption>, List<com.sporez.actualist.android.ui.components.PickerOption>> = session.read {
+        ledger.accounts(includeClosed = false).map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name) } to
+            ledger.payees().filter { !it.isTransfer }.map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name) }
+    }
+
+    /**
+     * Creates a schedule through the ported schedule writer: [frequency] null is a one-time
+     * schedule; [approximate] matches amounts within Actual's 7.5% "isapprox" window.
+     */
+    fun create(name: String, accountId: String, payeeId: String?, amount: Long, approximate: Boolean, start: LocalDate, frequency: com.sporez.actualist.core.rules.ScheduleFrequency?, posts: Boolean) =
+        write("Added ${name.ifBlank { "schedule" }}") {
+            val operation = if (approximate) "isapprox" else "is"
+            val rule = if (frequency == null) {
+                com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), operation)
+            } else {
+                com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), frequency), operation)
+            }
+            Schedules(database, clock).create(
+                com.sporez.actualist.core.schedules.ScheduleCreateCommand(
+                    identity = com.sporez.actualist.core.schedules.ScheduleCreateIdentity.make(),
+                    name = name.trim().ifEmpty { null },
+                    definition = com.sporez.actualist.core.schedules.ScheduleDefinitionDraft(
+                        accountId = accountId,
+                        payeeMappingId = payeeId,
+                        amount = if (approximate) com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(amount)
+                        else com.sporez.actualist.core.schedules.ScheduleAmountDraft.Exact(amount),
+                        dateRule = rule,
+                    ),
+                    postsTransaction = posts,
+                    customUpcomingLength = null,
+                    asOfDayId = today(),
+                ),
+            )
+        }
+
     fun delete(item: ScheduleListItem) = write("Deleted ${item.name}") { Schedules(database, clock).delete(item.id) }
 
     private fun write(done: String, block: BudgetSession.() -> Any?) {
@@ -63,17 +99,99 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
 fun SchedulesScreen(viewModel: SchedulesViewModel) {
     val state by viewModel.schedules.collectAsState()
     val message by viewModel.messages.message.collectAsState()
+    var adding by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     when (val current = state) {
         Loadable.Loading -> LoadingBox()
         is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
-        is Loadable.Ready -> if (current.value.isEmpty()) {
-            MessageBox("No schedules", "Schedules created in Actual appear here.")
-        } else {
-            LazyColumn(Modifier.fillMaxSize().testTag("schedules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("schedules-message")) } }
-                items(current.value, key = { it.id }) { item -> ScheduleCard(item, viewModel) }
+        is Loadable.Ready -> LazyColumn(Modifier.fillMaxSize().testTag("schedules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                androidx.compose.material3.OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().testTag("schedule-add")) { Text("Add schedule") }
             }
+            message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("schedules-message")) } }
+            if (current.value.isEmpty()) item { Text("No schedules yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            items(current.value, key = { it.id }) { item -> ScheduleCard(item, viewModel) }
         }
+    }
+    if (adding) AddScheduleDialog(viewModel) { adding = false }
+}
+
+@Composable
+private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Unit) {
+    var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var amountText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var outflow by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
+    var approximate by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
+    var posts by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var startText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(LocalDate.now().plusDays(1).toString()) }
+    var frequency by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("MONTHLY") }
+    var accountId by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var payeeId by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var choices by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Pair<List<com.sporez.actualist.android.ui.components.PickerOption>, List<com.sporez.actualist.android.ui.components.PickerOption>>?>(null) }
+    var picking by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { choices = viewModel.choices() }
+    val magnitude = com.sporez.actualist.core.money.Money.parse(amountText)
+    val start = runCatching { LocalDate.parse(startText.trim()) }.getOrNull()
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add schedule") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("schedule-dialog")) {
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("schedule-name"))
+                TextButton(onClick = { picking = "account" }, modifier = Modifier.testTag("schedule-account")) {
+                    Text(choices?.first?.firstOrNull { it.id == accountId }?.title ?: "Choose an account")
+                }
+                TextButton(onClick = { picking = "payee" }, modifier = Modifier.testTag("schedule-payee")) {
+                    Text(choices?.second?.firstOrNull { it.id == payeeId }?.title ?: "Choose a payee (optional)")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.FilterChip(selected = outflow, onClick = { outflow = true }, label = { Text("Outflow") })
+                    androidx.compose.material3.FilterChip(selected = !outflow, onClick = { outflow = false }, label = { Text("Inflow") }, modifier = Modifier.padding(start = 6.dp))
+                }
+                com.sporez.actualist.android.ui.components.AmountField(amountText, { amountText = it }, label = "Amount", tag = "schedule-amount")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = approximate, onCheckedChange = { approximate = it })
+                    Text("Approximate amount")
+                }
+                androidx.compose.material3.OutlinedTextField(startText, { startText = it }, label = { Text("First date (YYYY-MM-DD)") }, singleLine = true, isError = start == null, modifier = Modifier.fillMaxWidth().testTag("schedule-start"))
+                Row {
+                    for ((key, label) in listOf("ONCE" to "Once", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly", "YEARLY" to "Yearly")) {
+                        androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-frequency-$key"))
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
+                    Text("Post the transaction automatically")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = accountId != null && magnitude != null && magnitude != 0L && start != null,
+                onClick = {
+                    val signed = kotlin.math.abs(magnitude!!).let { if (outflow) -it else it }
+                    val freq = if (frequency == "ONCE") null else com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)
+                    viewModel.create(name, accountId!!, payeeId, signed, approximate, start!!, freq, posts)
+                    onDismiss()
+                },
+                modifier = Modifier.testTag("schedule-save"),
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+    when (picking) {
+        "account" -> com.sporez.actualist.android.ui.components.PickerDialog(
+            title = "Account",
+            options = choices?.first.orEmpty(),
+            onPick = { accountId = it.id; picking = null },
+            onDismiss = { picking = null },
+        )
+        "payee" -> com.sporez.actualist.android.ui.components.PickerDialog(
+            title = "Payee",
+            options = listOf(com.sporez.actualist.android.ui.components.PickerOption(null, "No payee")) + choices?.second.orEmpty(),
+            searchable = true,
+            onPick = { payeeId = it.id; picking = null },
+            onDismiss = { picking = null },
+        )
     }
 }
 

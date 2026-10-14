@@ -230,6 +230,25 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun addsASchedule() {
+        openDemo()
+        compose.onNodeWithTag("open-settings").performClick()
+        compose.waitForTag("settings-screen")
+        compose.onNodeWithTag("show-schedules").performClick()
+        compose.waitForTag("schedule-add")
+        compose.onNodeWithTag("schedule-add").performClick()
+        compose.waitForTag("schedule-dialog")
+        compose.onNodeWithTag("schedule-name").performTextInput("Synthetic Gym")
+        compose.onNodeWithTag("schedule-account").performClick()
+        compose.waitForTag("pick-checking")
+        compose.onNodeWithTag("pick-checking").performClick()
+        compose.onNodeWithTag("schedule-amount").performTextInput("40.00")
+        compose.screenshot("18-add-schedule")
+        compose.onNodeWithTag("schedule-save").performClick()
+        compose.waitOrCapture("schedule-added") { compose.onAllNodes(hasText("Synthetic Gym")).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()
