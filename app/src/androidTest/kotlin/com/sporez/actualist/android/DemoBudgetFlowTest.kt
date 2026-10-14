@@ -94,6 +94,13 @@ class DemoBudgetFlowTest {
         compose.waitUntil(30_000) { toBudgetText() != before }
         assertNotEquals(before, toBudgetText())
         compose.screenshot("08-after-assign")
+        // Undo restores To Budget; redo applies the assignment again.
+        val assigned = toBudgetText()
+        compose.onNodeWithTag("undo").performClick()
+        compose.waitUntil(30_000) { toBudgetText() == before }
+        compose.waitForTag("redo")
+        compose.onNodeWithTag("redo").performClick()
+        compose.waitUntil(30_000) { toBudgetText() == assigned }
     }
 
     @Test

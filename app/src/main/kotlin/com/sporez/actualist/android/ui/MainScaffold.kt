@@ -5,6 +5,8 @@ package com.sporez.actualist.android.ui
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CreditCard
@@ -78,6 +80,19 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
     val syncStatus by session.syncStatus.collectAsState()
     val scope = rememberCoroutineScope()
     val key = "session-${System.identityHashCode(session)}"
+    val undoState by session.undoState.collectAsState()
+    val snackbar = androidx.compose.runtime.remember { androidx.compose.material3.SnackbarHostState() }
+    fun historyStep(undo: Boolean) {
+        scope.launch {
+            val message = try {
+                val stepped = if (undo) session.undo() else session.redo()
+                if (!stepped) null else if (undo) "Undone" else "Redone"
+            } catch (error: Exception) {
+                error.message ?: "That could not be undone."
+            }
+            message?.let { snackbar.showSnackbar(it) }
+        }
+    }
 
     // Pull from the server when a synced budget opens; demo budgets never touch the network.
     LaunchedEffect(session) { if (!session.isDemo) container.server.sync(session) }
@@ -96,6 +111,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
     }
 
     Scaffold(
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
             // The transaction editor has its own header with close and save.
             if (!route.startsWith("transaction")) TopAppBar(
@@ -124,6 +140,16 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                     }
                 },
                 actions = {
+                    if (isTab) {
+                        IconButton(onClick = { historyStep(undo = true) }, enabled = undoState.canUndo, modifier = Modifier.testTag("undo")) {
+                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                        }
+                        if (undoState.canRedo) {
+                            IconButton(onClick = { historyStep(undo = false) }, modifier = Modifier.testTag("redo")) {
+                                Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                            }
+                        }
+                    }
                     if (!session.isDemo) {
                         IconButton(onClick = { scope.launch { container.server.sync(session) } }, modifier = Modifier.testTag("sync-button")) {
                             Icon(if (syncStatus is SyncStatus.Failed) Icons.Filled.SyncProblem else Icons.Filled.Sync, contentDescription = "Sync")

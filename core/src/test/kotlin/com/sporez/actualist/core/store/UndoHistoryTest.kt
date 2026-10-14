@@ -70,10 +70,17 @@ class UndoHistoryTest {
 
     @Test
     fun aNoteUndoesToNull() = demo { db, history ->
-        history.record { db.commitLocal(listOf(CellDraft("notes", "budget-2026-10", "note", SyncValue.text("Synthetic note")))) }
-        assertEquals("Synthetic note", BudgetReads(db).monthNote("2026-10"))
+        // A month without a note: the note row is new, so undo writes null (Actual's rule for notes).
+        assertNull(BudgetReads(db).monthNote("2027-03"))
+        history.record { db.commitLocal(listOf(CellDraft("notes", "budget-2027-03", "note", SyncValue.text("Synthetic note")))) }
+        assertEquals("Synthetic note", BudgetReads(db).monthNote("2027-03"))
         history.undo()
-        assertNull(BudgetReads(db).monthNote("2026-10"))
+        assertNull(BudgetReads(db).monthNote("2027-03"))
+        // An existing note goes back to its old text.
+        val october = BudgetReads(db).monthNote("2026-10")
+        history.record { db.commitLocal(listOf(CellDraft("notes", "budget-2026-10", "note", SyncValue.text("Replaced")))) }
+        history.undo()
+        assertEquals(october, BudgetReads(db).monthNote("2026-10"))
     }
 
     @Test

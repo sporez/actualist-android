@@ -18,7 +18,7 @@ import com.sporez.actualist.core.sync.SyncMessage
  */
 class UndoHistory(private val database: BudgetDatabase, private val limit: Int = 100) {
     private class Entry(val batches: List<UndoBatch>) {
-        /** The messages whose cells must still be winning for the next undo or redo. */
+        /** The messages whose values must still be in place for the next undo or redo. */
         var current: List<SyncMessage> = batches.flatMap { it.messages }
     }
 
@@ -81,13 +81,28 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
         cursor = 0
     }
 
+    /**
+     * Every cell must still hold the value [messages] left in it (the last write per cell). Values,
+     * not timestamps: undoing a later gesture legitimately rewrites cells an earlier one set.
+     */
     private fun requireUnchanged(messages: List<SyncMessage>, reason: String) {
         val latest = LinkedHashMap<Triple<String, String, String>, String>()
-        for (message in messages) latest[Triple(message.dataset, message.row, message.column)] = message.timestamp
-        for ((cell, timestamp) in latest) {
-            if (database.winningTimestamp(cell.first, cell.second, cell.third) != timestamp) {
+        for (message in messages) latest[Triple(message.dataset, message.row, message.column)] = message.serializedValue
+        for ((cell, serialized) in latest) {
+            if (!sameValue(database.cellValue(cell.first, cell.second, cell.third).serialized, serialized)) {
                 throw LocalFirstException.InvalidLocalWrite(reason)
             }
         }
+    }
+
+    /** SQLite may store a number written as text in a numeric column; compare the payloads. */
+    private fun sameValue(stored: String, written: String): Boolean {
+        if (stored == written) return true
+        val a = stored.substringAfter(':')
+        val b = written.substringAfter(':')
+        if (stored.startsWith("0:") || written.startsWith("0:")) return false
+        val x = a.toDoubleOrNull()
+        val y = b.toDoubleOrNull()
+        return a == b || (x != null && y != null && x == y)
     }
 }

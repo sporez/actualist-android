@@ -3,7 +3,10 @@ package com.sporez.actualist.core.commands
 import com.sporez.actualist.core.LocalFirstException
 import com.sporez.actualist.core.TestClock
 import com.sporez.actualist.core.TestDatabases
+import com.sporez.actualist.core.db.CellDraft
 import com.sporez.actualist.core.db.Sql
+import com.sporez.actualist.core.store.UndoHistory
+import com.sporez.actualist.core.sync.SyncValue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -46,11 +49,13 @@ enum class DivergenceKind {
  * Actualist writes only changed cells). Minted ids are compared by structure: a new row is named
  * by its own content, and its parent or transfer link by the linked row's content.
  *
- * NOT YET PORTED: the `undo` half of every case. Actualist undoes a command through its action
- * log, which this port does not have, so every comparison under the fixture's `undo` key, and the
- * `conflict` edit that precedes the undo, is skipped. Two cases exist only to test undo
- * (M4-undo-conflict-after-merge, M4-undo-restores-both-graphs); their merge step is replayed in
- * full, their undo is the part that is not ported.
+ * The `undo` half is replayed too: the command runs inside [UndoHistory.record], the fixture's
+ * `conflict` edit (if any) is committed afterwards outside it, and [UndoHistory.undo] is compared
+ * as Actualist compares it: the undo outcome ("ok", or "blocked" when the undo is refused), the
+ * canonical rows after undo, and, for the case with rules, the live rule count after undo. The
+ * undo CRDT messages are not compared, as in the Swift replay. M4-undo-conflict-after-merge is
+ * excused as OP-76: our undo is blocked where Actual's overwrites the later edit; the refusal and
+ * the post-conflict rows are asserted.
  */
 @RunWith(Parameterized::class)
 class TransactionCommandOracleReplayTest(private val caseId: String) {
@@ -120,12 +125,6 @@ class TransactionCommandOracleReplayTest(private val caseId: String) {
             "M4-undo-restores-both-graphs",
         )
 
-        /**
-         * Cases whose point is the undo, which needs the action log this port lacks. Their merge
-         * step is still replayed above; only the undo comparison is not ported.
-         */
-        val notYetPorted: Set<String> = setOf("M4-undo-conflict-after-merge", "M4-undo-restores-both-graphs")
-
         /** Actualist's registered divergences for this domain (known-divergences.json, OP-70 to OP-76). */
         val divergences: Map<String, Pair<String, DivergenceKind>> = mapOf(
             "D2-split-error-clone" to ("OP-70" to DivergenceKind.REFUSED_WHERE_ACTUAL_ALLOWS),
@@ -165,7 +164,15 @@ class TransactionCommandOracleReplayTest(private val caseId: String) {
         )
     }
 
-    private data class Observed(val outcome: String, val kept: String?, val rows: List<Map<String, Any?>>, val liveRules: Long?)
+    private data class Observed(
+        val outcome: String,
+        val kept: String?,
+        val rows: List<Map<String, Any?>>,
+        val liveRules: Long?,
+        val undoOutcome: String? = null,
+        val undoRows: List<Map<String, Any?>>? = null,
+        val liveRulesAfterUndo: Long? = null,
+    )
 
     @Test
     fun replaysTransactionCommandCase() {
@@ -200,9 +207,18 @@ class TransactionCommandOracleReplayTest(private val caseId: String) {
                 mismatches.filter { transferLinks.matches(it) }
             }
             DivergenceKind.UNDO_BLOCKED_AFTER_LATER_EDIT -> {
-                // Only the undo diverges, and the undo is not ported: the merge step stays strict.
-                assertEquals("ok", entry["undo"]!!.jsonObject["outcome"]!!.jsonPrimitive.content)
-                emptyList()
+                // Only the undo diverges: the merge step stays strict. Actual's undo succeeds and
+                // overwrites the later edit; ours is refused and leaves the post-conflict rows.
+                assertEquals("ok", expected.undoOutcome)
+                assertEquals("blocked", actual.undoOutcome)
+                val postConflict = canonical(
+                    fixtureRows(entry["conflict"]!!.jsonObject["rowsAfterMutation"]!!.jsonArray),
+                    seeded,
+                )
+                assertEquals(postConflict, actual.undoRows)
+                val undoMismatches = mismatches.filter { it.startsWith("undo.") }
+                assertTrue("the excused undo difference must still exist", undoMismatches.isNotEmpty())
+                undoMismatches
             }
         }
         val strict = mismatches.filter { it !in known }
@@ -217,8 +233,12 @@ class TransactionCommandOracleReplayTest(private val caseId: String) {
         val rows = canonical(fixtureRows(afterHandler["transactions"]!!.jsonArray), seeded)
         if (handler["outcome"]!!.jsonPrimitive.content != "ok") return Observed("refused", null, rows, null)
         val kept = (handler["result"] as? JsonPrimitive)?.takeIf { it.isString }?.content
-        val liveRules = (entry["rules"] as? JsonObject)?.get("afterHandler")?.jsonArray?.size?.toLong()
-        return Observed("ok", kept, rows, liveRules)
+        val rules = entry["rules"] as? JsonObject
+        val liveRules = rules?.get("afterHandler")?.jsonArray?.size?.toLong()
+        val liveRulesAfterUndo = rules?.get("afterUndo")?.jsonArray?.size?.toLong()
+        val undo = entry["undo"]!!.jsonObject
+        val undoRows = canonical(fixtureRows(undo["transactions"]!!.jsonArray), seeded)
+        return Observed("ok", kept, rows, liveRules, undo["outcome"]!!.jsonPrimitive.content, undoRows, liveRulesAfterUndo)
     }
 
     private fun fixtureRows(array: JsonArray): List<Map<String, Any?>> = array.map { element ->
@@ -240,18 +260,22 @@ class TransactionCommandOracleReplayTest(private val caseId: String) {
         var counter = 0
         return TestDatabases.starter("node1", clock).use { database ->
             seed(database.sql, input)
+            // Created after seeding, so the seed is not an undoable gesture.
+            val history = UndoHistory(database)
             val commands = TransactionCommands(database, clock) { "uuid-${++counter}" }
             val selected = entry["selected"]!!.jsonArray.map { it.jsonPrimitive.content }
 
             var kept: String? = null
             val outcome = try {
-                if (caseId.startsWith("D")) {
-                    commands.duplicate(selected)
-                } else {
-                    val preview = commands.previewMerge(selected[0], selected[1])
-                    // Actual merges reconciled rows without asking; Actualist asks first, so the
-                    // replay answers the confirmation. That is a UI step, not a refusal.
-                    kept = commands.merge(selected[0], selected[1], allowReconciled = preview.reconciledIds.isNotEmpty()).keeperId
+                history.record {
+                    if (caseId.startsWith("D")) {
+                        commands.duplicate(selected)
+                    } else {
+                        val preview = commands.previewMerge(selected[0], selected[1])
+                        // Actual merges reconciled rows without asking; Actualist asks first, so the
+                        // replay answers the confirmation. That is a UI step, not a refusal.
+                        kept = commands.merge(selected[0], selected[1], allowReconciled = preview.reconciledIds.isNotEmpty()).keeperId
+                    }
                 }
                 "ok"
             } catch (refusal: LocalFirstException.InvalidLocalWrite) {
@@ -259,13 +283,49 @@ class TransactionCommandOracleReplayTest(private val caseId: String) {
             }
 
             val rows = canonical(readRows(database.sql), seeded)
-            val liveRules = database.sql.queryLong("SELECT COUNT(*) FROM rules WHERE COALESCE(tombstone, 0) = 0") ?: 0L
             if (outcome != "ok") {
                 Observed("refused", null, rows, null)
             } else {
-                Observed("ok", kept, rows, if (entry["rules"] != null) liveRules else null)
+                val liveRules = ruleCount(database.sql)
+
+                // The fixture's post-command edit, written outside the recorded gesture like a later user edit.
+                val conflict = entry["conflict"] as? JsonObject
+                if (conflict != null) {
+                    val drafts = conflict["messages"]!!.jsonArray.map { element ->
+                        val message = element.jsonObject
+                        CellDraft(
+                            message["dataset"]!!.jsonPrimitive.content,
+                            message["row"]!!.jsonPrimitive.content,
+                            message["column"]!!.jsonPrimitive.content,
+                            syncValue(jsonValue(message["value"] ?: JsonNull)),
+                        )
+                    }
+                    database.commitLocal(drafts)
+                }
+
+                val undoOutcome = try {
+                    if (history.undo() == null) "missing" else "ok"
+                } catch (blocked: LocalFirstException.InvalidLocalWrite) {
+                    "blocked"
+                }
+                Observed(
+                    "ok", kept, rows, if (entry["rules"] != null) liveRules else null,
+                    undoOutcome, canonical(readRows(database.sql), seeded),
+                    if (entry["rules"] != null) ruleCount(database.sql) else null,
+                )
             }
         }
+    }
+
+    private fun ruleCount(sql: Sql): Long =
+        sql.queryLong("SELECT COUNT(*) FROM rules WHERE COALESCE(tombstone, 0) = 0") ?: 0L
+
+    private fun syncValue(value: Any?): SyncValue = when (value) {
+        null -> SyncValue.Null
+        is String -> SyncValue.Text(value)
+        is Long -> SyncValue.Integer(value)
+        is Double -> SyncValue.Real(value)
+        else -> SyncValue.Null
     }
 
     private fun readRows(sql: Sql): List<Map<String, Any?>> = sql.query("SELECT * FROM transactions").map { row ->
@@ -370,6 +430,19 @@ class TransactionCommandOracleReplayTest(private val caseId: String) {
         }
         if (entry["rules"] != null && expected.outcome == "ok" && actual.outcome == "ok") {
             differ("rules.afterHandler", expected.liveRules, actual.liveRules)
+            differ("rules.afterUndo", expected.liveRulesAfterUndo, actual.liveRulesAfterUndo)
+        }
+        // Compared as in the Swift replay: the undo outcome and the rows after undo, not the messages.
+        if (expected.outcome == "ok" && actual.outcome == "ok") {
+            differ("undo.outcome", expected.undoOutcome, actual.undoOutcome)
+            val wantRows = expected.undoRows!!
+            val gotRows = actual.undoRows!!
+            differ("undo.rows.count", wantRows.size, gotRows.size)
+            for (index in 0 until minOf(wantRows.size, gotRows.size)) {
+                val want = wantRows[index]
+                val got = gotRows[index]
+                for (key in (want.keys + got.keys).sorted()) differ("undo.rows[$index].$key", want[key], got[key])
+            }
         }
         return mismatches
     }
@@ -390,16 +463,15 @@ class TransactionCommandOracleManifestTest {
         val replayed = TransactionCommandOracleReplayTest.replayedCaseIds
         assertEquals("replayed ids must be unique", replayed.size, replayed.toSet().size)
         val excused = TransactionCommandOracleReplayTest.divergences.keys
-        val notYetPorted = TransactionCommandOracleReplayTest.notYetPorted
-        val unaccounted = fixtureIds.filter { it !in replayed && it !in excused && it !in notYetPorted }
+        val unaccounted = fixtureIds.filter { it !in replayed && it !in excused }
         assertTrue("unaccounted cases: $unaccounted", unaccounted.isEmpty())
-        val unknown = (replayed + excused + notYetPorted).filter { it !in fixtureIds }
+        val unknown = (replayed + excused).filter { it !in fixtureIds }
         assertTrue("unknown cases: $unknown", unknown.isEmpty())
-        // Excused and not-yet-ported cases still replay their handler step in full.
-        assertTrue((excused + notYetPorted).all { it in replayed })
+        // Excused cases still replay in full; only their registered difference is excused.
+        assertTrue(excused.all { it in replayed })
         println(
-            "transaction-command oracle: ${replayed.size} replayed (handler step), ${excused.size} excused as Actualist excuses them, " +
-                "${notYetPorted.size} undo-only cases not yet ported; undo comparisons skipped for every case",
+            "transaction-command oracle: ${replayed.size} replayed (handler and undo halves), " +
+                "${excused.size} excused as Actualist excuses them (OP-70 to OP-76)",
         )
     }
 }

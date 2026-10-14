@@ -371,10 +371,9 @@ class BudgetDatabase private constructor(
     @Volatile
     var undoListener: ((UndoBatch) -> Unit)? = null
 
-    /** The timestamp currently winning a cell, or null when nothing was ever written to it. */
-    fun winningTimestamp(dataset: String, row: String, column: String): String? = sql.queryString(
-        "SELECT MAX(timestamp) FROM messages_crdt WHERE dataset = ? AND row = ? AND column = ?",
-        dataset, row, column,
+    /** A cell's stored value as a [SyncValue] (Null when the row does not exist). */
+    fun cellValue(dataset: String, row: String, column: String): SyncValue = UndoBatch.sqlToSyncValue(
+        sql.queryOne("SELECT ${Sql.quoted(column)} AS v FROM ${Sql.quoted(dataset)} WHERE id = ? LIMIT 1", row)?.get("v"),
     )
 
     fun commitLocal(drafts: List<CellDraft>, nowMillis: Long = clock.nowMillis()): List<SyncMessage> =
