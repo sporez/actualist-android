@@ -1,5 +1,6 @@
 package com.sporez.actualist.android.ui.transactions
 
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
