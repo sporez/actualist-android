@@ -56,7 +56,7 @@ class DemoBudgetTest {
             // Savings goals roll over and so carry their whole balance forward.
             val vacation = october.category("vacation")!!
             assertTrue(vacation.carryover)
-            assertEquals(7 * 20_000L, vacation.balance)
+            assertEquals(7 * 20_000L + 200_000L, vacation.balance)
             assertEquals("Demo month. Every number here is synthetic.", database.sql.queryString("SELECT note FROM notes WHERE id = 'budget-2026-10'"))
 
             // The demo's rules run through the ported engine: a cafe purchase is categorized as dining.

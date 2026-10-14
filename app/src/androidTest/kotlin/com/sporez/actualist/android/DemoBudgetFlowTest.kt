@@ -40,7 +40,7 @@ class DemoBudgetFlowTest {
     }
 
     private fun toBudgetText(): String =
-        compose.onNodeWithTag("to-budget-amount").fetchSemanticsNode().config
+        compose.onNodeWithTag("to-budget-amount", useUnmergedTree = true).fetchSemanticsNode().config
             .let { config -> config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text } }
 
     @Test
@@ -116,6 +116,46 @@ class DemoBudgetFlowTest {
         compose.waitUntil(30_000) { compose.onAllNodesWithText("Synthetic Corner Cafe").fetchSemanticsNodes().isNotEmpty() }
         assertTrue(compose.onAllNodes(hasText("-$12.34")).fetchSemanticsNodes().isNotEmpty())
         compose.screenshot("10-after-add")
+    }
+
+    @Test
+    fun rulePreviewCategorizesFromThePayee() {
+        openDemo()
+        compose.onNodeWithTag("tab-spending").performClick()
+        compose.waitForTag("transaction-list")
+        compose.onNodeWithTag("add-transaction").performClick()
+        compose.waitForTag("transaction-editor")
+        compose.onNodeWithTag("editor-amount").performTextInput("4.50")
+        compose.onNodeWithTag("editor-payee").performClick()
+        compose.waitForTag("picker-search")
+        compose.onNodeWithTag("picker-search").performTextInput("Daily Grind")
+        compose.onNodeWithTag("pick-cafe").performClick()
+        // The demo rule "payee is Daily Grind -> Dining" fills the category before saving.
+        compose.waitForTag("rules-applied")
+        compose.onNodeWithTag("editor-category", useUnmergedTree = false).assertExists()
+        assertTrue(compose.onAllNodes(hasText("Dining")).fetchSemanticsNodes().isNotEmpty())
+        compose.screenshot("11-rule-preview")
+        compose.onNodeWithTag("editor-save").performClick()
+        compose.waitForTag("transaction-list")
+    }
+
+    @Test
+    fun reconcilesAnAccount() {
+        openDemo()
+        compose.onNodeWithTag("tab-accounts").performClick()
+        compose.waitForTag("budget-accounts")
+        compose.onNodeWithTag("account-savings").performClick()
+        compose.waitForTag("account-balance")
+        compose.onNodeWithTag("reconcile").performClick()
+        compose.waitForTag("reconcile-balance")
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Cleared balance: …")).fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("reconcile-balance").performTextInput("20000.00")
+        compose.waitForTag("reconcile-difference")
+        compose.screenshot("12-reconcile")
+        compose.onNodeWithTag("reconcile-finish").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Reconciled and locked")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Reconciliation balance adjustment", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("13-after-reconcile")
     }
 
     @Test

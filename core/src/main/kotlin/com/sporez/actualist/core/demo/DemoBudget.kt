@@ -189,6 +189,11 @@ object DemoBudget {
             }
             month = month.plusMonths(1)
         }
+        // The starting balances fund the savings goals in the first month, as a new user would.
+        val firstKey = firstMonth.year * 100 + firstMonth.monthValue
+        for ((id, amount) in listOf("emergency_fund" to 1_000_000L, "vacation" to 200_000L, "retirement" to 300_000L)) {
+            cell("zero_budgets", "$firstKey-$id", "amount", SyncValue.int(amount + categories.first { it.id == id }.monthlyBudget))
+        }
         // Savings goals roll over, as people use them for sinking funds.
         val anchorKey = Months.id(anchorMonth.year, anchorMonth.monthValue)
         for (id in listOf("emergency_fund", "vacation", "retirement")) {
