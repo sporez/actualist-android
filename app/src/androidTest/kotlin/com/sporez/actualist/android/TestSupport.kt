@@ -19,6 +19,9 @@ class FreshAppState : ExternalResource() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val container = (context.applicationContext as ActualistApplication).container
         container.settings.update { Settings() }
+        // A previous test's activity may not have finished cleanly: drop its sessions before
+        // deleting the files they point at.
+        container.sessions.closeAll()
         container.library.list().forEach { container.library.delete(it.id) }
         container.secrets.clear()
     }

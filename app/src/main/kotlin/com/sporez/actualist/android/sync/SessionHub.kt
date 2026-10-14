@@ -29,7 +29,8 @@ class SessionHub {
     fun release(session: BudgetSession) {
         val entry = held[session.budgetId]
         if (entry == null || entry.session !== session) {
-            session.close()
+            // Not held (already closed by closeAll, or never acquired here): closing twice is harmless.
+            runCatching { session.close() }
             return
         }
         entry.count -= 1
@@ -37,5 +38,16 @@ class SessionHub {
             held.remove(session.budgetId)
             session.close()
         }
+    }
+
+    /**
+     * Closes every open session, whoever holds it. For resetting the app's data (tests delete the
+     * budget files): a session left open by an activity that never finished would otherwise keep
+     * serving a file that no longer exists.
+     */
+    @Synchronized
+    fun closeAll() {
+        for (entry in held.values) runCatching { entry.session.close() }
+        held.clear()
     }
 }
