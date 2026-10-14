@@ -501,25 +501,66 @@ private fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
 
 
 /**
- * A monthly amount template (Actual's "simple" template), edited through the ported template
- * editor model. Other template kinds are listed read-only; they can still be removed here.
+ * The category's template, edited through the ported template editor model: a monthly amount,
+ * saving toward a total by a month, an average of recent months, the same as an earlier month, or
+ * a balance goal. Templates with several entries or other kinds are shown read-only and can be
+ * removed; the editor's validation (Actualist's) refuses anything Actual would reject.
  */
 @Composable
 private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: (saved: Boolean) -> Unit) {
     var draft by remember { mutableStateOf<com.sporez.actualist.core.templates.editor.TemplateEditorDraft?>(null) }
     var loaded by remember { mutableStateOf(false) }
+    var kind by rememberSaveable(category.id) { mutableStateOf("monthly") }
     var amountText by rememberSaveable(category.id) { mutableStateOf("") }
+    var monthText by rememberSaveable(category.id) { mutableStateOf(java.time.YearMonth.now().plusMonths(6).toString()) }
+    var countText by rememberSaveable(category.id) { mutableStateOf("3") }
     androidx.compose.runtime.LaunchedEffect(category.id) {
         draft = runCatching { viewModel.templateDraft(category.id) }.getOrNull()
-        val monthly = draft?.entries?.singleOrNull() as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed
-        if (monthly != null) amountText = Money.format(Math.round(monthly.amount * 100), symbol = "", grouping = false)
+        fun money(value: Double) = Money.format(Math.round(value * 100), symbol = "", grouping = false)
+        when (val entry = draft?.entries?.singleOrNull()) {
+            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed -> { kind = "monthly"; amountText = money(entry.amount) }
+            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DateTarget -> { kind = "by"; amountText = money(entry.amount); monthText = entry.month }
+            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average -> { kind = "average"; countText = entry.numMonths.toString() }
+            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy -> { kind = "copy"; countText = entry.lookBack.toString() }
+            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal -> { kind = "goal"; amountText = money(entry.amount) }
+            else -> {}
+        }
         loaded = true
     }
     val current = draft
-    val monthly = current?.entries?.singleOrNull() as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed
-    val simple = current != null && (current.entries.isEmpty() ||
-        (monthly != null && monthly.cadence == com.sporez.actualist.core.templates.editor.TemplateCadence.MONTH && monthly.interval == 1))
+    val single = current?.entries?.singleOrNull()
+    // Editable here: no template yet, or exactly one entry of a kind this dialog offers, in its plain form.
+    val editable = current != null && (
+        current.entries.isEmpty() ||
+            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed &&
+                single.cadence == com.sporez.actualist.core.templates.editor.TemplateCadence.MONTH && single.interval == 1) ||
+            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DateTarget && single.repeatInterval == null && !single.isSpend) ||
+            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average && single.adjustment == null) ||
+            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy && single.legacyLimit == null) ||
+            single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal
+        )
     val amount = Money.parse(amountText)
+    val count = countText.trim().toIntOrNull()
+    val month = runCatching { java.time.YearMonth.parse(monthText.trim()) }.getOrNull()
+    fun entry(): com.sporez.actualist.core.templates.editor.TemplateDraftEntry? {
+        val priority = (single as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed)?.priority
+            ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DEFAULT_PRIORITY
+        return when (kind) {
+            "monthly" -> amount?.takeIf { it > 0 }?.let { value ->
+                (single as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed)?.copy(amount = value / 100.0)
+                    ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.monthlyFixed(amount = value / 100.0, priority = priority)
+            }
+            "by" -> if (amount != null && amount > 0 && month != null) {
+                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.dateTarget(
+                    amount = amount / 100.0, month = month.toString(), priority = priority, repeatInterval = null, annual = false, isSpend = false,
+                )
+            } else null
+            "average" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.average(numMonths = it, priority = priority) }
+            "copy" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.copyPrevious(lookBack = it, priority = priority) }
+            "goal" -> amount?.takeIf { it > 0 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.goal(amount = it / 100.0) }
+            else -> null
+        }
+    }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = { onDismiss(false) },
         title = { Text("Template for ${category.name}") },
@@ -528,22 +569,49 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
                 when {
                     !loaded -> Text("Reading the template…")
                     current == null -> Text("This template is managed in the category's note or uses options this app cannot change. Edit it in Actual.")
-                    simple -> {
-                        Text("Budget this amount every month when templates are applied.", style = MaterialTheme.typography.bodySmall)
-                        AmountField(amountText, { amountText = it }, label = "Monthly amount", tag = "template-amount")
+                    editable -> {
+                        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val kinds = listOf("monthly" to "Monthly", "by" to "By date", "average" to "Average", "copy" to "Copy", "goal" to "Goal")
+                            items(kinds.size) { index ->
+                                val (key, label) = kinds[index]
+                                androidx.compose.material3.FilterChip(
+                                    selected = kind == key,
+                                    onClick = { kind = key },
+                                    label = { Text(label) },
+                                    modifier = Modifier.testTag("template-kind-$key"),
+                                )
+                            }
+                        }
+                        when (kind) {
+                            "monthly" -> {
+                                Text("Budget this amount every month.", style = MaterialTheme.typography.bodySmall)
+                                AmountField(amountText, { amountText = it }, label = "Monthly amount", tag = "template-amount")
+                            }
+                            "by" -> {
+                                Text("Save toward a total by a month; the monthly amount is worked out for you.", style = MaterialTheme.typography.bodySmall)
+                                AmountField(amountText, { amountText = it }, label = "Total", tag = "template-amount")
+                                androidx.compose.material3.OutlinedTextField(monthText, { monthText = it }, label = { Text("By month (YYYY-MM)") }, singleLine = true, isError = month == null, modifier = Modifier.fillMaxWidth().testTag("template-month"))
+                            }
+                            "average", "copy" -> {
+                                Text(if (kind == "average") "Budget the average spent over the last months." else "Budget what was budgeted that many months ago.", style = MaterialTheme.typography.bodySmall)
+                                androidx.compose.material3.OutlinedTextField(countText, { countText = it.filter(Char::isDigit) }, label = { Text("Months (1-12)") }, singleLine = true, isError = count == null || count !in 1..12, modifier = Modifier.fillMaxWidth().testTag("template-months"))
+                            }
+                            "goal" -> {
+                                Text("A balance goal shown on the category; it does not assign money by itself.", style = MaterialTheme.typography.bodySmall)
+                                AmountField(amountText, { amountText = it }, label = "Goal balance", tag = "template-amount")
+                            }
+                        }
                     }
                     else -> Text("${current.entries.size} template entries this app shows read-only. Edit them in Actual, or remove the template here.")
                 }
             }
         },
         confirmButton = {
+            val next = if (editable) entry() else null
             TextButton(
-                enabled = simple && amount != null && amount > 0,
+                enabled = next != null,
                 onClick = {
-                    val value = amount!! / 100.0
-                    val entry = monthly?.copy(amount = value)
-                        ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.monthlyFixed(amount = value)
-                    viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(listOf(entry)))
+                    viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(listOf(next!!)))
                     onDismiss(true)
                 },
                 modifier = Modifier.testTag("template-save"),
@@ -562,7 +630,6 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
         },
     )
 }
-
 
 /** The category's note text (template directives in the same note are kept as they are). */
 @Composable

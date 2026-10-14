@@ -35,6 +35,10 @@ class TemplateEditorWritesTest {
             assertEquals("""{"source":"ui"}""", db.sql.queryString("SELECT template_settings FROM categories WHERE id = 'dining'"))
             assertEquals(8_000L, proposed("dining"))
 
+            // Saving toward a total by a month plans a share of it each month.
+            writes.save("shopping", TemplateEditorDraft(listOf(TemplateDraftEntry.dateTarget(amount = 1_200.0, month = "2027-04", repeatInterval = null, annual = false, isSpend = false, today = day))))
+            assertTrue(proposed("shopping") in 1L..120_000L)
+
             // Saving an unchanged draft writes nothing; an empty draft clears the template.
             val unchanged = writes.load("dining")!!
             assertTrue(writes.save("dining", unchanged).isEmpty())
