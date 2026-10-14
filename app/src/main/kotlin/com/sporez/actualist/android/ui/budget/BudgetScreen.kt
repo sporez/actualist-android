@@ -568,18 +568,6 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
     val amount = Money.parse(amountText)
     val count = countText.trim().toIntOrNull()
     val month = runCatching { java.time.YearMonth.parse(monthText.trim()) }.getOrNull()
-    fun entries(): List<com.sporez.actualist.core.templates.editor.TemplateDraftEntry>? {
-        if (kind == "upto") {
-            val value = amount?.takeIf { it > 0 } ?: return null
-            val refillPriority = current?.entries?.filterIsInstance<com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Refill>()?.singleOrNull()?.priority
-                ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DEFAULT_PRIORITY
-            return listOf(
-                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.balanceLimit(amount = value / 100.0),
-                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.refill(priority = refillPriority),
-            )
-        }
-        return entry()?.let { listOf(it) }
-    }
     fun entry(): com.sporez.actualist.core.templates.editor.TemplateDraftEntry? {
         val priority = (single as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed)?.priority
             ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DEFAULT_PRIORITY
@@ -604,6 +592,18 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             }
             else -> null
         }
+    }
+    fun entries(): List<com.sporez.actualist.core.templates.editor.TemplateDraftEntry>? {
+        if (kind == "upto") {
+            val value = amount?.takeIf { it > 0 } ?: return null
+            val refillPriority = current?.entries?.filterIsInstance<com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Refill>()?.singleOrNull()?.priority
+                ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.DEFAULT_PRIORITY
+            return listOf(
+                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.balanceLimit(amount = value / 100.0),
+                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.refill(priority = refillPriority),
+            )
+        }
+        return entry()?.let { listOf(it) }
     }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = { onDismiss(false) },
