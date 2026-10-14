@@ -11,6 +11,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -312,6 +314,28 @@ class DemoBudgetFlowTest {
         compose.waitForTag("budget-accounts")
         compose.waitOrCapture("grouped") { compose.onAllNodes(hasText("Synthetic Cash")).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("28-account-groups")
+    }
+
+    @Test
+    fun selectsTransactionsAndActsOnThemTogether() {
+        openDemo()
+        compose.onNodeWithTag("tab-spending").performClick()
+        compose.waitForTag("transaction-list")
+        val rowMatcher = androidx.compose.ui.test.SemanticsMatcher("a transaction row") { node ->
+            val tag = node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)
+            tag != null && tag.startsWith("transaction-") && tag != "transaction-list"
+        }
+        compose.waitUntil(30_000) { compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size >= 2 }
+        compose.onAllNodes(rowMatcher)[0].performTouchInput { longClick() }
+        compose.waitForTag("selection-bar")
+        compose.onAllNodes(rowMatcher)[1].performClick()
+        compose.waitOrCapture("two-selected") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("29-selection")
+        compose.onNodeWithTag("batch-unclear").performClick()
+        compose.waitForGone("selection-bar")
+        compose.waitOrCapture("undo-enabled") {
+            compose.onAllNodes(hasTestTag("undo") and androidx.compose.ui.test.isEnabled()).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test

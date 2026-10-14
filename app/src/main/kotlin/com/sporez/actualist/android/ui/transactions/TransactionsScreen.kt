@@ -1,6 +1,8 @@
 package com.sporez.actualist.android.ui.transactions
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -155,6 +157,53 @@ class TransactionsViewModel(
 
     fun search(text: String) {
         _query.value = _query.value.copy(search = text)
+    }
+
+    private val _selection = MutableStateFlow<Set<String>>(emptySet())
+    /** Rows selected for a batch action (long-press starts a selection). */
+    val selection: StateFlow<Set<String>> = _selection.asStateFlow()
+
+    fun toggleSelected(id: String) {
+        _selection.value = _selection.value.let { if (id in it) it - id else it + id }
+    }
+
+    fun clearSelection() {
+        _selection.value = emptySet()
+    }
+
+    private fun batch(describe: (com.sporez.actualist.core.transactions.BatchResult) -> String, block: BudgetSession.(Set<String>) -> com.sporez.actualist.core.transactions.BatchResult) {
+        val ids = _selection.value
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val result = session.write { block(ids) }
+                _selection.value = emptySet()
+                messages.show(describe(result) + if (result.skipped > 0) " (${result.skipped} skipped: locked or not applicable)" else "")
+            } catch (error: Exception) {
+                messages.show(error.message ?: "The selected transactions could not be changed.")
+            }
+        }
+    }
+
+    fun clearSelected(cleared: Boolean) = batch({ "${if (cleared) "Cleared" else "Uncleared"} ${it.changed}" }) {
+        com.sporez.actualist.core.transactions.TransactionBatch(database, clock).setCleared(it, cleared)
+    }
+
+    fun categorizeSelected(categoryId: String) = batch({ "Categorized ${it.changed}" }) {
+        com.sporez.actualist.core.transactions.TransactionBatch(database, clock).categorize(it, categoryId)
+    }
+
+    fun deleteSelected() = batch({ "Deleted ${it.changed}" }) {
+        com.sporez.actualist.core.transactions.TransactionBatch(database, clock).delete(it)
+    }
+
+    fun duplicateSelected() = batch({ "Duplicated ${it.changed}" }) { ids ->
+        val result = com.sporez.actualist.core.commands.TransactionCommands(database, clock).duplicate(ids.toList())
+        com.sporez.actualist.core.transactions.BatchResult(result.duplicateIds.size, 0)
+    }
+
+    suspend fun categoryOptions(): List<com.sporez.actualist.android.ui.components.PickerOption> = session.read {
+        ledger.categories(includeHidden = false).filter { !it.isIncome }.map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name, it.groupName) }
     }
 
     fun setStatus(status: com.sporez.actualist.core.query.StatusFilter) {
@@ -409,7 +458,15 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                     if (list.rows.isEmpty()) {
                         MessageBox("No transactions", if (query.search.isNullOrBlank()) "Add one with the + button." else "Nothing matches that search.")
                     } else {
-                        TransactionList(list.rows, showAccount = query.accountId == null, onOpen = onOpen)
+                        val selected by viewModel.selection.collectAsState()
+                        if (selected.isNotEmpty()) SelectionBar(selected.size, viewModel)
+                        TransactionList(
+                            list.rows,
+                            showAccount = query.accountId == null,
+                            selected = selected,
+                            onOpen = { row -> if (selected.isNotEmpty()) viewModel.toggleSelected(row.id) else onOpen(row) },
+                            onLongPress = { row -> viewModel.toggleSelected(row.id) },
+                        )
                     }
                 }
             }
@@ -421,7 +478,13 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
 }
 
 @Composable
-private fun TransactionList(rows: List<TransactionRow>, showAccount: Boolean, onOpen: (TransactionRow) -> Unit) {
+private fun TransactionList(
+    rows: List<TransactionRow>,
+    showAccount: Boolean,
+    selected: Set<String>,
+    onOpen: (TransactionRow) -> Unit,
+    onLongPress: (TransactionRow) -> Unit,
+) {
     val byDay = rows.groupBy { it.date }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     // LazyColumn keeps its position on the first visible key, so a new newest row (a new day
@@ -437,7 +500,7 @@ private fun TransactionList(rows: List<TransactionRow>, showAccount: Boolean, on
             item(key = "rows-$day") {
                 SectionCard {
                     dayRows.forEachIndexed { index, row ->
-                        TransactionItem(row, showAccount, onOpen)
+                        TransactionItem(row, showAccount, row.id in selected, onOpen, onLongPress)
                         if (index < dayRows.lastIndex) HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -447,8 +510,21 @@ private fun TransactionList(rows: List<TransactionRow>, showAccount: Boolean, on
 }
 
 @Composable
-private fun TransactionItem(row: TransactionRow, showAccount: Boolean, onOpen: (TransactionRow) -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable { onOpen(row) }.padding(horizontal = 16.dp, vertical = 10.dp).testTag("transaction-${row.id}")) {
+private fun TransactionItem(
+    row: TransactionRow,
+    showAccount: Boolean,
+    isSelected: Boolean,
+    onOpen: (TransactionRow) -> Unit,
+    onLongPress: (TransactionRow) -> Unit,
+) {
+    val background = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent
+    Column(
+        Modifier.fillMaxWidth()
+            .background(background)
+            .combinedClickable(onClick = { onOpen(row) }, onLongClick = { onLongPress(row) })
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .testTag("transaction-${row.id}"),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (!row.cleared) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.outline, modifier = Modifier.size(7.dp)) {}
@@ -766,5 +842,38 @@ private fun AccountNoteField(viewModel: TransactionsViewModel, onDismiss: () -> 
     androidx.compose.material3.OutlinedTextField(text, { text = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("account-notes"))
     if (text.trim() != original.orEmpty()) {
         TextButton(onClick = { viewModel.saveAccountNote(text); onDismiss() }, modifier = Modifier.testTag("account-notes-save")) { Text("Save notes") }
+    }
+}
+
+
+/** Batch actions on the selected rows, as Actualist's multi-select offers. */
+@Composable
+private fun SelectionBar(count: Int, viewModel: TransactionsViewModel) {
+    var choosing by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<com.sporez.actualist.android.ui.components.PickerOption>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    androidx.compose.foundation.lazy.LazyRow(
+        Modifier.fillMaxWidth().testTag("selection-bar"),
+        contentPadding = PaddingValues(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        item { Text("$count selected", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 6.dp)) }
+        item { TextButton(onClick = { viewModel.clearSelected(true) }, modifier = Modifier.testTag("batch-clear")) { Text("Clear") } }
+        item { TextButton(onClick = { viewModel.clearSelected(false) }, modifier = Modifier.testTag("batch-unclear")) { Text("Unclear") } }
+        item {
+            TextButton(onClick = { scope.launch { choosing = viewModel.categoryOptions() } }, modifier = Modifier.testTag("batch-categorize")) { Text("Categorize") }
+        }
+        item { TextButton(onClick = viewModel::duplicateSelected, modifier = Modifier.testTag("batch-duplicate")) { Text("Duplicate") } }
+        item { TextButton(onClick = viewModel::deleteSelected, modifier = Modifier.testTag("batch-delete")) { Text("Delete", color = MaterialTheme.colorScheme.error) } }
+        item { TextButton(onClick = viewModel::clearSelection, modifier = Modifier.testTag("batch-cancel")) { Text("Cancel") } }
+    }
+    choosing?.let { options ->
+        com.sporez.actualist.android.ui.components.PickerDialog(
+            title = "Categorize as",
+            options = options,
+            searchable = true,
+            onPick = { option -> option.id?.let(viewModel::categorizeSelected); choosing = null },
+            onDismiss = { choosing = null },
+        )
     }
 }
