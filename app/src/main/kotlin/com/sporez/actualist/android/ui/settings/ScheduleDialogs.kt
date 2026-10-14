@@ -29,6 +29,7 @@ import com.sporez.actualist.core.schedules.ScheduleListItem
 import com.sporez.actualist.core.schedules.ScheduleListPresentation
 
 /** The amount text of a schedule row: "~$X" for approximate, a range for between, else the amount. */
+@Composable
 internal fun scheduleAmountText(item: ScheduleListItem): String? = when {
     item.isApproximate && item.amountMinorUnits != null -> "~" + money(item.amountMinorUnits!!)
     item.amountLower != null && item.amountUpper != null && item.amountLower != item.amountUpper ->
