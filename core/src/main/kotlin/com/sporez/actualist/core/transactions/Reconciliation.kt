@@ -5,6 +5,8 @@ import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.db.BudgetDatabase
 import com.sporez.actualist.core.db.CellDraft
 import com.sporez.actualist.core.db.Clock
+import com.sporez.actualist.core.rules.RuleEngine
+import com.sporez.actualist.core.rules.RuleTransactionInput
 import com.sporez.actualist.core.sync.SyncValue
 import java.time.LocalDate
 import java.util.UUID
@@ -22,7 +24,6 @@ data class ReconciliationSnapshot(val accountId: String, val clearedBalance: Lon
  * - unlocking a simple row unlocks it, a parent unlocks its family, and a child unlocks only when its
  *   parent is already unlocked (then the whole family, as Actual's grouped query does).
  *
- * Rules are not run on the adjustment row: this port has no rule engine in the write path yet.
  */
 class Reconciliation(
     private val database: BudgetDatabase,
@@ -51,20 +52,49 @@ class Reconciliation(
         return ReconciliationSnapshot(accountId, cleared, uncleared.toInt(), last)
     }
 
-    /** A cleared adjustment row closing the gap to [bankBalance]; no write when there is no gap. */
+    /**
+     * A cleared adjustment row closing the gap to [bankBalance]; no write when there is no gap.
+     * The budget's rules run on it first, as Actualist's `reconciliationAdjustmentWrite` does: a
+     * deleting rule cancels the adjustment, a rule that clears the notes keeps the default note
+     * (Actualist's intended OP-17), and the result is written as a split, transfer or simple row.
+     */
     fun adjustmentDrafts(accountId: String, bankBalance: Long, today: LocalDate): List<CellDraft> {
         val difference = bankBalance - snapshot(accountId).clearedBalance
         if (difference == 0L) return emptyList()
         val id = newId()
-        return listOf(
-            CellDraft("transactions", id, "acct", SyncValue.text(accountId)),
-            CellDraft("transactions", id, "date", SyncValue.int(Months.packedDate(today))),
-            CellDraft("transactions", id, "amount", SyncValue.int(difference)),
-            CellDraft("transactions", id, "notes", SyncValue.text(ADJUSTMENT_NOTE)),
-            CellDraft("transactions", id, "cleared", SyncValue.bool(true)),
-            CellDraft("transactions", id, "reconciled", SyncValue.bool(false)),
-            CellDraft("transactions", id, "sort_order", SyncValue.Real(clock.nowMillis().toDouble())),
+        var draft = TransactionDraft(
+            accountId = accountId,
+            date = today,
+            amount = difference,
+            notes = ADJUSTMENT_NOTE,
+            cleared = true,
+            sortOrder = clock.nowMillis().toDouble(),
         )
+        val preview = RuleEngine(database).run(
+            RuleTransactionInput(accountId = accountId, date = today, amount = difference, notes = ADJUSTMENT_NOTE, cleared = true, sortOrder = draft.sortOrder),
+            today,
+        )
+        var payeeId: String? = null
+        if (preview.appliedRuleIds.isNotEmpty()) {
+            if (preview.deletesTransaction) return emptyList()
+            payeeId = preview.payeeId
+            draft = draft.copy(
+                accountId = preview.accountId,
+                date = preview.date,
+                amount = preview.amount,
+                categoryId = if (preview.splits.isEmpty()) preview.categoryId else null,
+                notes = preview.notes?.takeIf { it.isNotEmpty() } ?: ADJUSTMENT_NOTE,
+                cleared = preview.cleared,
+                splits = preview.splits.map { SplitDraft(it.categoryId, it.amount, it.notes) },
+            )
+        }
+        val writes = TransactionWrites(database, clock, newId)
+        return when {
+            draft.splits.isNotEmpty() -> writes.splitDrafts(draft, id, payeeId)
+            payeeId != null && writes.transferAccountIdOf(payeeId) != null ->
+                writes.transferDrafts(draft.copy(payeeId = payeeId, isTransfer = true), id, payeeId).drafts
+            else -> writes.simpleDrafts(draft, id, payeeId)
+        }
     }
 
     /** Locks cleared rows when the cleared balance equals [bankBalance]; refuses otherwise. */

@@ -121,4 +121,28 @@ class ReconciliationTest {
             assertEquals(adjustment.id, rows.first().id)
         }
     }
+
+    @Test
+    fun rulesRunOnTheAdjustmentAndAnEmptyNoteKeepsTheDefault() = seeded { db, reconciliation ->
+        db.sql.executeScript(
+            """
+            INSERT INTO category_groups (id, name, is_income, hidden, tombstone, sort_order) VALUES ('g', 'Bills', 0, 0, 0, 1);
+            INSERT INTO categories (id, name, is_income, cat_group, hidden, tombstone, sort_order) VALUES ('fees', 'Fees', 0, 'g', 0, 0, 1);
+            INSERT INTO payees (id, name, tombstone) VALUES ('bank', 'Bank', 0);
+            INSERT INTO payee_mapping (id, targetId) VALUES ('bank', 'bank');
+            """.trimIndent(),
+        )
+        db.sql.execute(
+            "INSERT INTO rules (id, stage, conditions_op, conditions, actions, tombstone) VALUES ('r', NULL, 'and', ?, ?, 0)",
+            "[{\"op\":\"is\",\"field\":\"account\",\"value\":\"checking\",\"type\":\"id\"}]",
+            "[{\"op\":\"set\",\"field\":\"category\",\"value\":\"fees\",\"type\":\"id\"},{\"op\":\"set\",\"field\":\"payee\",\"value\":\"bank\",\"type\":\"id\"},{\"op\":\"set\",\"field\":\"notes\",\"value\":\"\",\"type\":\"string\"}]",
+        )
+        reconciliation.createAdjustment("checking", 2_500, today)
+        val row = db.sql.queryOne("SELECT category, description, notes, cleared, amount FROM transactions WHERE id = 'generated'")!!
+        assertEquals("fees", row.string("category"))
+        assertEquals("bank", row.string("description"))
+        assertEquals(Reconciliation.ADJUSTMENT_NOTE, row.string("notes"))
+        assertEquals(true, row.bool("cleared"))
+        assertEquals(2_500L, row.long("amount"))
+    }
 }
