@@ -289,6 +289,32 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun groupsAnAccount() {
+        openDemo()
+        compose.onNodeWithTag("tab-accounts").performClick()
+        compose.waitForTag("budget-accounts")
+        compose.onNodeWithTag("accounts-list").performScrollToNode(hasTestTag("manage-groups"))
+        compose.onNodeWithTag("manage-groups").performClick()
+        compose.waitForTag("groups-dialog")
+        compose.onNodeWithTag("group-name").performTextInput("Synthetic Cash")
+        compose.onNodeWithTag("group-create").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synthetic Cash")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Done").performClick()
+        compose.waitForGone("groups-dialog")
+        compose.onNodeWithTag("account-savings").performClick()
+        compose.waitForTag("manage-account")
+        compose.onNodeWithTag("manage-account").performClick()
+        compose.waitForTag("account-group")
+        compose.onNodeWithTag("account-group").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("No group")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(hasText("Synthetic Cash"))[0].performClick()
+        compose.onNodeWithTag("nav-back").performClick()
+        compose.waitForTag("budget-accounts")
+        compose.waitOrCapture("grouped") { compose.onAllNodes(hasText("Synthetic Cash")).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("28-account-groups")
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()

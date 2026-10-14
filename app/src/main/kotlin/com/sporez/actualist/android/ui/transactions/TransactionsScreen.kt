@@ -191,6 +191,19 @@ class TransactionsViewModel(
         com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).close(it, destinationId, categoryId, java.time.LocalDate.now())
     }
 
+    /** The account's group and the groups it can move to. */
+    suspend fun groupChoices(): Pair<String?, List<com.sporez.actualist.core.accountgroups.AccountGroup>> {
+        val id = _query.value.accountId ?: return null to emptyList()
+        return session.read {
+            val groups = com.sporez.actualist.core.accountgroups.AccountGroups(database, clock)
+            groups.accountGroupIds()[id] to groups.groups()
+        }
+    }
+
+    fun moveToGroup(groupId: String?) = accountWrite(if (groupId == null) "Removed from its group" else "Moved to the group") {
+        com.sporez.actualist.core.accountgroups.AccountGroups(database, clock).moveAccount(it, groupId)
+    }
+
     fun reopenAccount() = accountWrite("Account reopened") { com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).reopen(it) }
 
     fun renameAccount(name: String) = accountWrite("Renamed") { com.sporez.actualist.core.transactions.AccountLifecycle(database, clock).rename(it, name) }
@@ -491,6 +504,7 @@ private fun AccountDialog(account: Account, viewModel: TransactionsViewModel, on
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("account-rename"))
                 TextButton(onClick = { viewModel.renameAccount(name); onDismiss() }, enabled = name.isNotBlank() && name.trim() != account.name) { Text("Rename") }
+                GroupRow(viewModel, onDismiss)
                 if (viewModel.bankSyncAvailable && !account.closed) {
                     androidx.compose.material3.HorizontalDivider()
                     BankSyncSection(viewModel, onDismiss)
@@ -673,6 +687,33 @@ private fun BankSyncSection(viewModel: TransactionsViewModel, onDismiss: () -> U
                 onDismiss()
             },
             onDismiss = { remotes = null },
+        )
+    }
+}
+
+
+@Composable
+private fun GroupRow(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
+    var choices by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<Pair<String?, List<com.sporez.actualist.core.accountgroups.AccountGroup>>?>(null)
+    }
+    var picking by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { choices = runCatching { viewModel.groupChoices() }.getOrNull() }
+    val loaded = choices ?: return
+    if (loaded.second.isEmpty()) return
+    val current = loaded.second.firstOrNull { it.id == loaded.first }
+    TextButton(onClick = { picking = true }, modifier = Modifier.testTag("account-group")) { Text("Group: ${current?.name ?: "None"}") }
+    if (picking) {
+        com.sporez.actualist.android.ui.components.PickerDialog(
+            title = "Account group",
+            options = listOf(com.sporez.actualist.android.ui.components.PickerOption(null, "No group")) +
+                loaded.second.map { com.sporez.actualist.android.ui.components.PickerOption(it.id, it.name) },
+            onPick = { option ->
+                picking = false
+                if (option.id != loaded.first) viewModel.moveToGroup(option.id)
+                onDismiss()
+            },
+            onDismiss = { picking = false },
         )
     }
 }
