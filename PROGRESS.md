@@ -44,9 +44,9 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38569702608 — 3,010 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38560587213 — 4/4, none skipped.
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38568543294 — 25/25, none skipped (adds the landscape side-by-side months); process-death relaunch reopened the selected budget.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38572536759 — 3,010 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38572536728 — 4/4, none skipped (login, plain and encrypted new budgets, imported ZIP as a new budget, download, two-device sync, conflicts, merkle agreement, SimpleFIN routes unconfigured).
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38573203981 — 25/25, none skipped (every main screen, undo/redo and History, editor and rule preview, rule editor, reconcile, schedules, multi-select, templates, account groups, reports drill-down, widget, landscape side-by-side months, loopback-server flows incl. new budget, background sync, SimpleFIN, OpenID, and the app against the real actual-server via `adb reverse`); process-death relaunch reopened the selected budget.
 
 ## Known limitations
 
