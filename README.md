@@ -34,8 +34,8 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Split transactions: create, edit, delete | Done | Splits 23 |
 | Search, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
 | Rules: engine, editor, preview in the transaction editor, on import and reconciliation | Done | Rules 245 |
-| Schedules: recurrence, status, add, edit (name, amount, auto-post), post, skip, complete, delete | Done (date rule edits in Actual) | Schedules 136 + 49 + 66 |
-| Accounts: add, rename, close (with balance transfer), reopen, SimpleFIN unlink | Done | AccountLifecycle 16 |
+| Schedules: recurrence, status, add, edit (name, amount, auto-post, first date and frequency of simple rules), post, skip, complete, delete | Done (patterns and end rules edited in Actual) | Schedules 136 + 49 + 66 |
+| Accounts: add, rename, close (with balance transfer), reopen, SimpleFIN unlink, account groups | Done | AccountLifecycle 16; account-group tests ported from Actualist |
 | Reconciliation | Done | from Actualist's Reconciliation cases |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
 | Payees: rename, merge | Done | unit tests |
@@ -46,7 +46,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Server: OpenID sign-in (browser redirect) | Done | unit + device tests |
 | Server: password sign-in, (encrypted) download, sync with confirmation, merkle repair | Done | multi-device tests; JVM and on-device loopback server |
 | New budget creation and registration (plain or end-to-end encrypted) | Done | real actual-server 26.10.0 in CI |
-| GoCardless, direct SimpleFIN bridge, account groups, widgets | Not ported | — |
+| GoCardless, direct SimpleFIN bridge, dashboard widgets | Not ported | — |
 
 ## Building
 
