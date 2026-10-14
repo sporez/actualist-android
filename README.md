@@ -30,7 +30,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
 | Wide screens: the next two months beside the edited one (read-only, tap to switch) | Done | device test (landscape) |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
-| Budget templates: preview, apply, edit (monthly, by date, schedule, % of income, average, copy, goal) | Done (limit/refill and multi-entry templates read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
+| Budget templates: preview, apply, edit (monthly, up to, by date, schedule, % of income, average, copy, goal) | Done (other multi-entry templates read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
 | Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge, make a schedule | Done | Transactions 21, TransactionCommand 39 |
 | Multi-select: clear, unclear, categorize, duplicate, delete together (atomic, one undo) | Done | unit + device tests |
 | Split transactions: create, edit, delete | Done | Splits 23 |

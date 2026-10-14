@@ -29,7 +29,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 ## Completed milestones
 
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
-- Wide screens (840dp and up) show the next two months beside the edited one; schedule templates in the template editor.
+- Wide screens (840dp and up) show the next two months beside the edited one; schedule and "up to" templates in the template editor.
 - Category learning (Actual's `updateCategoryRules`) after editor and batch categorization, with budget-wide and per-payee switches; schedule every-N intervals, monthly last-day / nth-weekday patterns, weekend handling and end rules; percentage-of-income templates.
 - Budget overview home-screen widget (Jetpack Glance) through the session hub; template editing for by-date, average, copy and goal templates; category notes; reports month switcher, Budget vs Spent and drill-down; rule editor "one of" and "approximately".
 - Multi-select batch actions, status filters, account notes, make-a-schedule from a transaction, budget ZIP export and import-as-new (with Actual's resetSync, checked against the real server), custom request headers scoped to the server origin.
@@ -44,19 +44,19 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38563362016 — 3,010 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38560587213 — 4/4, none skipped (login, plain and encrypted new budgets, imported ZIP as a new budget, download, two-device sync, conflicts, merkle agreement, SimpleFIN routes unconfigured).
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38562037544 — 24/24, none skipped (every main screen, undo/redo and History, editor and rule preview, rule editor, reconcile, schedules, multi-select, templates, account groups, reports drill-down, widget, loopback-server flows incl. new budget, background sync, SimpleFIN, OpenID, and the app against the real actual-server via `adb reverse`); process-death relaunch reopened the selected budget.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38569702608 — 3,010 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38560587213 — 4/4, none skipped.
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38568543294 — 25/25, none skipped (adds the landscape side-by-side months); process-death relaunch reopened the selected budget.
 
 ## Known limitations
 
-- Not ported: GoCardless, the direct SimpleFIN bridge fallback, header auth, schedules with several day patterns in the editor, editing limit/refill and multi-entry templates in the UI, rule editor operators beyond is/is not/one of/contains/matches/comparisons/approximately (other rules stay read-only), Actual's dashboard widgets, editing in the side-by-side months.
+- Not ported: GoCardless, the direct SimpleFIN bridge fallback, header auth, schedules with several day patterns in the editor, editing templates with several independent entries in the UI, rule editor operators beyond is/is not/one of/contains/matches/comparisons/approximately (other rules stay read-only), Actual's dashboard widgets, editing in the side-by-side months.
 - Real-server coverage is a disposable `actualbudget/actual-server:26.10.0` container in CI with synthetic data (login, new plain and encrypted budgets, download, two-device sync, conflicts); the on-device tests use an in-process loopback server.
 - Background sync runs hourly on any network; its first run waits 30 minutes, since opening the app syncs anyway.
 - Plain-http servers are refused except on loopback.
 
 ## Next recommended work
 
-1. UI for the remaining template kinds (limit/refill, several entries).
+1. Templates with several independent entries in the UI (edited in Actual today).
 2. Editing in the side-by-side months (today they are read-only; tap a month to edit it).
 
