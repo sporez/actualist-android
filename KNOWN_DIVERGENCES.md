@@ -31,10 +31,11 @@ excused here by exactly the same cases and paths as Actualist's own replays.
 | OP-73 | transaction commands | Merging a transfer with a missing or non-reciprocal peer is refused. |
 | OP-74 | transaction commands | Keeping a split parent and dropping a simple row is refused. |
 | OP-75 | transaction commands | A refused merge writes nothing (Actual has already cleared four `transferred_id` cells). |
-| OP-76 | transaction commands | Undo after a later edit is blocked (undo itself is not ported here; the merge step is strict). |
+| OP-76 | transaction commands / undo | Undo after a later edit to any row the gesture touched (for a merge, any row of its graph) is refused; Actual's undo overwrites the later edit. Applies to every undo in the app. |
 | OP-78 | transaction queries | Free-text search is flat across split children. |
 | OP-79 | transaction queries | A deleted or missing parent hides its orphan child in the all-rows read. |
 | OP-86 | transactions | Category placement on two transfer-create shapes. Final row state matches in one of them. |
+| AND-02 | account lifecycle / undo | **Found by this port.** Actual closes an account with a balance in two batches, so undoing it nulls the source leg's `category` and `transferred_id` cells; this port closes in one batch and tombstones them instead. The leg is tombstoned either way. Case `close-positive-on-to-on-history`. |
 | AND-01 | budget month | **Inherited from Actualist, found by this port.** A refused hold refuses the whole action; Actual's UI commits `reset-income-carryover` before the hold fails. Observable in `generated-004-2027-11` and `generated-057-2026-11`; Actualist's replay attributes these rows to OP-32 through its cascade rule. |
 
 ## Beyond Actualist
@@ -52,5 +53,11 @@ excused here by exactly the same cases and paths as Actualist's own replays.
 Oracle-only cases named by each manifest, exactly as Actualist does not replay
 them: budget month 1 (tracking move money), rules 24, schedules 2, transaction
 queries 13, import reconcile 19, splits 2, account lifecycle 6 (forced delete,
-GoCardless). Undo halves of the transaction-command and account-lifecycle cases
-are not compared: this port has no action log.
+GoCardless).
+
+## Undo
+
+Undo is a port of Actual's own cell-level undo (`server/undo.ts`), not of
+Actualist's per-gesture action log. The undo halves of all 39 transaction-command
+cases (outcome and rows, as Actualist compares) and the five account-lifecycle
+undo observations (exact messages) are replayed.

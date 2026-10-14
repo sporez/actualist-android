@@ -40,8 +40,10 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
 | Payees: rename, merge | Done | unit tests |
 | Reports: net worth, cash flow, spending | Done | UI screenshots |
+| Undo / redo of every local edit | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
 | Server: password sign-in, (encrypted) download, sync with confirmation, merkle repair | Done | multi-device tests; JVM and on-device loopback server |
-| Bank sync network fetch, OpenID login, new budget creation/upload, account groups, widgets | Not ported | — |
+| New budget creation and registration (plain or end-to-end encrypted) | Done | real actual-server 26.10.0 in CI |
+| Bank sync network fetch, OpenID login, account groups, widgets | Not ported | — |
 
 ## Building
 

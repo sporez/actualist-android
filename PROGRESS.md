@@ -13,13 +13,13 @@ The Compose app exposes nearly all of them. Remaining work is listed at the bott
 | Holds | 14 | — | 2 (as Actualist) |
 | Tracking recurrence | 36 | — | — |
 | Transactions (create) | 21 | OP-86 | — |
-| TransactionCommand (duplicate, merge) | 39 | OP-70..76 | undo halves (no action log) |
+| TransactionCommand (duplicate, merge, and their undo) | 39 + 39 undo | OP-70..76 | — |
 | TransactionQuery (filters, grouping, split modes, saved filters) | 38 | OP-78, OP-79 | 13 oracle-only |
 | Splits | 23 | — | 2 oracle-only |
 | Rules | 245 | — | 24 oracle-only |
 | Schedules | 136 recurrence + 49 status + 66 stateful | OP-51..53 | 2 oracle-only |
 | TemplateApply | 135 (×2 modes) | OP-24 (as-stated mode only), OP-25 | — |
-| AccountLifecycle | 16 | OP-22 | 6 (forced delete, GoCardless), undo |
+| AccountLifecycle (incl. 5 undo observations) | 16 | OP-22, AND-02 | 6 (forced delete, GoCardless) |
 | BankSync / import reconcile | 465 | OP-58..62, 66..68 | 19 oracle-only |
 | Reconciliation | cases ported as unit tests | — | — |
 
@@ -28,6 +28,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 ## Completed milestones
 
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
+- Undo/redo: Actual's cell-level undo (`server/undo.ts`) captured in every local commit, per-session history, refused after a later edit to a touched row (OP-76); Undo/Redo in the top bar.
 - Core engine: sync primitives, SQLite CRDT database with atomic outbox, sync engine with server confirmation and merkle repair, encrypted download/import, new-budget creation and registration, every domain above.
 - App: onboarding + demo; Budget (assign, move, cover, hold, rollover, add/hide categories, bulk month actions, templates preview/apply, month notes); Spending (search, saved-filter chips, CSV export/import); transaction editor (rule preview, splits, transfers, account moves, duplicate, merge); Accounts (add, rename, close with transfer, reopen, reconcile); Reports; Settings (sync status, Rules editor, Payees rename/merge, Schedules add/post/skip/complete/delete, theme, hide amounts); server sign-in, download, new budget, sync on open/resume/after edits.
 - Bugs found by tests and fixed: Android ICU regex rejecting `UNICODE_CHARACTER_CLASS`; new newest row inserted off-screen; transfer edits propagating the date (Actual does not); false out-of-sync after a partial outbox batch.
@@ -39,14 +40,14 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Known limitations
 
-- Not ported: bank sync network fetch (SimpleFIN/GoCardless), OpenID/header login, account groups, undo/action log, full schedule and template editors, rule editor for advanced operators (those rules stay read-only), widgets.
-- Server sync has only been exercised against in-repo mock servers (JVM and on-device loopback), never a real Actual server, by design for this experiment.
+- Not ported: bank sync network fetch (SimpleFIN/GoCardless), OpenID/header login, account groups, Actualist's History screen (undo itself is ported), full schedule and template editors, rule editor for advanced operators (those rules stay read-only), widgets.
+- Real-server coverage is a disposable `actualbudget/actual-server:26.10.0` container in CI with synthetic data (login, new plain and encrypted budgets, download, two-device sync, conflicts); the on-device tests use an in-process loopback server.
 - No background sync while the app is closed (sync runs on open, on resume and shortly after edits).
 - Plain-http servers are refused except on loopback.
 
 ## Next recommended work
 
-1. Run the app against a disposable real Actual server (Docker) in CI to validate sync and new-budget registration end to end.
-2. Undo (Actualist's action log) — the remaining excluded oracle halves.
-3. Background sync with WorkManager (needs a second-connection busy-timeout story and clock reload).
-4. SimpleFIN bank sync fetch on top of the ported reconciler.
+1. Background sync with WorkManager (needs a second-connection busy-timeout story and clock reload).
+2. SimpleFIN bank sync fetch on top of the ported reconciler.
+3. A History screen listing undoable gestures, as Actualist has.
+4. OpenID login.
