@@ -193,6 +193,20 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
     suspend fun templateDraft(categoryId: String): com.sporez.actualist.core.templates.editor.TemplateEditorDraft? =
         session.read { com.sporez.actualist.core.templates.editor.TemplateEditorWrites(database, clock).load(categoryId) }
 
+    /** The editor's snapshot: draft, lock and the schedules and income sources it may reference; null when unreadable. */
+    suspend fun templateEditorSnapshot(categoryId: String): com.sporez.actualist.core.templates.editor.TemplateEditorSnapshot? = try {
+        session.read { com.sporez.actualist.core.templates.editor.TemplateEditorWrites(database, clock).snapshot(categoryId) }
+    } catch (error: Exception) {
+        null
+    }
+
+    /** Raw `goal_def` per category that has one: what the templates browser lists. */
+    suspend fun templateDefinitions(): Map<String, String> = try {
+        session.read { com.sporez.actualist.core.templates.TemplateReads(database).goalDefsRaw() }
+    } catch (error: Exception) {
+        emptyMap()
+    }
+
     fun saveTemplate(categoryId: String, draft: com.sporez.actualist.core.templates.editor.TemplateEditorDraft) =
         write(if (draft.entries.isEmpty()) "Template removed" else "Template saved") {
             com.sporez.actualist.core.templates.editor.TemplateEditorWrites(database, clock).save(categoryId, draft)

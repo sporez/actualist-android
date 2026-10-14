@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
-import com.sporez.actualist.core.templates.editor.TemplateDraftEntry as TE
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -441,6 +440,7 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
     var amountText by rememberSaveable { mutableStateOf("") }
     var picking by remember { mutableStateOf(false) }
     var showTemplates by remember { mutableStateOf(false) }
+    var showBrowser by remember { mutableStateOf(false) }
     val month = screen.month
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("to-budget-sheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -466,10 +466,14 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
                 TextButton(onClick = { viewModel.setThreeMonthAverage(); onDismiss() }, modifier = Modifier.testTag("three-month-average")) { Text("3-month avg") }
                 TextButton(onClick = { viewModel.setZero(); onDismiss() }, modifier = Modifier.testTag("set-zero")) { Text("Zero all") }
             }
-            TextButton(onClick = { showTemplates = true }, modifier = Modifier.testTag("templates-open")) { Text("Apply budget templates…") }
+            Row {
+                TextButton(onClick = { showTemplates = true }, modifier = Modifier.testTag("templates-open")) { Text("Apply budget templates…") }
+                TextButton(onClick = { showBrowser = true }, modifier = Modifier.testTag("templates-browse")) { Text("Browse") }
+            }
         }
     }
     if (showTemplates) TemplatesDialog(viewModel) { showTemplates = false; onDismiss() }
+    if (showBrowser) TemplatesBrowserDialog(screen, viewModel) { showBrowser = false }
     if (picking) {
         PickerDialog(
             title = "Assign to",
@@ -528,273 +532,6 @@ private fun AddCategoryDialog(screen: BudgetScreenState, viewModel: BudgetViewMo
     }
 }
 
-
-/** Preview of the budget's templates for this month, then apply (fill empty or overwrite). */
-@Composable
-private fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
-    var overwrite by rememberSaveable { mutableStateOf(false) }
-    var preview by remember { mutableStateOf<com.sporez.actualist.core.templates.TemplatePreview?>(null) }
-    var loaded by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(overwrite) {
-        preview = viewModel.templatePreview(overwrite)
-        loaded = true
-    }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Budget templates") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("templates-dialog")) {
-                val p = preview
-                when {
-                    !loaded -> Text("Reading templates…")
-                    p == null -> Text("No category in this budget has a template. Templates are written in Actual (category notes or the template editor).")
-                    else -> {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Overwrite existing amounts", Modifier.weight(1f))
-                            Switch(checked = overwrite, onCheckedChange = { overwrite = it }, modifier = Modifier.testTag("templates-overwrite"))
-                        }
-                        p.errors.firstOrNull()?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                        val changed = p.categories.filter { it.proposed != it.current }
-                        if (changed.isEmpty()) Text("Nothing to change.", style = MaterialTheme.typography.bodySmall)
-                        for (category in changed.take(12)) {
-                            Row {
-                                Text(category.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${money(category.current)} → ${money(category.proposed)}", style = MoneyTextStyle)
-                            }
-                        }
-                        if (changed.size > 12) Text("…and ${changed.size - 12} more", style = MaterialTheme.typography.bodySmall)
-                        HorizontalDivider()
-                        SummaryLine("Assigned", p.assigned)
-                        if (p.released != 0L) SummaryLine("Released", p.released)
-                        SummaryLine(if (p.isTracking) "Saved after" else "To Budget after", p.leftover)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            val p = preview
-            TextButton(
-                enabled = p != null && p.isReady && p.categories.any { it.proposed != it.current },
-                onClick = { viewModel.applyTemplates(overwrite); onDismiss() },
-                modifier = Modifier.testTag("templates-apply"),
-            ) { Text("Apply") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-
-/** One entry of a template as the dialog edits it; "upto" stands for a monthly limit plus a refill. */
-private data class TemplateForm(
-    val kind: String = "monthly",
-    val amountText: String = "",
-    val monthText: String = java.time.YearMonth.now().plusMonths(6).toString(),
-    val countText: String = "3",
-    val scheduleId: String? = null,
-    val priority: Int = TE.DEFAULT_PRIORITY,
-)
-
-private object TemplateForms {
-    private fun money(value: Double) = Money.format(Math.round(value * 100), symbol = "", grouping = false)
-
-    /** Forms for a stored template, or null when it uses something these forms cannot show. */
-    fun from(entries: List<TE>, schedules: List<Pair<String, String>>): List<TemplateForm>? {
-        val forms = mutableListOf<TemplateForm>()
-        val limits = entries.filterIsInstance<TE.BalanceLimit>()
-        val refills = entries.filterIsInstance<TE.Refill>()
-        if (limits.size > 1 || refills.size > 1 || limits.size != refills.size) return null
-        limits.singleOrNull()?.let { limit ->
-            if (limit.hold || limit.period != com.sporez.actualist.core.templates.editor.TemplateLimitPeriod.MONTHLY || limit.start != null) return null
-            forms += TemplateForm(kind = "upto", amountText = money(limit.amount), priority = refills.single().priority)
-        }
-        for (entry in entries) {
-            forms += when (entry) {
-                is TE.BalanceLimit, is TE.Refill -> continue
-                is TE.MonthlyFixed -> if (entry.cadence == com.sporez.actualist.core.templates.editor.TemplateCadence.MONTH && entry.interval == 1) {
-                    TemplateForm("monthly", amountText = money(entry.amount), priority = entry.priority)
-                } else return null
-                is TE.DateTarget -> if (entry.repeatInterval == null && !entry.isSpend) TemplateForm("by", amountText = money(entry.amount), monthText = entry.month, priority = entry.priority) else return null
-                is TE.Average -> if (entry.adjustment == null) TemplateForm("average", countText = entry.numMonths.toString(), priority = entry.priority) else return null
-                is TE.Copy -> if (entry.legacyLimit == null) TemplateForm("copy", countText = entry.lookBack.toString(), priority = entry.priority) else return null
-                is TE.Goal -> TemplateForm("goal", amountText = money(entry.amount))
-                is TE.Percentage -> if (entry.sourceCategory == "all income" && !entry.previous) {
-                    TemplateForm("percent", countText = entry.percent.let { if (it == Math.rint(it)) it.toLong().toString() else it.toString() }, priority = entry.priority)
-                } else return null
-                is TE.Schedule -> if (entry.adjustment == null && !entry.full) {
-                    TemplateForm("schedule", scheduleId = entry.scheduleId ?: schedules.firstOrNull { it.second == entry.name }?.first, priority = entry.priority)
-                } else return null
-                else -> return null
-            }
-        }
-        return forms
-    }
-
-    /** The entries a form stands for, or null when it is incomplete. */
-    fun entries(form: TemplateForm, schedules: List<Pair<String, String>>): List<TE>? {
-        val amount = Money.parse(form.amountText)?.takeIf { it > 0 }?.let { it / 100.0 }
-        val count = form.countText.trim().toIntOrNull()?.takeIf { it in 1..12 }
-        return when (form.kind) {
-            "monthly" -> amount?.let { listOf(TE.monthlyFixed(amount = it, priority = form.priority)) }
-            "upto" -> amount?.let { listOf(TE.balanceLimit(amount = it), TE.refill(priority = form.priority)) }
-            "by" -> {
-                val month = runCatching { java.time.YearMonth.parse(form.monthText.trim()) }.getOrNull()
-                if (amount != null && month != null) {
-                    listOf(TE.dateTarget(amount = amount, month = month.toString(), priority = form.priority, repeatInterval = null, annual = false, isSpend = false))
-                } else null
-            }
-            "schedule" -> schedules.firstOrNull { it.first == form.scheduleId }?.let { (id, name) -> listOf(TE.schedule(name = name, scheduleId = id, priority = form.priority)) }
-            "percent" -> form.countText.trim().toDoubleOrNull()?.takeIf { it > 0 && it <= 100 }?.let {
-                listOf(TE.percentage(percent = it, sourceCategory = "all income", priority = form.priority))
-            }
-            "average" -> count?.let { listOf(TE.average(numMonths = it, priority = form.priority)) }
-            "copy" -> count?.let { listOf(TE.copyPrevious(lookBack = it, priority = form.priority)) }
-            "goal" -> amount?.let { listOf(TE.goal(amount = it)) }
-            else -> null
-        }
-    }
-
-    val kinds = listOf(
-        "monthly" to "Monthly", "upto" to "Up to", "by" to "By date", "schedule" to "Schedule",
-        "percent" to "% of income", "average" to "Average", "copy" to "Copy", "goal" to "Goal",
-    )
-}
-
-/**
- * The category's template, edited through the ported template editor model as a list of entries
- * (Actual runs them in priority order): monthly amount, up to a cap, saving by a date, a schedule's
- * amount, a share of income, an average or copy of earlier months, or a balance goal. A template
- * using anything else is shown read-only and can be removed; the editor's validation (Actualist's)
- * refuses whatever Actual would reject.
- */
-@Composable
-private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: (saved: Boolean) -> Unit) {
-    var draft by remember { mutableStateOf<com.sporez.actualist.core.templates.editor.TemplateEditorDraft?>(null) }
-    var loaded by remember { mutableStateOf(false) }
-    var schedules by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var forms by remember { mutableStateOf<List<TemplateForm>?>(null) }
-    androidx.compose.runtime.LaunchedEffect(category.id) {
-        draft = runCatching { viewModel.templateDraft(category.id) }.getOrNull()
-        schedules = runCatching { viewModel.scheduleChoices() }.getOrDefault(emptyList())
-        forms = draft?.let { current -> TemplateForms.from(current.entries, schedules)?.ifEmpty { listOf(TemplateForm()) } }
-        loaded = true
-    }
-    val current = draft
-    val editing = forms
-    fun update(index: Int, form: TemplateForm) {
-        forms = editing?.toMutableList()?.also { it[index] = form }
-    }
-    val planned = editing?.map { TemplateForms.entries(it, schedules) }
-    val next = if (planned != null && planned.all { it != null }) planned.flatMap { it!! } else null
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = { onDismiss(false) },
-        title = { Text("Template for ${category.name}") },
-        text = {
-            Column(
-                Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()).testTag("template-editor"),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                when {
-                    !loaded -> Text("Reading the template…")
-                    current == null -> Text("This template is managed in the category's note or uses options this app cannot change. Edit it in Actual.")
-                    editing == null -> Text("${current.entries.size} template entries this app shows read-only. Edit them in Actual, or remove the template here.")
-                    else -> {
-                        editing.forEachIndexed { index, form ->
-                            TemplateFormCard(index, form, schedules, removable = editing.size > 1, onChange = { update(index, it) }) {
-                                forms = editing.filterIndexed { i, _ -> i != index }
-                            }
-                        }
-                        TextButton(onClick = { forms = editing + TemplateForm(kind = "goal") }, modifier = Modifier.testTag("template-add-entry")) { Text("Add another entry") }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = next != null,
-                onClick = {
-                    viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(next!!))
-                    onDismiss(true)
-                },
-                modifier = Modifier.testTag("template-save"),
-            ) { Text("Save") }
-        },
-        dismissButton = {
-            Row {
-                if (current != null && current.entries.isNotEmpty()) {
-                    TextButton(
-                        onClick = { viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(emptyList())); onDismiss(true) },
-                        modifier = Modifier.testTag("template-remove"),
-                    ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
-                }
-                TextButton(onClick = { onDismiss(false) }) { Text("Cancel") }
-            }
-        },
-    )
-}
-
-@Composable
-private fun TemplateFormCard(
-    index: Int,
-    form: TemplateForm,
-    schedules: List<Pair<String, String>>,
-    removable: Boolean,
-    onChange: (TemplateForm) -> Unit,
-    onRemove: () -> Unit,
-) {
-    // Field tags keep their single-entry names for the first entry, so existing tests still apply.
-    fun tag(name: String) = if (index == 0) name else "$name-$index"
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (index > 0) androidx.compose.material3.HorizontalDivider()
-        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(TemplateForms.kinds.size) { i ->
-                val (key, label) = TemplateForms.kinds[i]
-                androidx.compose.material3.FilterChip(
-                    selected = form.kind == key,
-                    onClick = { onChange(form.copy(kind = key)) },
-                    label = { Text(label) },
-                    modifier = Modifier.testTag(tag("template-kind-$key")),
-                )
-            }
-        }
-        when (form.kind) {
-            "monthly" -> AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Monthly amount", tag = tag("template-amount"))
-            "upto" -> {
-                Text("Refill the category up to this balance each month.", style = MaterialTheme.typography.bodySmall)
-                AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Up to", tag = tag("template-amount"))
-            }
-            "by" -> {
-                Text("Save toward a total by a month; the monthly amount is worked out for you.", style = MaterialTheme.typography.bodySmall)
-                AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Total", tag = tag("template-amount"))
-                val valid = runCatching { java.time.YearMonth.parse(form.monthText.trim()) }.isSuccess
-                androidx.compose.material3.OutlinedTextField(form.monthText, { onChange(form.copy(monthText = it)) }, label = { Text("By month (YYYY-MM)") }, singleLine = true, isError = !valid, modifier = Modifier.fillMaxWidth().testTag(tag("template-month")))
-            }
-            "schedule" -> {
-                Text("Budget what a schedule needs before its next date.", style = MaterialTheme.typography.bodySmall)
-                if (schedules.isEmpty()) Text("No active schedules yet.", style = MaterialTheme.typography.bodySmall)
-                for ((id, name) in schedules) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onChange(form.copy(scheduleId = id)) }.testTag(tag("template-schedule-$id"))) {
-                        androidx.compose.material3.RadioButton(selected = form.scheduleId == id, onClick = { onChange(form.copy(scheduleId = id)) })
-                        Text(name)
-                    }
-                }
-            }
-            "percent" -> {
-                Text("Budget a share of this month's income.", style = MaterialTheme.typography.bodySmall)
-                androidx.compose.material3.OutlinedTextField(form.countText, { value -> onChange(form.copy(countText = value.filter { it.isDigit() || it == '.' })) }, label = { Text("Percent of all income") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag(tag("template-percent")))
-            }
-            "average", "copy" -> {
-                Text(if (form.kind == "average") "Budget the average spent over the last months." else "Budget what was budgeted that many months ago.", style = MaterialTheme.typography.bodySmall)
-                val count = form.countText.trim().toIntOrNull()
-                androidx.compose.material3.OutlinedTextField(form.countText, { onChange(form.copy(countText = it.filter(Char::isDigit))) }, label = { Text("Months (1-12)") }, singleLine = true, isError = count == null || count !in 1..12, modifier = Modifier.fillMaxWidth().testTag(tag("template-months")))
-            }
-            "goal" -> {
-                Text("A balance goal shown on the category; it does not assign money by itself.", style = MaterialTheme.typography.bodySmall)
-                AmountField(form.amountText, { onChange(form.copy(amountText = it)) }, label = "Goal balance", tag = tag("template-amount"))
-            }
-        }
-        if (removable) TextButton(onClick = onRemove, modifier = Modifier.testTag(tag("template-remove-entry"))) { Text("Remove this entry") }
-    }
-}
 
 /** The category's note text (template directives in the same note are kept as they are). */
 @Composable
