@@ -26,6 +26,21 @@ was modified.
 | `sync/ActualCrypto.kt` | `LocalFirst/ActualBudgetCrypto.swift` |
 | `db/BudgetDatabase.kt` | `LocalFirst/Database/BudgetDatabase+Sync.swift`, `+Merkle.swift`, `+LocalCommit.swift` |
 | `budget/*` | `LocalFirst/Database/BudgetDatabase+BudgetReads.swift`, `+BudgetWrites.swift`, `+HoldWrites.swift`, `+EnvelopeHolds.swift`, `+EnvelopeCarryIn.swift`, `+CategoryValueTimeline.swift`, `BudgetFinancialCalculation.swift`, `+TransactionSplitQuery.swift` |
+| `transactions/*` (writes, ledger reads, reconciliation, accounts, payees, batch, account lifecycle) | `LocalFirst/Database/BudgetDatabase+Transaction*.swift`, `+Reconciliation*.swift`, `+Payees.swift`, `+AccountLifecycle*.swift` |
+| `splits/*` | `LocalFirst/SplitTransactionFamily.swift`, `Database/BudgetDatabase+TransactionSplitWrites.swift` |
+| `commands/*` | `Database/TransactionDuplicatePlanner.swift`, `TransactionMergePlanner.swift`, `+TransactionDuplicate.swift`, `+TransactionMerge.swift` |
+| `query/*` | `Database/BudgetDatabase+TransactionQuery.swift`, `+TransactionFilters.swift`, `Repositories/TransactionQueryModels.swift` |
+| `rules/*` (engine, writes, `CategoryLearning.kt`) | `Database/RuleEngine*.swift`, `+Rules.swift` (incl. `categoryLearningRuleMessages`) |
+| `schedules/*` | `Database/BudgetDatabase+Schedule*.swift`, `ActualScheduleRecurrence.swift` |
+| `templates/*`, `templates/editor/*` | `Database/BudgetTemplateEngine*.swift`, `BudgetTemplateNoteParser.swift`, `+TemplateApply.swift`, `+TemplateEditor.swift` and the editor model |
+| `importer/*` | `Shared/BankSyncReconciler.swift`, `ImportReconcile*.swift`, `ImportPayeeNameNormalization.swift` |
+| `banksync/*`, `banksync/bridge/*` | `Network/ActualServerSimpleFINClient.swift`, `SimpleFINBridgeClient.swift`, `Shared/BankSyncFieldMapping.swift`, `LocalFirstActualStore+BankSync*.swift` |
+| `accountgroups/*` | `Database/BudgetDatabase+AccountGroupCompatibility.swift`, `+AccountGroupWrites.swift` |
+| `notes/EntityNotes.kt` | `Shared/ActualNote.swift`, `Database/BudgetDatabase+Notes.swift` |
+| `server/*` (client, new budget, portable ZIP, OpenID, custom headers) | `Network/ActualServer*Client.swift`, `+NewBudgetSeed.swift`, `PortableBudgetArchive.swift`, `+PortableSyncReset.swift`, `Security/ActualOpenIDAuthenticationCoordinator.swift`, `Security/CustomHTTPHeaders.swift` |
+| `db/UndoBatch.kt`, `store/UndoHistory.kt` | Actual's `loot-core/src/server/undo.ts` (not Actualist's action log; see `KNOWN_DIVERGENCES.md`) |
+
+The app layer (`app/`) follows Actualist's screens in behavior but is Android-native Compose code.
 
 ## Reused test vectors and fixtures
 
@@ -41,4 +56,7 @@ pinned Actual source itself was read: tag `v26.10.0`, commit
 `2bebdbaae0b701120a8cad9d56aafd64fa04c577`,
 `packages/loot-core/src/server/budget/actions.ts` (MIT). It is the same build the
 parity oracle was generated from, so those ports are checked by the oracle's
-recorded cases.
+recorded cases. The same source was also read for undo (`server/undo.ts`),
+transfer updates (`server/transactions/transfer.ts`), category learning
+(`server/transactions/transaction-rules.ts`, `updateCategoryRules`) and the
+server's SimpleFIN routes (`sync-server/src/app-simplefin`).
