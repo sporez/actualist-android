@@ -2,6 +2,7 @@ package com.sporez.actualist.android.ui.reports
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,14 +52,28 @@ import java.time.LocalDate
 
 class ReportsViewModel(session: BudgetSession) : ViewModel() {
     private val today = LocalDate.now()
-    val dashboard = reloading(session, MutableStateFlow(today)) { day ->
-        reports.dashboard(Months.id(day.year, day.monthValue), day.toString())
+    private val currentMonth = Months.id(today.year, today.monthValue)
+    private val _month = MutableStateFlow(currentMonth)
+    val month: kotlinx.coroutines.flow.StateFlow<String> = _month
+
+    /** Past months report through their last day; the current month through today. */
+    val dashboard = reloading(session, _month) { month ->
+        val end = if (month == currentMonth) today else java.time.YearMonth.parse(month).atEndOfMonth()
+        reports.dashboard(month, end.toString())
     }
+
+    fun shift(months: Int) {
+        val next = Months.shifted(_month.value, months)
+        if (next <= currentMonth) _month.value = next
+    }
+
+    val isCurrentMonth: Boolean get() = _month.value == currentMonth
 }
 
 @Composable
-fun ReportsScreen(viewModel: ReportsViewModel) {
+fun ReportsScreen(viewModel: ReportsViewModel, onOpenCategory: (String, String) -> Unit = { _, _ -> }) {
     val state by viewModel.dashboard.collectAsState()
+    val month by viewModel.month.collectAsState()
     Box(Modifier.fillMaxSize().testTag("reports-screen")) {
         when (val current = state) {
             Loadable.Loading -> LoadingBox()
@@ -68,10 +83,18 @@ fun ReportsScreen(viewModel: ReportsViewModel) {
                 if (!dashboard.hasData) {
                     MessageBox("No report data yet", "Reports fill in once the budget has transactions.")
                 } else {
-                    LazyColumn(contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyColumn(Modifier.testTag("reports-list"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        item {
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                androidx.compose.material3.TextButton(onClick = { viewModel.shift(-1) }, modifier = Modifier.testTag("reports-previous")) { Text("‹ Previous") }
+                                Text(monthTitle(month), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                androidx.compose.material3.TextButton(onClick = { viewModel.shift(1) }, enabled = !viewModel.isCurrentMonth, modifier = Modifier.testTag("reports-next")) { Text("Next ›") }
+                            }
+                        }
                         item { NetWorthCard(dashboard) }
                         item { CashFlowCard(dashboard) }
-                        item { SpendingCard(dashboard) }
+                        item { SpendingCard(dashboard, onOpenCategory) }
+                        item { BudgetComparisonCard(dashboard, onOpenCategory) }
                     }
                 }
             }
@@ -168,14 +191,17 @@ private fun CashFlowCard(dashboard: ReportsDashboard) {
 }
 
 @Composable
-private fun SpendingCard(dashboard: ReportsDashboard) {
+private fun SpendingCard(dashboard: ReportsDashboard, onOpenCategory: (String, String) -> Unit) {
     val spending = dashboard.spending.filter { it.spent > 0 }
     val total = spending.sumOf { it.spent }.takeIf { it > 0 } ?: 1L
     SectionCard(Modifier.testTag("report-spending")) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CardTitle("Spending by Category", "${monthTitle(dashboard.anchorMonth)} · budgeted ${money(dashboard.budgetedExpenses)}")
             for (item in spending.take(10)) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    Modifier.clickable { onOpenCategory(item.categoryId, item.name) }.testTag("report-category-${item.categoryId}"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Row {
                         Text(item.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         MoneyText(item.spent)
@@ -187,6 +213,29 @@ private fun SpendingCard(dashboard: ReportsDashboard) {
                 }
             }
             if (spending.isEmpty()) Text("No spending yet this month.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+
+/** Budgeted against spent per category for the month, largest overspending first. */
+@Composable
+private fun BudgetComparisonCard(dashboard: ReportsDashboard, onOpenCategory: (String, String) -> Unit) {
+    val rows = dashboard.spending.filter { it.budgeted != 0L || it.spent != 0L }.sortedBy { it.budgeted - it.spent }
+    SectionCard(Modifier.testTag("report-budget-comparison")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CardTitle("Budget vs Spent", "${monthTitle(dashboard.anchorMonth)} · ${money(rows.sumOf { it.spent })} of ${money(rows.sumOf { it.budgeted })}")
+            for (item in rows.take(12)) {
+                val remaining = item.budgeted - item.spent
+                Row(Modifier.fillMaxWidth().clickable { onOpenCategory(item.categoryId, item.name) }.padding(vertical = 2.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${money(item.spent)} of ${money(item.budgeted)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    MoneyText(remaining, colored = true)
+                }
+            }
+            if (rows.isEmpty()) Text("Nothing budgeted or spent this month.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

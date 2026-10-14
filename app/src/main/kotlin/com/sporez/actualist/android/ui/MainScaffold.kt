@@ -201,7 +201,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
             composable("reports") {
                 val vm = viewModel(key = "reports-$key") { ReportsViewModel(session) }
-                ReportsScreen(vm)
+                ReportsScreen(vm) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
             }
             composable("settings") {
                 SettingsScreen(

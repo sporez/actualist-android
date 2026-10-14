@@ -380,6 +380,23 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun reportsSwitchMonthsAndDrillIntoACategory() {
+        openDemo()
+        compose.onNodeWithTag("tab-reports").performClick()
+        compose.waitForTag("reports-list")
+        compose.onNodeWithTag("reports-previous").performClick()
+        compose.onNodeWithTag("reports-next").performClick()
+        compose.onNodeWithTag("reports-list").performScrollToNode(hasTestTag("report-budget-comparison"))
+        compose.screenshot("30-budget-vs-spent")
+        val categoryRow = androidx.compose.ui.test.SemanticsMatcher("a report category row") { node ->
+            node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)?.startsWith("report-category-") == true
+        }
+        compose.onNodeWithTag("reports-list").performScrollToNode(categoryRow)
+        compose.onAllNodes(categoryRow)[0].performClick()
+        compose.waitForTag("transaction-list")
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()
