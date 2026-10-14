@@ -29,7 +29,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Demo budget (no server, no credentials) | Done | — (JVM + emulator UI tests) |
 | Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
-| Budget templates: preview, apply, edit monthly templates | Done (other template kinds read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
+| Budget templates: preview, apply, edit (monthly, by date, average, copy, goal) | Done (percentage, schedule, limit and multi-entry templates read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
 | Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge, make a schedule | Done | Transactions 21, TransactionCommand 39 |
 | Multi-select: clear, unclear, categorize, duplicate, delete together (atomic, one undo) | Done | unit + device tests |
 | Split transactions: create, edit, delete | Done | Splits 23 |
@@ -49,7 +49,9 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | New budget creation and registration (plain or end-to-end encrypted) | Done | real actual-server 26.10.0 in CI |
 | Budget ZIP export; import a ZIP as a new server budget (Actual's resetSync) | Done | JVM + real actual-server |
 | Custom request headers for servers behind an access proxy | Done | unit tests |
-| GoCardless, direct SimpleFIN bridge, dashboard widgets | Not ported | — |
+| Home-screen widget: To Budget and net worth (Glance) | Done | device test |
+| Category and account notes | Done (template directives preserved) | unit tests |
+| GoCardless, direct SimpleFIN bridge, Actual dashboard widgets | Not ported | — |
 
 ## Building
 
