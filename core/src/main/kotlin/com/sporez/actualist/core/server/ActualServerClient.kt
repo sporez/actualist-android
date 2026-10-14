@@ -173,6 +173,24 @@ class ActualServerClient(
         request("sync/download-user-file").header(TOKEN, token).header(FILE_ID, fileId).header("Accept", "application/octet-stream").get().build(),
     ) { it.bodyBytes(maximumDownloadBytes) }
 
+    /**
+     * Registers a budget archive as a new (or replacement) server file, as Actualist's
+     * `uploadUserFile` does. Returns the group id the server assigned, when it sends one.
+     */
+    fun uploadUserFile(token: String, fileId: String, name: String, groupId: String?, archive: ByteArray): String? {
+        val builder = request("sync/upload-user-file")
+            .header(TOKEN, token)
+            .header(FILE_ID, fileId)
+            .header("X-ACTUAL-NAME", encodeUriComponent(name))
+            .header("X-ACTUAL-FORMAT", "2")
+            .post(archive.toRequestBody("application/encrypted-file".toMediaType()))
+        groupId?.let { builder.header("X-ACTUAL-GROUP-ID", it) }
+        val text = execute(builder.build()) { it.bodyText() }
+        val root = runCatching { parse(text) }.getOrNull() ?: return null
+        if ((root["status"] as? JsonPrimitive)?.contentOrNull == "error") throw ServerException.InvalidResponse()
+        return (root["groupId"] as? JsonPrimitive)?.contentOrNull ?: ((root["data"] as? JsonObject)?.get("groupId") as? JsonPrimitive)?.contentOrNull
+    }
+
     override fun sync(body: ByteArray, token: String): ByteArray = execute(
         request("sync/sync").header(TOKEN, token).post(body.toRequestBody(SYNC)).build(),
     ) { it.bodyBytes(maximumSyncResponseBytes) }
@@ -243,6 +261,17 @@ class ActualServerClient(
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
+
+        /** JavaScript `encodeURIComponent`, which Actual's server reverses for `X-ACTUAL-NAME`. */
+        fun encodeUriComponent(text: String): String {
+            val unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+            val out = StringBuilder()
+            for (byte in text.toByteArray(Charsets.UTF_8)) {
+                val char = (byte.toInt() and 0xFF).toChar()
+                if (byte >= 0 && char in unreserved) out.append(char) else out.append(String.format(java.util.Locale.ROOT, "%%%02X", byte.toInt() and 0xFF))
+            }
+            return out.toString()
+        }
 
         /** https anywhere; http only for loopback (this device, emulator host tests). */
         fun validatedUrl(serverUrl: String): HttpUrl {

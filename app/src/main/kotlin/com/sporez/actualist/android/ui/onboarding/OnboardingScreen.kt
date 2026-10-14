@@ -138,6 +138,26 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
         } else if (files == null && !busy) {
             Button(onClick = { load() }, modifier = Modifier.testTag("server-list")) { Text("Show budgets") }
         }
+        if (server.isSignedIn) {
+            var newName by rememberSaveable { mutableStateOf("") }
+            OutlinedTextField(newName, { newName = it }, label = { Text("New budget name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("new-budget-name"))
+            OutlinedButton(
+                enabled = !busy && newName.isNotBlank(),
+                onClick = {
+                    scope.launch {
+                        busy = true
+                        error = null
+                        try {
+                            onDownloaded(server.createBudget(newName))
+                        } catch (e: Exception) {
+                            error = e.message ?: "The budget could not be created."
+                        }
+                        busy = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().testTag("new-budget-create"),
+            ) { Text("Create a new budget on this server") }
+        }
         if (busy) CircularProgressIndicator()
         files?.let { list ->
             if (list.isEmpty()) Text("No budgets on this server.")

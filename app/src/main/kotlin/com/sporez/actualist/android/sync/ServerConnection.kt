@@ -84,6 +84,33 @@ class ServerConnection(
         metadata
     }
 
+    /**
+     * Creates a new budget on the server, as Actualist's `createNewBudget` does: a starter file is
+     * built locally, registered with `upload-user-file`, and kept only once the server confirmed
+     * it. Any failure removes the local copy, so nothing unregistered stays selectable.
+     */
+    suspend fun createBudget(name: String): LocalBudget = withContext(Dispatchers.IO) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) throw LocalFirstException.InvalidLocalWrite("Enter a name for the new budget.")
+        val client = client()
+        val token = token()
+        val id = java.util.UUID.randomUUID().toString()
+        val file = library.databaseFile(id)
+        try {
+            com.sporez.actualist.core.server.NewBudget.createFile(driver, file.absolutePath)
+            val archive = com.sporez.actualist.core.server.NewBudget.archive(file, id, trimmed)
+            val groupId = client.uploadUserFile(token, id, trimmed, null, archive)
+                ?: client.userFileInfo(token, id)?.groupId
+                ?: throw ServerException.InvalidResponse()
+            val metadata = LocalBudget(id = id, name = trimmed, isDemo = false, cloudFileId = id, groupId = groupId, nodeId = HybridLogicalClock.makeClientId())
+            library.saveMetadata(metadata)
+            metadata
+        } catch (error: Exception) {
+            library.delete(id)
+            throw error
+        }
+    }
+
     /** One sync pass for an open (non-demo) session. Never reports success early. */
     suspend fun sync(session: BudgetSession): SyncStatus {
         if (session.isDemo) return SyncStatus.LocalOnly.also(session::publishSyncStatus)
