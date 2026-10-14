@@ -188,7 +188,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                         try {
                             val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 resolver.openInputStream(uri)?.use { input ->
-                                    // Refuse implausibly large files before reading them into memory.
+                                    // Refuse implausibly large files (the importer also caps the extracted database).
                                     val data = input.readBytes()
                                     if (data.size > 512 * 1024 * 1024) throw IllegalArgumentException("The file is too large.")
                                     data
