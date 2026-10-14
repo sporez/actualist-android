@@ -2,41 +2,50 @@
 
 ## Current phase
 
-Phases A–C done and verified; Phase D (server sync) implemented and verified against a
-loopback mock server; Phase E in progress (rules done, schedules being ported).
+Phases A–D done and verified; Phase E (secondary features) largely done: rules, schedules,
+reconciliation, CSV, payees, bulk month actions. Remaining work is listed below.
 
 ## Completed milestones
 
 | Milestone | Evidence |
 |---|---|
-| Reference pinned: Actualist `actualist-dev` `61987e5` | `REFERENCE.md` |
-| Private repo, Gradle 9.6.0 wrapper (checksum-verified), AGP 9.4.1 built-in Kotlin, Kotlin 2.4.21, compileSdk 37 / targetSdk 36 | CI |
+| Reference pinned: Actualist `actualist-dev` `61987e5`; Actual `v26.10.0` (`2bebdbaa`) source read for the bulk actions | `REFERENCE.md` |
+| Private repo, Gradle 9.6.0 wrapper (checksum-verified), AGP 9.4.1 built-in Kotlin, Kotlin 2.4.21, compileSdk 37 / targetSdk 36 / minSdk 26 | CI |
 | Sync primitives: HLC, merkle trie + murmur3, sync values, protobuf codec, AES-256-GCM/PBKDF2 | Upstream merkle vectors; Node-generated crypto vectors; byte-exact protobuf tests |
 | SQLite budget database: CRDT apply (LWW, duplicates, quarantine, reserved datasets), atomic local commit + outbox, merkle persistence, restart | `BudgetDatabaseTest` (16) |
-| Envelope + tracking budget math and writes (assign, move, cover, transfer-available, carryover, hold/reset) | **BudgetMonth oracle: 80 replayed cases match (2 with inherited AND-01)**; **Holds oracle 14/14**; **Tracking contract 36/36** |
+| Envelope + tracking budget math and writes (assign, move, cover, transfer-available, carryover, hold/reset) | **BudgetMonth oracle: 85 replayed cases match** (OP-32 note cells and 2 cases with inherited AND-01 excused); **Holds oracle 14/14**; **Tracking contract 36/36** |
+| Bulk month actions Actualist lacks: copy previous month, zero, 3-month average, copy to year end, cover overbudgeted | Ported from Actual's `actions.ts`; the 5 formerly oracle-only BudgetMonth cases now replay and match |
 | Transaction creation (manual, transfer, import, starting balance) | **Transactions oracle 21/21** (2 with Actualist's intended OP-86) |
 | Rule engine (conditions, ranking, actions, formulas, BALANCE_OF, split actions, schedule date conditions) | **Rules oracle: 245/245 replayed cases match** (24 oracle-only listed) |
+| Schedules (recurrence, status, create/post/skip/complete/delete, advancement) | **Schedules oracle: recurrence 136/136, status 49/49, stateful 66/66** (OP-51/52/53 as in Actualist) |
 | Split create and edit, transaction edit/delete, account create/rename/close | `SplitEditTest`, unit tests |
-| Account reconciliation (adjustment, lock, unlock) | `ReconciliationTest` (cases from Actualist's reconciliation oracle) |
+| Reconciliation (adjustment, lock, unlock) | `ReconciliationTest` (cases from Actualist's reconciliation oracle) |
 | CSV export (Actual's format) and import (duplicate-skipping) | `CsvTest` incl. export→import round trip |
-| Category/group create, rename, hide | `CategoryWritesTest` |
+| Categories/groups create, rename, hide; payee rename and merge | `CategoryWritesTest`, `PayeeWritesTest` |
 | Sync engine: push with server confirmation, pull, merkle re-pull, encryption, batching | `SyncEngineTest` (11 multi-device scenarios) |
-| Actual server HTTP client, encrypted download/import, sanitizer | `ServerIntegrationTest` (loopback mock server, end to end) |
-| Compose app: onboarding + demo, Budget, Spending, Accounts, Reports, Settings, Rules, transaction editor (rule preview, splits), reconcile, CSV, server sign-in/download/sync | Emulator UI tests (API 34) with screenshots |
+| Actual server HTTP client, encrypted download/import, sanitizer | `ServerIntegrationTest` (JVM loopback server, end to end) |
+| Compose app: onboarding + demo, Budget, Spending, Accounts, Reports, Settings, Rules, Payees, Schedules, editor (rule preview, splits), reconcile, CSV, server sign-in/download/sync, auto-flush and sync on resume | Emulator UI tests (API 34) with screenshots, incl. an on-device sign-in/download/edit/sync flow against a loopback server and a process-death relaunch check |
+| Performance | 30,060-transaction smoke test (CI JVM): month view 784 ms, list 375 ms, balances 52 ms, reports 1.0 s; recurrence inputs memoized by `total_changes()` |
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38506583444 (787 JVM tests at the previous count, 0 failures, 0 skipped; debug APK artifact `actualist-android-debug-apk`).
-- Emulator (API 34, Pixel 6 profile): run https://github.com/sporez/actualist-android/actions/runs/38505552545 booted and ran 5 UI tests: 4 passed, 1 failed on a test-side finder (fixed). Re-run with 7 tests in progress: https://github.com/sporez/actualist-android/actions/runs/38506969510.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38510931999 — 1,120 JVM tests, 0 failures, 0 skipped; debug APK artifact `actualist-android-debug-apk`.
+- Emulator (API 34): last completed run https://github.com/sporez/actualist-android/actions/runs/38509606145 — 8/9 UI tests passed; the reconcile test exposed a real list-scroll bug (new newest row inserted off-screen), fixed in `fix(app): keep a newly added newest transaction in view`. Process-death relaunch reopened the selected budget. Re-run in progress: https://github.com/sporez/actualist-android/actions/runs/38511146138.
+
+## Bugs found by the emulator (all fixed)
+
+- Android's ICU regex rejects `Pattern.UNICODE_CHARACTER_CLASS`; the rule engine crashed on device while JVM tests passed. Flag now used only where supported.
+- A newly created newest transaction could be inserted above the visible list (LazyColumn key anchoring).
+- Emulator infra: runner disk too small for the AVD; system ANR dialogs covering the app.
 
 ## Known failures and limitations
 
-- Schedules: being ported (worker); not yet in the app.
-- Not implemented: budget templates, bank sync (SimpleFIN), payee management/merge, transaction duplicate/merge/batch edit, rule editing, OpenID/header login, account groups, notes editing, widgets.
+- Not implemented: budget templates, bank sync (SimpleFIN), transaction duplicate/merge/batch edit, rule and schedule editors, OpenID/header login, account groups, notes editing, widgets, background sync while the app is closed (WorkManager).
 - Transfer payee/account changes on edit are refused rather than re-pairing the transfer.
 - CSV import skips exact duplicates only; Actualist's fuzzy import-reconcile matcher and import rules are not ported.
+- Rules do not run on CSV import or reconciliation adjustments (they do run in the editor preview and on schedule posting).
 - Plain-http servers are refused except on loopback (Android network security config matches).
-- Server sync has only been exercised against the in-repo mock server, never a real Actual server (by design for this experiment).
+- Server sync has only been exercised against in-repo mock servers, never a real Actual server (by design for this experiment).
 
 ## Parity findings
 
@@ -46,6 +55,7 @@ loopback mock server; Phase E in progress (rules done, schedules being ported).
 
 ## Next recommended work
 
-1. Integrate the schedules port, add a Schedules screen, replay the Schedules oracle.
-2. Background sync (WorkManager) and conflict/edit UX on real servers (only after a disposable test server exists).
-3. Templates and payee management.
+1. Rule and schedule editors (the engines and writers exist).
+2. Run rules on CSV import; port Actualist's import-reconcile matcher.
+3. Background sync with WorkManager (needs a busy-timeout story for a second SQLite connection).
+4. Budget templates (Actualist has a large template engine and fixtures).
