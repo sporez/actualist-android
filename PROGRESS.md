@@ -29,7 +29,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 ## Completed milestones
 
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
-- Rule editor: pre/default/post stages, "add before/after notes" actions, "is not" on text, "is between" on amounts, plain date conditions (a day, month or year), on/off-budget accounts and tags (stored as Actual stores them; JVM round trips; device test for stages, notes actions and "is between").
+- Rule editor: pre/default/post stages, "add before/after notes" actions, "is not" on text, "is between" on amounts, plain date conditions (a day, month or year), on/off-budget accounts, tags, and inflow/outflow amounts (stored as Actual stores them; JVM round trips; device test for stages, notes actions and "is between").
 - Report Explorer over the ported query engine (date range, accounts, categories, transfers; totals, per-category, matching transactions). Its JVM test checks totals against ledger sums; its device steps (part of the reports test) passed on the emulator in https://github.com/sporez/actualist-android/actions/runs/38591078296.
 - SimpleFIN direct bridge (device-claimed access key) when the server does not host SimpleFIN; templates with several entries in the template editor; a 50,000-transaction performance smoke test.
 - Wide screens (840dp and up) show the next two months beside the edited one, and a later month's assigned amount edits in place (as Actualist's grid); schedule and "up to" templates in the template editor.
@@ -55,7 +55,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Known limitations
 
-- Not ported: GoCardless, header auth, schedules with several weekday patterns (or weekdays mixed with days) in the editor, template kinds and options beyond those listed in the README, in the rule editor: recurring date values, split and schedule-link actions, the inflow/outflow amount fields, and Handlebars templates (such rules stay read-only), Actual's dashboard widgets.
+- Not ported: GoCardless, header auth, schedules with several weekday patterns (or weekdays mixed with days) in the editor, template kinds and options beyond those listed in the README, in the rule editor: recurring date values, split and schedule-link actions, and Handlebars templates (such rules stay read-only), Actual's dashboard widgets.
 - Real-server coverage is a disposable `actualbudget/actual-server:26.10.0` container in CI with synthetic data (login, new plain and encrypted budgets, download, two-device sync, conflicts); the on-device tests use an in-process loopback server.
 - Background sync runs hourly on any network; its first run waits 30 minutes, since opening the app syncs anyway.
 - Plain-http servers are refused except on loopback.
