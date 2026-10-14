@@ -310,7 +310,15 @@ class BudgetDatabase private constructor(
         var committedClock = localClock
         var undoBatch: UndoBatch? = null
         val result = sql.transaction {
-            val (drafts, outcome) = prepare()
+            undoGuards = if (recordUndo) LinkedHashSet() else null
+            val (drafts, outcome) = try {
+                prepare()
+            } catch (error: Throwable) {
+                undoGuards = null
+                throw error
+            }
+            val guards = undoGuards.orEmpty()
+            undoGuards = null
             if (drafts.isEmpty()) return@transaction CommitResult(outcome, emptyList())
             var clock = committedClock ?: throw LocalFirstException.InvalidLocalWrite("local clock is not configured")
             if (!tableExists("messages_crdt")) throw LocalFirstException.InvalidLocalWrite("missing messages_crdt table")
@@ -356,7 +364,7 @@ class BudgetDatabase private constructor(
             }
             persistMerkleTrie(trie.pruned(), clock)
             committedClock = clock
-            if (recordUndo) undoBatch = UndoBatch.of(committed, drafts, oldRows, oldRows.keys.associateWith { (dataset, row) -> rowSnapshot(dataset, row) })
+            if (recordUndo) undoBatch = UndoBatch.of(committed, drafts, oldRows, (oldRows.keys + guards).associateWith { (dataset, row) -> rowSnapshot(dataset, row) })
             CommitResult(outcome, committed)
         }
         localClock = committedClock
@@ -370,6 +378,15 @@ class BudgetDatabase private constructor(
      */
     @Volatile
     var undoListener: ((UndoBatch) -> Unit)? = null
+    private var undoGuards: MutableSet<Pair<String, String>>? = null
+
+    /**
+     * Called from inside [commitLocal]'s prepare step: undoing this batch also requires [row] to be
+     * unchanged, though the batch does not write it (a merge keeps its kept row as is).
+     */
+    fun guardForUndo(dataset: String, row: String) {
+        undoGuards?.add(dataset to row)
+    }
 
     /** A row as serialized cell values (column to `N:`/`S:`/`0:` form); null when it does not exist. */
     fun rowSnapshot(dataset: String, row: String): Map<String, String>? =

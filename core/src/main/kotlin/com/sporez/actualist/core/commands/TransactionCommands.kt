@@ -151,6 +151,8 @@ class TransactionCommands(
             if (plan.reconciledIds.isNotEmpty() && !allowReconciled) {
                 throw LocalFirstException.InvalidLocalWrite("confirm the reconciled transaction warning again")
             }
+            // Actualist guards the whole merge graph for undo, including rows the merge leaves as they are.
+            plan.beforeSnapshots.forEach { database.guardForUndo("transactions", it.id) }
             val drafts = mergeDrafts(plan)
             if (drafts.isEmpty()) throw LocalFirstException.InvalidLocalWrite("the merge has no transaction changes")
             drafts to plan
