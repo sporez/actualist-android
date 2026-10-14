@@ -415,7 +415,7 @@ data class RepeatOptions(
     val endValue: String = "",
     /** Monthly only: "none" (the start date's day), "lastDay", "days" with [daysText], or "weekday" with [weekday] and [ordinal] (-1 is last). */
     val pattern: String = "none",
-    /** Days of the month for "days", as "1, 15, last". */
+    /** Days and weekdays of the month for "days", as "1, 15, last, 2nd fri". */
     val daysText: String = "",
     val weekday: com.sporez.actualist.core.rules.ScheduleWeekday = com.sporez.actualist.core.rules.ScheduleWeekday.FRIDAY,
     val ordinal: Int = 1,
@@ -448,7 +448,7 @@ data class RepeatOptions(
     }
 
     companion object {
-        /** Null when the rule uses patterns this form cannot show (several weekdays, or weekdays mixed with days). */
+        /** Null when the rule uses patterns this form cannot show (counted from the month's end, such as second to last). */
         fun of(recurrence: com.sporez.actualist.core.rules.ScheduleRecurrence): RepeatOptions? {
             val base = when (val ending = recurrence.ending) {
                 is com.sporez.actualist.core.rules.ScheduleEnding.AfterOccurrences -> RepeatOptions(recurrence.interval.toString(), "count", ending.count.toString())
@@ -503,7 +503,7 @@ private fun RepeatFields(options: RepeatOptions, frequency: String, tag: String,
             androidx.compose.material3.OutlinedTextField(
                 options.daysText,
                 { onChange(options.copy(daysText = it)) },
-                label = { Text("Days of the month (e.g. 1, 15, last)") },
+                label = { Text("Days (e.g. 1, 15, last, 2nd fri)") },
                 singleLine = true,
                 isError = options.daysText.isNotBlank() && com.sporez.actualist.core.rules.MonthDays.parse(options.daysText) == null,
                 modifier = Modifier.fillMaxWidth().testTag("$tag-days"),

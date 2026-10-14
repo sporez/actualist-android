@@ -33,7 +33,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 - Report Explorer over the ported query engine (date range, accounts, categories, transfers; totals, per-category, matching transactions). Its JVM test checks totals against ledger sums; its device steps (part of the reports test) passed on the emulator in https://github.com/sporez/actualist-android/actions/runs/38591078296.
 - SimpleFIN direct bridge (device-claimed access key) when the server does not host SimpleFIN; templates with several entries in the template editor; a 50,000-transaction performance smoke test.
 - Wide screens (840dp and up) show the next two months beside the edited one, and a later month's assigned amount edits in place (as Actualist's grid); schedule and "up to" templates in the template editor.
-- Category learning (Actual's `updateCategoryRules`) after editor and batch categorization, with budget-wide and per-payee switches; schedule every-N intervals, monthly last-day, specific-days ("1, 15, last") and nth-weekday patterns, weekend handling and end rules; percentage-of-income templates.
+- Category learning (Actual's `updateCategoryRules`) after editor and batch categorization, with budget-wide and per-payee switches; schedule every-N intervals, monthly last-day, nth-weekday, and several days and weekdays ("1, 15, last, 2nd fri") patterns, weekend handling and end rules; percentage-of-income templates.
 - Budget overview home-screen widget (Jetpack Glance) through the session hub; template editing for by-date, average, copy and goal templates; category notes; reports month switcher, Budget vs Spent and drill-down; rule editor "one of" and "approximately".
 - Multi-select batch actions, status filters, account notes, make-a-schedule from a transaction, budget ZIP export and import-as-new (with Actual's resetSync, checked against the real server), custom request headers scoped to the server origin.
 - Device tests moved to Compose's v2 test API (StandardTestDispatcher): the deprecated v1 rule's unconfined dispatcher once let a background state change run the Recomposer off the main thread (CalledFromWrongThreadException at teardown). Rules learned under v2: never block the test thread on work that needs the session's write lock (run it on a thread and `waitUntil`), invoke long-press through the `OnLongClick` semantics action, and wait for the browser to fully take the foreground before delivering an OpenID redirect.
@@ -55,13 +55,12 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Known limitations
 
-- Not ported: GoCardless, header auth, schedules with several weekday patterns (or weekdays mixed with days) in the editor, template kinds and options beyond those listed in the README, in the rule editor: recurring date values, split and schedule-link actions, and Handlebars templates (such rules stay read-only), Actual's dashboard widgets.
+- Not ported: GoCardless, header auth, schedule patterns counted from the month's end other than "last" (such as second to last) in the editor, template kinds and options beyond those listed in the README, in the rule editor: recurring date values, split and schedule-link actions, and Handlebars templates (such rules stay read-only), Actual's dashboard widgets.
 - Real-server coverage is a disposable `actualbudget/actual-server:26.10.0` container in CI with synthetic data (login, new plain and encrypted budgets, download, two-device sync, conflicts); the on-device tests use an in-process loopback server.
 - Background sync runs hourly on any network; its first run waits 30 minutes, since opening the app syncs anyway.
 - Plain-http servers are refused except on loopback.
 
 ## Next recommended work
 
-1. Several weekday patterns in the schedule editor (for example the 1st and 3rd Friday).
-2. Split actions in the rule editor (`set-split-amount`), the largest group of rules still read-only.
+1. Split actions in the rule editor (`set-split-amount`), the largest group of rules still read-only.
 
