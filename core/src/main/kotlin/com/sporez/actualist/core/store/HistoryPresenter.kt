@@ -83,8 +83,11 @@ class HistoryPresenter(private val database: BudgetDatabase, private val symbol:
         data class Cell(val id: String, val month: String, val name: String, val old: Long, val new: Long)
         val list = amountRows.map { id ->
             val dataset = if (cells.columns("zero_budgets", id).contains("amount")) "zero_budgets" else "reflect_budgets"
-            val month = id.take(7)
-            val categoryId = id.drop(8)
+            // Budget rows are "<yyyymm>-<category>"; prefer the row's own columns when it still exists.
+            val snapshot = database.rowSnapshot(dataset, id)
+            val categoryId = text(snapshot?.get("category")) ?: id.substringAfter('-', "")
+            val monthDigits = snapshot?.get("month")?.let { plain(it) }?.filter(Char::isDigit)?.takeIf { it.length >= 6 } ?: id.substringBefore('-')
+            val month = if (monthDigits.length >= 6) "${monthDigits.take(4)}-${monthDigits.substring(4, 6)}" else monthDigits
             Cell(id, month, categoryName(categoryId), number(cells.before(dataset, id, "amount")) ?: 0L, number(cells.after(dataset, id, "amount")) ?: 0L)
         }
         val changes = list.map { HistoryChange("${it.name} · ${monthLabel(it.month)}", money(it.old), money(it.new)) }
