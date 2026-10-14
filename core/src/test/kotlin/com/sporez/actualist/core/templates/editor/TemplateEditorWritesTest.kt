@@ -35,11 +35,16 @@ class TemplateEditorWritesTest {
             assertEquals("""{"source":"ui"}""", db.sql.queryString("SELECT template_settings FROM categories WHERE id = 'dining'"))
             assertEquals(8_000L, proposed("dining"))
 
-            // Saving toward a total by a month plans a share of it each month.
-            writes.save("shopping", TemplateEditorDraft(listOf(TemplateDraftEntry.dateTarget(amount = 1_200.0, month = "2027-04", repeatInterval = null, annual = false, isSpend = false, today = day))))
+            // Saving toward a total by a month plans a share of what is still missing each month.
+            // (Shopping already carries about $1,251 into November, so a $1,200 target would release money.)
+            writes.save("shopping", TemplateEditorDraft(listOf(TemplateDraftEntry.dateTarget(amount = 6_000.0, month = "2027-04", repeatInterval = null, annual = false, isSpend = false, today = day))))
+            assertEquals(
+                """[{"amount":6000,"directive":"template","month":"2027-04","priority":1,"type":"by"}]""",
+                db.sql.queryString("SELECT goal_def FROM categories WHERE id = 'shopping'"),
+            )
             val planned = BudgetTemplates(db, clock).preview("2026-11", today = day)
-            val shopping = planned.categories.firstOrNull { it.categoryId == "shopping" }
-            assertTrue("errors=${planned.errors} shopping=$shopping goal_def=${db.sql.queryString("SELECT goal_def FROM categories WHERE id = 'shopping'")}", shopping != null && shopping.proposed in 1L..120_000L)
+            val shopping = planned.categories.single { it.categoryId == "shopping" }
+            assertTrue("$shopping", shopping.proposed > 0 && shopping.proposed < 600_000L)
 
             // Saving an unchanged draft writes nothing; an empty draft clears the template.
             val unchanged = writes.load("dining")!!
