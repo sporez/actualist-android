@@ -92,6 +92,15 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun releaseHold() = write("Hold released") { budgetWrites.hold(month.value, HoldCommand.Reset) }
 
+    /** The category's template as an editor draft; null when it is note-managed or locked (see TemplateEditorWrites). */
+    suspend fun templateDraft(categoryId: String): com.sporez.actualist.core.templates.editor.TemplateEditorDraft? =
+        session.read { com.sporez.actualist.core.templates.editor.TemplateEditorWrites(database, clock).load(categoryId) }
+
+    fun saveTemplate(categoryId: String, draft: com.sporez.actualist.core.templates.editor.TemplateEditorDraft) =
+        write(if (draft.entries.isEmpty()) "Template removed" else "Template saved") {
+            com.sporez.actualist.core.templates.editor.TemplateEditorWrites(database, clock).save(categoryId, draft)
+        }
+
     private fun write(done: String, block: BudgetSession.() -> Any?) {
         viewModelScope.launch {
             try {

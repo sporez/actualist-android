@@ -256,6 +256,26 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun editsATemplateInTheCategorySheet() {
+        openDemo()
+        compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("category-dining"))
+        compose.onNodeWithTag("category-dining").performClick()
+        compose.waitForTag("category-template")
+        compose.onNodeWithTag("category-template").performClick()
+        compose.waitForTag("template-amount")
+        compose.onNodeWithTag("template-amount").performTextInput("80.00")
+        compose.screenshot("19-template-editor")
+        compose.onNodeWithTag("template-save").performClick()
+        compose.waitForGone("template-editor")
+        compose.onNodeWithTag("month-next").performClick()
+        compose.waitForTag("to-budget-banner")
+        compose.onNodeWithTag("to-budget-banner").performClick()
+        compose.waitForTag("templates-open")
+        compose.onNodeWithTag("templates-open").performClick()
+        compose.waitOrCapture("template-in-preview") { compose.onAllNodes(hasText("$0.00 → $80.00", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()

@@ -314,11 +314,13 @@ private fun CategorySheet(
             }
             Row {
                 TextButton(onClick = onShowTransactions, modifier = Modifier.testTag("category-transactions")) { Text("Show transactions") }
+                if (!category.isIncome) TextButton(onClick = { picking = "template" }, modifier = Modifier.testTag("category-template")) { Text("Template") }
                 if (!category.isIncome) TextButton(onClick = { viewModel.hideCategory(category.id); onDismiss() }, modifier = Modifier.testTag("hide-category")) { Text("Hide category") }
             }
         }
     }
     val expenseCategories = screen.month.categoryGroups.filter { !it.isIncome }.flatMap { group -> group.categories.map { it to group } }.filter { it.first.id != category.id }
+    if (picking == "template") TemplateEditorDialog(category, viewModel) { picking = null }
     when (picking) {
         "move" -> PickerDialog(
             title = "Move to",
@@ -488,5 +490,69 @@ private fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
             ) { Text("Apply") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+
+/**
+ * A monthly amount template (Actual's "simple" template), edited through the ported template
+ * editor model. Other template kinds are listed read-only; they can still be removed here.
+ */
+@Composable
+private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: () -> Unit) {
+    var draft by remember { mutableStateOf<com.sporez.actualist.core.templates.editor.TemplateEditorDraft?>(null) }
+    var loaded by remember { mutableStateOf(false) }
+    var amountText by rememberSaveable(category.id) { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(category.id) {
+        draft = runCatching { viewModel.templateDraft(category.id) }.getOrNull()
+        val monthly = draft?.entries?.singleOrNull() as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed
+        if (monthly != null) amountText = Money.format(Math.round(monthly.amount * 100), symbol = "", grouping = false)
+        loaded = true
+    }
+    val current = draft
+    val monthly = current?.entries?.singleOrNull() as? com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed
+    val simple = current != null && (current.entries.isEmpty() ||
+        (monthly != null && monthly.cadence == com.sporez.actualist.core.templates.editor.TemplateCadence.MONTH && monthly.interval == 1))
+    val amount = Money.parse(amountText)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Template for ${category.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("template-editor")) {
+                when {
+                    !loaded -> Text("Reading the template…")
+                    current == null -> Text("This template is managed in the category's note or uses options this app cannot change. Edit it in Actual.")
+                    simple -> {
+                        Text("Budget this amount every month when templates are applied.", style = MaterialTheme.typography.bodySmall)
+                        AmountField(amountText, { amountText = it }, label = "Monthly amount", tag = "template-amount")
+                    }
+                    else -> Text("${current.entries.size} template entries this app shows read-only. Edit them in Actual, or remove the template here.")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = simple && amount != null && amount > 0,
+                onClick = {
+                    val value = amount!! / 100.0
+                    val entry = monthly?.copy(amount = value)
+                        ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.monthlyFixed(amount = value)
+                    viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(listOf(entry)))
+                    onDismiss()
+                },
+                modifier = Modifier.testTag("template-save"),
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            Row {
+                if (current != null && current.entries.isNotEmpty()) {
+                    TextButton(
+                        onClick = { viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(emptyList())); onDismiss() },
+                        modifier = Modifier.testTag("template-remove"),
+                    ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
     )
 }
