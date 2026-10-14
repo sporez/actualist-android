@@ -322,7 +322,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
             is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> {
                 startText = current.recurrenceValue.startDayId
                 frequency = current.recurrenceValue.frequency.name
-                repeat = RepeatOptions.of(current.recurrenceValue)
+                repeat = RepeatOptions.of(current.recurrenceValue) ?: RepeatOptions()
             }
             else -> {}
         }
@@ -331,7 +331,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
     val simpleRule = when (val current = rule) {
         is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> true
         is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> current.recurrenceValue.let {
-            it.patterns.isEmpty() && !it.skipWeekend && it.frequency != com.sporez.actualist.core.rules.ScheduleFrequency.DAILY
+            RepeatOptions.of(it) != null && it.frequency != com.sporez.actualist.core.rules.ScheduleFrequency.DAILY
         }
         else -> false
     }
@@ -407,7 +407,17 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
 
 
 /** "Every N" and an end rule for a recurring schedule; patterns and weekend handling stay in Actual. */
-data class RepeatOptions(val intervalText: String = "1", val end: String = "never", val endValue: String = "") {
+data class RepeatOptions(
+    val intervalText: String = "1",
+    val end: String = "never",
+    val endValue: String = "",
+    /** Monthly only: "none" (the start date's day), "lastDay", or "weekday" with [weekday] and [ordinal] (-1 is last). */
+    val pattern: String = "none",
+    val weekday: com.sporez.actualist.core.rules.ScheduleWeekday = com.sporez.actualist.core.rules.ScheduleWeekday.FRIDAY,
+    val ordinal: Int = 1,
+    val skipWeekend: Boolean = false,
+    val weekendAfter: Boolean = true,
+) {
     fun recurrence(start: LocalDate, frequency: com.sporez.actualist.core.rules.ScheduleFrequency): com.sporez.actualist.core.rules.ScheduleRecurrence? {
         val interval = intervalText.trim().toLongOrNull()?.takeIf { it in 1..99 } ?: return null
         val ending = when (end) {
@@ -418,14 +428,33 @@ data class RepeatOptions(val intervalText: String = "1", val end: String = "neve
             }
             else -> com.sporez.actualist.core.rules.ScheduleEnding.Never
         }
-        return runCatching { com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), frequency, interval = interval, ending = ending) }.getOrNull()
+        val patterns = if (frequency != com.sporez.actualist.core.rules.ScheduleFrequency.MONTHLY) emptyList() else when (pattern) {
+            "lastDay" -> listOf(com.sporez.actualist.core.rules.SchedulePattern.DayOfMonth(-1))
+            "weekday" -> listOf(com.sporez.actualist.core.rules.SchedulePattern.Weekday(weekday, ordinal))
+            else -> emptyList()
+        }
+        return runCatching {
+            com.sporez.actualist.core.rules.ScheduleRecurrence(
+                start.toString(), frequency, interval = interval, patterns = patterns, skipWeekend = skipWeekend,
+                weekendAdjustment = if (weekendAfter) com.sporez.actualist.core.rules.WeekendAdjustment.AFTER else com.sporez.actualist.core.rules.WeekendAdjustment.BEFORE,
+                ending = ending,
+            )
+        }.getOrNull()
     }
 
     companion object {
-        fun of(recurrence: com.sporez.actualist.core.rules.ScheduleRecurrence): RepeatOptions = when (val ending = recurrence.ending) {
-            is com.sporez.actualist.core.rules.ScheduleEnding.AfterOccurrences -> RepeatOptions(recurrence.interval.toString(), "count", ending.count.toString())
-            is com.sporez.actualist.core.rules.ScheduleEnding.OnDate -> RepeatOptions(recurrence.interval.toString(), "date", ending.dayId)
-            else -> RepeatOptions(recurrence.interval.toString())
+        /** Null when the rule uses patterns this form cannot show (several, or a fixed day number). */
+        fun of(recurrence: com.sporez.actualist.core.rules.ScheduleRecurrence): RepeatOptions? {
+            val base = when (val ending = recurrence.ending) {
+                is com.sporez.actualist.core.rules.ScheduleEnding.AfterOccurrences -> RepeatOptions(recurrence.interval.toString(), "count", ending.count.toString())
+                is com.sporez.actualist.core.rules.ScheduleEnding.OnDate -> RepeatOptions(recurrence.interval.toString(), "date", ending.dayId)
+                else -> RepeatOptions(recurrence.interval.toString())
+            }.copy(skipWeekend = recurrence.skipWeekend, weekendAfter = recurrence.weekendAdjustment == com.sporez.actualist.core.rules.WeekendAdjustment.AFTER)
+            return when (val pattern = recurrence.patterns.singleOrNull()) {
+                null -> if (recurrence.patterns.isEmpty()) base else null
+                is com.sporez.actualist.core.rules.SchedulePattern.DayOfMonth -> if (pattern.day == -1) base.copy(pattern = "lastDay") else null
+                is com.sporez.actualist.core.rules.SchedulePattern.Weekday -> base.copy(pattern = "weekday", weekday = pattern.weekday, ordinal = pattern.ordinal)
+            }
         }
     }
 }
@@ -452,6 +481,45 @@ private fun RepeatFields(options: RepeatOptions, frequency: String, tag: String,
                 label = { Text(label) },
                 modifier = Modifier.padding(end = 4.dp).testTag("$tag-end-$key"),
             )
+        }
+    }
+    if (frequency == "MONTHLY") {
+        Row {
+            for ((key, label) in listOf("none" to "Same day", "lastDay" to "Last day", "weekday" to "A weekday")) {
+                androidx.compose.material3.FilterChip(
+                    selected = options.pattern == key,
+                    onClick = { onChange(options.copy(pattern = key)) },
+                    label = { Text(label) },
+                    modifier = Modifier.padding(end = 4.dp).testTag("$tag-pattern-$key"),
+                )
+            }
+        }
+        if (options.pattern == "weekday") {
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val ordinals = listOf(1 to "1st", 2 to "2nd", 3 to "3rd", 4 to "4th", -1 to "Last")
+                items(ordinals.size) { index ->
+                    val (value, label) = ordinals[index]
+                    androidx.compose.material3.FilterChip(selected = options.ordinal == value, onClick = { onChange(options.copy(ordinal = value)) }, label = { Text(label) })
+                }
+            }
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val days = com.sporez.actualist.core.rules.ScheduleWeekday.values().toList()
+                items(days.size) { index ->
+                    val day = days[index]
+                    androidx.compose.material3.FilterChip(
+                        selected = options.weekday == day,
+                        onClick = { onChange(options.copy(weekday = day)) },
+                        label = { Text(day.name.take(3).lowercase().replaceFirstChar { it.uppercase() }) },
+                    )
+                }
+            }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.Checkbox(checked = options.skipWeekend, onCheckedChange = { onChange(options.copy(skipWeekend = it)) }, modifier = Modifier.testTag("$tag-skip-weekend"))
+        Text("Move off weekends", Modifier.weight(1f))
+        if (options.skipWeekend) {
+            TextButton(onClick = { onChange(options.copy(weekendAfter = !options.weekendAfter)) }) { Text(if (options.weekendAfter) "to Monday" else "to Friday") }
         }
     }
     if (options.end != "never") {
