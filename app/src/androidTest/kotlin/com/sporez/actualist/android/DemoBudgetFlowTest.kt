@@ -405,8 +405,11 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("open-explorer").performClick()
         compose.waitForTag("explorer-totals")
         compose.onNodeWithTag("explorer-range-Last 3 months").performClick()
-        compose.waitOrCapture("explorer-rows") { compose.onAllNodes(hasTestTag("explorer-row")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitOrCapture("explorer-categories") { compose.onAllNodes(hasText("transactions", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("33-explorer")
+        // The matching transactions are further down the list.
+        compose.onNodeWithTag("explorer-screen").performScrollToNode(hasTestTag("explorer-row"))
+        compose.waitOrCapture("explorer-rows") { compose.onAllNodes(hasTestTag("explorer-row")).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
