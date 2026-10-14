@@ -177,6 +177,32 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
         if (server.isSignedIn) {
             var newName by rememberSaveable { mutableStateOf("") }
             var newPassword by remember { mutableStateOf("") }
+            val resolver = context.contentResolver
+            val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri != null) {
+                    scope.launch {
+                        busy = true
+                        error = null
+                        try {
+                            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                resolver.openInputStream(uri)?.use { input ->
+                                    // Refuse implausibly large files before reading them into memory.
+                                    val data = input.readBytes()
+                                    if (data.size > 512 * 1024 * 1024) throw IllegalArgumentException("The file is too large.")
+                                    data
+                                } ?: throw IllegalArgumentException("The file could not be read.")
+                            }
+                            val name = newName.trim().ifEmpty { com.sporez.actualist.core.server.PortableBudget.budgetName(bytes) ?: "Imported budget" }
+                            onDownloaded(server.importBudget(bytes, name, newPassword.ifEmpty { null }))
+                        } catch (e: Exception) {
+                            error = e.message ?: "The budget could not be imported."
+                        }
+                        busy = false
+                    }
+                }
+            }
             OutlinedTextField(newName, { newName = it }, label = { Text("New budget name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("new-budget-name"))
             OutlinedTextField(newPassword, { newPassword = it }, label = { Text("Encryption password (optional)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().testTag("new-budget-password"))
             OutlinedButton(
@@ -195,6 +221,11 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                 },
                 modifier = Modifier.fillMaxWidth().testTag("new-budget-create"),
             ) { Text("Create a new budget on this server") }
+            OutlinedButton(
+                enabled = !busy,
+                onClick = { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
+                modifier = Modifier.fillMaxWidth().testTag("import-budget-zip"),
+            ) { Text("Import a budget ZIP as a new budget") }
         }
         if (busy) CircularProgressIndicator()
         files?.let { list ->

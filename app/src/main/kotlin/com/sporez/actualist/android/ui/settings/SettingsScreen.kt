@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -69,6 +70,7 @@ fun SettingsScreen(
                     TextButton(onClick = onCloseBudget, modifier = Modifier.testTag("close-budget")) { Text("Close budget") }
                 }
                 TextButton(onClick = onShowHistory, modifier = Modifier.testTag("show-history")) { Text("History (undo and redo)") }
+                ExportBudgetButton(session)
             }
         }
         SectionCard {
@@ -124,4 +126,36 @@ fun syncDescription(status: SyncStatus): String = when (status) {
     }
     is SyncStatus.Synced -> "Synced ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(status.atMillis))} · ${status.uploaded} sent, ${status.applied} received"
     is SyncStatus.Failed -> "Sync failed: ${status.message}" + if (status.pendingChanges > 0) " · ${status.pendingChanges} change(s) kept locally" else ""
+}
+
+
+/** Exports the open budget as a ZIP (a consistent, sanitized snapshot), as Actualist's Export does. */
+@Composable
+private fun ExportBudgetButton(session: BudgetSession) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var status by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                status = try {
+                    val bytes = session.read {
+                        com.sporez.actualist.core.server.PortableBudget.exportArchive(
+                            database, name, androidx.sqlite.driver.bundled.BundledSQLiteDriver(), java.io.File(context.cacheDir, "portable-export"),
+                        )
+                    }
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) } ?: throw IllegalStateException("The file could not be written.")
+                    }
+                    "Exported ${bytes.size / 1024} KB"
+                } catch (error: Exception) {
+                    error.message ?: "The budget could not be exported."
+                }
+            }
+        }
+    }
+    TextButton(onClick = { launcher.launch("${session.name}.zip") }, modifier = Modifier.testTag("export-budget")) { Text("Export budget (ZIP)") }
+    status?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("export-status")) }
 }

@@ -136,7 +136,7 @@ class ServerConnection(
      * built locally, registered with `upload-user-file`, and kept only once the server confirmed
      * it. Any failure removes the local copy, so nothing unregistered stays selectable.
      */
-    suspend fun createBudget(name: String, encryptionPassword: String? = null): LocalBudget = withContext(Dispatchers.IO) {
+    suspend fun createBudget(name: String, encryptionPassword: String? = null, importArchive: ByteArray? = null): LocalBudget = withContext(Dispatchers.IO) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) throw LocalFirstException.InvalidLocalWrite("Enter a name for the new budget.")
         val client = client()
@@ -145,7 +145,14 @@ class ServerConnection(
         val file = library.databaseFile(id)
         var uploaded = false
         try {
-            com.sporez.actualist.core.server.NewBudget.createFile(driver, file.absolutePath)
+            if (importArchive == null) {
+                com.sporez.actualist.core.server.NewBudget.createFile(driver, file.absolutePath)
+            } else {
+                // Import a budget ZIP as a new budget: sanitized like a download, with Actual's
+                // resetSync so the new server group starts from an empty history.
+                com.sporez.actualist.core.server.BudgetImporter.install(importArchive, file, driver)
+                com.sporez.actualist.core.server.PortableBudget.resetSyncHistory(file, driver)
+            }
             val archive = com.sporez.actualist.core.server.NewBudget.archive(file, id, trimmed)
             val keys = encryptionPassword?.takeIf { it.isNotEmpty() }?.let { com.sporez.actualist.core.server.NewBudget.RegistrationKeys.make(it, archive) }
             val groupId = client.uploadUserFile(token, id, trimmed, null, keys?.encryptedArchive ?: archive, keys?.encryptMeta)
@@ -168,6 +175,10 @@ class ServerConnection(
             throw error
         }
     }
+
+    /** Imports a budget ZIP (Actual's or this app's export) as a new budget on this server. */
+    suspend fun importBudget(zip: ByteArray, name: String, encryptionPassword: String? = null): LocalBudget =
+        createBudget(name, encryptionPassword, importArchive = zip)
 
     /** SimpleFIN bank sync for [database] through this server, which holds the SimpleFIN token (as in Actualist). */
     fun simpleFin(database: com.sporez.actualist.core.db.BudgetDatabase, clock: com.sporez.actualist.core.db.Clock): com.sporez.actualist.core.banksync.SimpleFinSync =
