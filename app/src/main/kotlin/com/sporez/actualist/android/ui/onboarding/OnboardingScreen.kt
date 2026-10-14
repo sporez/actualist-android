@@ -19,6 +19,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,6 +111,23 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
         }
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val openId by server.openId.collectAsState()
+    LaunchedEffect(openId) {
+        when (val outcome = openId) {
+            ServerConnection.OpenIdOutcome.SignedIn -> {
+                server.consumeOpenId()
+                error = null
+                load()
+            }
+            is ServerConnection.OpenIdOutcome.Failed -> {
+                server.consumeOpenId()
+                error = outcome.message
+            }
+            null -> {}
+        }
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp).testTag("server-screen"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Connect to Actual", style = MaterialTheme.typography.headlineSmall)
         Text("Use your own server. Never point this experimental build at a budget you cannot afford to re-download.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -135,6 +154,23 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
                 },
                 modifier = Modifier.fillMaxWidth().testTag("server-sign-in"),
             ) { Text("Sign in") }
+            OutlinedButton(
+                enabled = !busy && url.length > 8,
+                onClick = {
+                    scope.launch {
+                        error = null
+                        try {
+                            val authorize = server.beginOpenId(url, context.packageName)
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(authorize)))
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            error = "No browser is available to finish OpenID sign-in."
+                        } catch (e: Exception) {
+                            error = e.message ?: "OpenID sign-in could not start."
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().testTag("server-openid"),
+            ) { Text("Sign in with OpenID") }
         } else if (files == null && !busy) {
             Button(onClick = { load() }, modifier = Modifier.testTag("server-list")) { Text("Show budgets") }
         }

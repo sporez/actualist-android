@@ -46,6 +46,53 @@ class ServerConnection(
         settings.update { it.copy(serverUrl = client.url) }
     }
 
+    sealed class OpenIdOutcome {
+        data object SignedIn : OpenIdOutcome()
+        data class Failed(val message: String) : OpenIdOutcome()
+    }
+
+    private val _openId = kotlinx.coroutines.flow.MutableStateFlow<OpenIdOutcome?>(null)
+    /** The result of the last OpenID redirect back into the app, until [consumeOpenId]. */
+    val openId: kotlinx.coroutines.flow.StateFlow<OpenIdOutcome?> = _openId
+
+    /**
+     * Starts OpenID sign-in as Actualist does and returns the identity provider address to open
+     * in a browser. The nonce and server are kept until the redirect comes back (also across a
+     * process restart).
+     */
+    suspend fun beginOpenId(serverUrl: String, scheme: String): String = withContext(Dispatchers.IO) {
+        val client = ActualServerClient(serverUrl)
+        if ("openid" !in client.loginMethods()) throw com.sporez.actualist.core.server.OpenIdException("This server does not offer OpenID sign-in.")
+        val nonce = com.sporez.actualist.core.server.OpenIdLogin.makeNonce()
+        val authorize = client.beginOpenIdLogin(com.sporez.actualist.core.server.OpenIdLogin.returnUrl(scheme, nonce))
+        secrets.putString(OPENID_PENDING, "$nonce ${client.url}")
+        authorize
+    }
+
+    /** Handles `<scheme>://localhost/openid/<nonce>/openid-cb?token=...`; only the pending nonce is accepted. */
+    fun completeOpenId(callback: String, scheme: String) {
+        val pending = secrets.getString(OPENID_PENDING)
+        if (pending == null) {
+            _openId.value = OpenIdOutcome.Failed("No OpenID sign-in is in progress.")
+            return
+        }
+        secrets.remove(OPENID_PENDING)
+        val nonce = pending.substringBefore(' ')
+        val url = pending.substringAfter(' ')
+        _openId.value = try {
+            val token = com.sporez.actualist.core.server.OpenIdLogin.token(callback, scheme, nonce)
+            secrets.putString(SecretStore.SERVER_TOKEN, token)
+            settings.update { it.copy(serverUrl = url) }
+            OpenIdOutcome.SignedIn
+        } catch (error: com.sporez.actualist.core.server.OpenIdException) {
+            OpenIdOutcome.Failed(error.message ?: "OpenID sign-in failed.")
+        }
+    }
+
+    fun consumeOpenId() {
+        _openId.value = null
+    }
+
     fun signOut() {
         secrets.remove(SecretStore.SERVER_TOKEN)
         settings.update { it.copy(serverUrl = null) }
@@ -173,4 +220,8 @@ class ServerConnection(
 
     private fun fail(session: BudgetSession, message: String): SyncStatus =
         SyncStatus.Failed(message, session.database.pendingLocalMessageCount()).also(session::publishSyncStatus)
+
+    private companion object {
+        const val OPENID_PENDING = "openid.pending"
+    }
 }

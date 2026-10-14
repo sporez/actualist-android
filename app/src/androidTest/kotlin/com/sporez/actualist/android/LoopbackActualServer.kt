@@ -29,6 +29,9 @@ class LoopbackActualServer(
     /** Files registered through upload-user-file, by id; each shares this server's message log. */
     val uploadedNames = java.util.concurrent.ConcurrentHashMap<String, String>()
     val simpleFinRequests = java.util.concurrent.CopyOnWriteArrayList<String>()
+    /** The return address the app sent when it started OpenID sign-in. */
+    @Volatile
+    var openIdReturnUrl: String? = null
     private var trie = MerkleTrie.EMPTY
     @Volatile var budgetZip: ByteArray = ByteArray(0)
     @Volatile private var running = true
@@ -92,7 +95,16 @@ class LoopbackActualServer(
         requests += "$method $path"
         val token = headers["x-actual-token"]
         val (status, type, payload) = when {
-            path == "/account/login-methods" -> Triple(200, "application/json", """{"status":"ok","methods":[{"method":"password","active":1,"displayName":"Password"}]}""".toByteArray())
+            path == "/account/login-methods" -> Triple(
+                200,
+                "application/json",
+                """{"status":"ok","methods":[{"method":"password","active":1,"displayName":"Password"},{"method":"openid","active":1,"displayName":"OpenID"}]}""".toByteArray(),
+            )
+            path == "/account/login" && String(body).contains("\"loginMethod\":\"openid\"") -> {
+                openIdReturnUrl = Regex("\"returnUrl\":\"([^\"]+)\"").find(String(body))?.groupValues?.get(1)
+                Triple(200, "application/json", """{"status":"ok","data":{"returnUrl":"$url/fake-idp"}}""".toByteArray())
+            }
+            path == "/fake-idp" -> Triple(200, "text/html", "<html><body>Synthetic identity provider</body></html>".toByteArray())
             path == "/account/login" -> if (String(body).contains("\"password\":\"$PASSWORD\"")) {
                 Triple(200, "application/json", """{"status":"ok","data":{"token":"$TOKEN"}}""".toByteArray())
             } else {

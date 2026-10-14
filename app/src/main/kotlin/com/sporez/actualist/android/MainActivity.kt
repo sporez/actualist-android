@@ -33,6 +33,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent { ActualistApp() }
+        handleOpenIdReturn(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleOpenIdReturn(intent)
+    }
+
+    /** The OpenID redirect back from the browser: `<applicationId>://localhost/openid/<nonce>/openid-cb?token=`. */
+    private fun handleOpenIdReturn(intent: android.content.Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != packageName || data.host != com.sporez.actualist.core.server.OpenIdLogin.CALLBACK_HOST) return
+        (application as ActualistApplication).container.server.completeOpenId(data.toString(), packageName)
+        intent.data = null
     }
 }
 

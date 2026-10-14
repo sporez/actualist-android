@@ -212,4 +212,33 @@ class ServerSyncFlowTest {
         assertTrue(server.simpleFinRequests.single().contains("remote-1"))
         compose.screenshot("25-bank-synced")
     }
+
+    @Test
+    fun signsInWithOpenIdThroughTheBrowserRedirect() {
+        publishBudget()
+        compose.waitForTag("onboarding")
+        compose.onNodeWithTag("onboarding-connect").performClick()
+        compose.waitForTag("server-url-field")
+        compose.onNodeWithTag("server-url-field").performTextClearance()
+        compose.onNodeWithTag("server-url-field").performTextInput(server.url)
+        compose.onNodeWithTag("server-openid").performClick()
+        compose.waitUntil(30_000) { server.openIdReturnUrl != null }
+        val returnUrl = server.openIdReturnUrl!!
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assertTrue(returnUrl, returnUrl.startsWith("${context.packageName}://localhost/openid/"))
+
+        // A forged callback with another nonce is refused and does not sign in.
+        fun deliver(uri: String) = context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri))
+                .setPackage(context.packageName)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        // What the identity provider's redirect does once the user signs in there.
+        deliver("$returnUrl/openid-cb?token=${LoopbackActualServer.TOKEN}")
+        compose.waitUntil(60_000) { compose.onAllNodesWithText("Loopback Synthetic Budget").fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("26-openid-signed-in")
+        // The nonce was single use: replaying the redirect is refused.
+        deliver("$returnUrl/openid-cb?token=${LoopbackActualServer.TOKEN}")
+        compose.waitForTag("server-error", 30_000)
+    }
 }
