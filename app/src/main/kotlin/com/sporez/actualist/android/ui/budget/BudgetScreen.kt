@@ -320,7 +320,12 @@ private fun CategorySheet(
         }
     }
     val expenseCategories = screen.month.categoryGroups.filter { !it.isIncome }.flatMap { group -> group.categories.map { it to group } }.filter { it.first.id != category.id }
-    if (picking == "template") TemplateEditorDialog(category, viewModel) { picking = null }
+    if (picking == "template") {
+        TemplateEditorDialog(category, viewModel) { saved ->
+            picking = null
+            if (saved) onDismiss()
+        }
+    }
     when (picking) {
         "move" -> PickerDialog(
             title = "Move to",
@@ -499,7 +504,7 @@ private fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
  * editor model. Other template kinds are listed read-only; they can still be removed here.
  */
 @Composable
-private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: () -> Unit) {
+private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: (saved: Boolean) -> Unit) {
     var draft by remember { mutableStateOf<com.sporez.actualist.core.templates.editor.TemplateEditorDraft?>(null) }
     var loaded by remember { mutableStateOf(false) }
     var amountText by rememberSaveable(category.id) { mutableStateOf("") }
@@ -515,7 +520,7 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
         (monthly != null && monthly.cadence == com.sporez.actualist.core.templates.editor.TemplateCadence.MONTH && monthly.interval == 1))
     val amount = Money.parse(amountText)
     androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { onDismiss(false) },
         title = { Text("Template for ${category.name}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("template-editor")) {
@@ -538,7 +543,7 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
                     val entry = monthly?.copy(amount = value)
                         ?: com.sporez.actualist.core.templates.editor.TemplateDraftEntry.monthlyFixed(amount = value)
                     viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(listOf(entry)))
-                    onDismiss()
+                    onDismiss(true)
                 },
                 modifier = Modifier.testTag("template-save"),
             ) { Text("Save") }
@@ -547,11 +552,11 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             Row {
                 if (current != null && current.entries.isNotEmpty()) {
                     TextButton(
-                        onClick = { viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(emptyList())); onDismiss() },
+                        onClick = { viewModel.saveTemplate(category.id, com.sporez.actualist.core.templates.editor.TemplateEditorDraft(emptyList())); onDismiss(true) },
                         modifier = Modifier.testTag("template-remove"),
                     ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
                 }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = { onDismiss(false) }) { Text("Cancel") }
             }
         },
     )
