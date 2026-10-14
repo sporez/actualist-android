@@ -34,7 +34,7 @@ class ServerConnection(
     val isSignedIn: Boolean get() = settings.settings.value.serverUrl != null && secrets.getString(SecretStore.SERVER_TOKEN) != null
 
     private fun client(url: String = settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()) =
-        ActualServerClient(url, com.sporez.actualist.core.server.httpClientWithHeaders(customHeaders(url)))
+        com.sporez.actualist.core.server.ServerClients.actual(url, customHeaders(url))
 
     /** The saved custom headers, as `Name: value` lines, and the server they belong to. */
     fun savedCustomHeaders(): Pair<String, String>? =
@@ -44,11 +44,8 @@ class ServerConnection(
     private fun customHeaders(url: String): com.sporez.actualist.core.server.EndpointHeaders? {
         val (savedUrl, text) = savedCustomHeaders() ?: return null
         val endpoint = runCatching { com.sporez.actualist.core.server.EndpointHeaders(savedUrl, com.sporez.actualist.core.server.EndpointHeaders.parse(text)) }.getOrNull()
-        val target = url.toHttpUrlOrNullSafe() ?: return null
-        return endpoint?.takeIf { it.appliesTo(target) }
+        return endpoint?.takeIf { it.appliesToUrl(url) }
     }
-
-    private fun String.toHttpUrlOrNullSafe(): okhttp3.HttpUrl? = runCatching { ActualServerClient(this).baseUrl }.getOrNull()
 
     /** Validates and stores custom headers for [serverUrl] (blank removes them). Throws with a readable reason. */
     fun saveCustomHeaders(serverUrl: String, text: String) {
@@ -211,7 +208,7 @@ class ServerConnection(
         com.sporez.actualist.core.banksync.SimpleFinSync(
             database,
             (settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()).let { url ->
-                com.sporez.actualist.core.banksync.SimpleFinServerClient(url, com.sporez.actualist.core.server.httpClientWithHeaders(customHeaders(url)))
+                com.sporez.actualist.core.server.ServerClients.simpleFin(url, customHeaders(url))
             },
             token(),
             clock,

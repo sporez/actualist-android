@@ -83,3 +83,14 @@ class CustomHeaderInterceptor(private val endpoint: EndpointHeaders) : Intercept
 fun httpClientWithHeaders(endpoint: EndpointHeaders?): OkHttpClient =
     if (endpoint == null || endpoint.headers.isEmpty()) ActualServerClient.defaultHttpClient()
     else ActualServerClient.defaultHttpClient().newBuilder().addInterceptor(CustomHeaderInterceptor(endpoint)).build()
+
+/** Whether [url]'s origin is the one these headers were saved for; false for an invalid address. */
+fun EndpointHeaders.appliesToUrl(url: String): Boolean = url.toHttpUrlOrNull()?.let { appliesTo(it) } ?: false
+
+/** Clients carrying the configured headers, so callers never need the HTTP library's types. */
+object ServerClients {
+    fun actual(url: String, headers: EndpointHeaders?): ActualServerClient = ActualServerClient(url, httpClientWithHeaders(headers))
+
+    fun simpleFin(url: String, headers: EndpointHeaders?): com.sporez.actualist.core.banksync.SimpleFinServerClient =
+        com.sporez.actualist.core.banksync.SimpleFinServerClient(url, httpClientWithHeaders(headers))
+}
