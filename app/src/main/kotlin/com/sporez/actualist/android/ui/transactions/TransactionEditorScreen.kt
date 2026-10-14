@@ -128,6 +128,16 @@ class TransactionEditorViewModel(
         }
     }
 
+    /**
+     * Actualist's editor rule preview: runs the budget's rules on the draft as typed and
+     * returns the result for the editor to show before saving. Null when rules cannot run.
+     */
+    suspend fun previewRules(input: com.sporez.actualist.core.rules.RuleTransactionInput): com.sporez.actualist.core.rules.RuleRunResult? = try {
+        session.read { com.sporez.actualist.core.rules.RuleEngine(database).run(input, LocalDate.now()) }
+    } catch (error: Exception) {
+        null
+    }
+
     fun saveSplit(edit: com.sporez.actualist.core.transactions.SplitFamilyEdit) = launchWrite {
         session.write { transactionWrites.updateSplit(transactionId!!, edit) }
     }
@@ -192,6 +202,46 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     val splitRemaining = (signed ?: 0) - splitAmounts.sumOf { it ?: 0 }
     val canSave = signed != null && account != null && (!splitting || (splitAmounts.all { it != null } && splitRemaining == 0L))
     val editingSplit = existing?.isChild == true
+    var rulesApplied by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    // New simple transactions get the rule preview whenever the payee or account changes.
+    LaunchedEffect(payeeId, newPayeeName, accountId) {
+        if (existing != null || splitting || isTransfer || accountId == null) return@LaunchedEffect
+        if (payeeId == null && newPayeeName.isBlank()) return@LaunchedEffect
+        val result = viewModel.previewRules(
+            com.sporez.actualist.core.rules.RuleTransactionInput(
+                accountId = accountId!!,
+                date = LocalDate.ofEpochDay(dateEpochDay),
+                amount = signed ?: 0,
+                payeeId = payeeId,
+                payeeName = payee?.name ?: newPayeeName,
+                categoryId = categoryId,
+                notes = notes.ifBlank { null },
+                cleared = cleared,
+                importedPayee = newPayeeName.ifBlank { null },
+            ),
+        ) ?: return@LaunchedEffect
+        if (result.appliedRuleIds.isEmpty() || result.deletesTransaction) return@LaunchedEffect
+        rulesApplied = result.appliedRuleIds
+        if (result.splits.isNotEmpty()) {
+            splitting = true
+            splits = result.splits.map { SplitLine(it.categoryId, Money.format(kotlin.math.abs(it.amount), symbol = "", grouping = false)) }
+        } else {
+            categoryId = result.categoryId
+        }
+        notes = result.notes ?: ""
+        cleared = result.cleared
+        if (result.payeeId != null && loaded.payees.any { it.id == result.payeeId }) {
+            payeeId = result.payeeId
+            newPayeeName = ""
+        }
+        if (loaded.accounts.any { it.id == result.accountId }) accountId = result.accountId
+        dateEpochDay = result.date.toEpochDay()
+        if (signed != null && result.amount != signed) {
+            outflow = result.amount <= 0
+            amountText = Money.format(kotlin.math.abs(result.amount), symbol = "", grouping = false)
+        }
+    }
 
     Column(Modifier.fillMaxSize().testTag("transaction-editor")) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -235,6 +285,14 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             error?.let { ErrorBanner(it, Modifier.testTag("editor-error")) }
             if (editingSplit) ErrorBanner("This is part of a split. Open the whole transaction to edit it.")
             if (existing?.reconciled == true) ErrorBanner("This transaction is reconciled and locked.")
+            if (rulesApplied.isNotEmpty()) {
+                Text(
+                    "Rules applied: ${rulesApplied.size}. Review before saving.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.testTag("rules-applied"),
+                )
+            }
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 SegmentedButton(selected = outflow, onClick = { outflow = true }, shape = SegmentedButtonDefaults.itemShape(0, 2), modifier = Modifier.testTag("editor-outflow")) { Text("Outflow") }
                 SegmentedButton(selected = !outflow, onClick = { outflow = false }, shape = SegmentedButtonDefaults.itemShape(1, 2), modifier = Modifier.testTag("editor-inflow")) { Text("Inflow") }
