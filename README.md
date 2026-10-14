@@ -35,7 +35,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Split transactions: create, edit, delete | Done | Splits 23 |
 | Search, Uncleared/Cleared/Reconciled status filters, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
 | Rules: engine, editor, preview in the transaction editor, on import and reconciliation; category learning (Actual's updateCategoryRules) with budget and per-payee switches | Done | Rules 245; learning unit tests |
-| Schedules: recurrence, status, add, edit (name, amount, auto-post, first date, frequency, every-N interval, end after N times or on a date), post, skip, complete, delete | Done (patterns and end rules edited in Actual) | Schedules 136 + 49 + 66 |
+| Schedules: recurrence, status, add, edit (name, amount, auto-post, first date, frequency, every-N interval, last day or nth weekday, weekend handling, end after N times or on a date), post, skip, complete, delete | Done (rules with several day patterns edited in Actual) | Schedules 136 + 49 + 66 |
 | Accounts: add, rename, notes, close (with balance transfer), reopen, SimpleFIN unlink, account groups | Done | AccountLifecycle 16; account-group tests ported from Actualist |
 | Reconciliation | Done | from Actualist's Reconciliation cases |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
