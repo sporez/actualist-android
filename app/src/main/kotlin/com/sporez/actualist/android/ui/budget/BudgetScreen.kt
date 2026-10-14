@@ -760,6 +760,7 @@ private fun FollowingMonths(
 ) {
     val state by viewModel.following.collectAsState()
     val months = (state as? Loadable.Ready)?.value ?: return
+    var assigning by remember { mutableStateOf<Pair<String, String>?>(null) }
     LazyColumn(
         modifier.testTag("budget-following"),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(end = 14.dp, bottom = 24.dp),
@@ -787,12 +788,20 @@ private fun FollowingMonths(
                                 Text(category.name, Modifier.weight(1.2f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 for (month in months) {
                                     val value = month.category(category.id)
-                                    Column(
-                                        Modifier.weight(1f).clickable { onEdit(month.month, category.id) }.testTag("following-${month.month}-${category.id}"),
-                                        horizontalAlignment = Alignment.End,
-                                    ) {
-                                        Text(money(value?.budgeted ?: 0L), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        MoneyText(value?.balance ?: 0L, colored = true)
+                                    // As Actualist's grid: the assigned amount edits in place, the balance opens the category.
+                                    val assignable = !category.isIncome || month.table != BudgetTable.ENVELOPE
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            money(value?.budgeted ?: 0L),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier
+                                                .clickable(enabled = assignable) { assigning = month.month to category.id }
+                                                .testTag("following-assign-${month.month}-${category.id}"),
+                                        )
+                                        Box(Modifier.clickable { onEdit(month.month, category.id) }.testTag("following-${month.month}-${category.id}")) {
+                                            MoneyText(value?.balance ?: 0L, colored = true)
+                                        }
                                     }
                                 }
                             }
@@ -802,4 +811,32 @@ private fun FollowingMonths(
             }
         }
     }
+    assigning?.let { (month, categoryId) ->
+        val category = months.firstOrNull { it.month == month }?.category(categoryId)
+        if (category == null) assigning = null else AssignInMonthDialog(month, category, viewModel) { assigning = null }
+    }
+}
+
+@Composable
+private fun AssignInMonthDialog(month: String, category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: () -> Unit) {
+    var text by rememberSaveable(month, category.id) { mutableStateOf(Money.format(category.budgeted, symbol = "", grouping = false)) }
+    val amount = Money.parse(text)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(category.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("following-assign-dialog")) {
+                Text(monthTitle(month), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                AmountField(text, { text = it }, label = "Assigned", tag = "following-assign-field")
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { amount?.let { viewModel.assignIn(month, category.id, it) }; onDismiss() },
+                enabled = amount != null,
+                modifier = Modifier.testTag("following-assign-save"),
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

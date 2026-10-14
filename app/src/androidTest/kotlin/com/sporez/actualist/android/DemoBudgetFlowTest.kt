@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sporez.actualist.android.ui.budget.monthTitle
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -437,6 +438,20 @@ class DemoBudgetFlowTest {
             compose.waitOrCapture("following-months") { compose.onAllNodes(hasTestTag("budget-following")).fetchSemanticsNodes().isNotEmpty() }
             compose.screenshot("32-landscape-months")
             val next = java.time.YearMonth.now().plusMonths(1).toString()
+            // The assigned amount in a later column edits that month in place.
+            compose.onNodeWithTag("budget-following").performScrollToNode(hasTestTag("following-assign-$next-groceries"))
+            compose.onNodeWithTag("following-assign-$next-groceries").performClick()
+            compose.waitForTag("following-assign-dialog")
+            compose.onNodeWithTag("following-assign-field").performTextClearance()
+            compose.onNodeWithTag("following-assign-field").performTextInput("123.45")
+            compose.onNodeWithTag("following-assign-save").performClick()
+            compose.waitForGone("following-assign-dialog")
+            compose.waitOrCapture("assigned-in-place") {
+                compose.onAllNodes(hasTestTag("following-assign-$next-groceries") and hasText("123.45", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals(monthTitle(java.time.YearMonth.now().toString()), compose.onNodeWithTag("month-title").fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.joinToString())
+            compose.screenshot("32b-assigned-in-place")
+            compose.onNodeWithTag("budget-following").performScrollToNode(hasTestTag("following-$next"))
             compose.onNodeWithTag("following-$next").performClick()
             // Only after switching to next month does the month after next-plus-one get a column.
             compose.waitOrCapture("switched-month") { compose.onAllNodes(hasTestTag("following-${java.time.YearMonth.parse(next).plusMonths(2)}")).fetchSemanticsNodes().isNotEmpty() }

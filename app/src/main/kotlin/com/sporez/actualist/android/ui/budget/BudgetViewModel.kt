@@ -46,6 +46,9 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun assign(categoryId: String, amount: Long) = write("Assigned") { budgetWrites.assign(month.value, categoryId, amount) }
 
+    /** Assigns in a month other than the shown one: the side-by-side columns edit in place. */
+    fun assignIn(month: String, categoryId: String, amount: Long) = write("Assigned in ${monthTitle(month)}") { budgetWrites.assign(month, categoryId, amount) }
+
     /** A null side is To Budget. */
     fun move(from: String?, to: String?, amount: Long) = write("Moved") {
         budgetWrites.move(month.value, listOf(MoveMoneyCommand(from, to, amount, if (from == null) MoveMoneyCommand.Kind.TRANSFER_AVAILABLE else MoveMoneyCommand.Kind.MOVE)))
