@@ -30,12 +30,13 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
 | Budget templates: preview, apply, edit monthly templates | Done (other template kinds read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
-| Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge | Done | Transactions 21, TransactionCommand 39 |
+| Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge, make a schedule | Done | Transactions 21, TransactionCommand 39 |
+| Multi-select: clear, unclear, categorize, duplicate, delete together (atomic, one undo) | Done | unit + device tests |
 | Split transactions: create, edit, delete | Done | Splits 23 |
-| Search, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
+| Search, Uncleared/Cleared/Reconciled status filters, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
 | Rules: engine, editor, preview in the transaction editor, on import and reconciliation | Done | Rules 245 |
 | Schedules: recurrence, status, add, edit (name, amount, auto-post, first date and frequency of simple rules), post, skip, complete, delete | Done (patterns and end rules edited in Actual) | Schedules 136 + 49 + 66 |
-| Accounts: add, rename, close (with balance transfer), reopen, SimpleFIN unlink, account groups | Done | AccountLifecycle 16; account-group tests ported from Actualist |
+| Accounts: add, rename, notes, close (with balance transfer), reopen, SimpleFIN unlink, account groups | Done | AccountLifecycle 16; account-group tests ported from Actualist |
 | Reconciliation | Done | from Actualist's Reconciliation cases |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
 | Payees: rename, merge | Done | unit tests |
@@ -46,6 +47,8 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Server: OpenID sign-in (browser redirect) | Done | unit + device tests |
 | Server: password sign-in, (encrypted) download, sync with confirmation, merkle repair | Done | multi-device tests; JVM and on-device loopback server |
 | New budget creation and registration (plain or end-to-end encrypted) | Done | real actual-server 26.10.0 in CI |
+| Budget ZIP export; import a ZIP as a new server budget (Actual's resetSync) | Done | JVM + real actual-server |
+| Custom request headers for servers behind an access proxy | Done | unit tests |
 | GoCardless, direct SimpleFIN bridge, dashboard widgets | Not ported | — |
 
 ## Building
