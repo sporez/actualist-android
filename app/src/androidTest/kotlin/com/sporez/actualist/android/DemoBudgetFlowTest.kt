@@ -376,7 +376,8 @@ class DemoBudgetFlowTest {
         compose.waitForTag("transaction-list")
         compose.onNodeWithTag("nav-back").performClick()
         compose.waitForTag("bottom-bar")
-        compose.waitOrCapture("schedule-made") { countSchedules() > before }
+        // The editor closes only after the schedule was written.
+        assertTrue(countSchedules() > before)
     }
 
     @Test
