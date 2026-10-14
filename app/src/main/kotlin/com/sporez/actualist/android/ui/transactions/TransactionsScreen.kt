@@ -223,7 +223,13 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
 @Composable
 private fun TransactionList(rows: List<TransactionRow>, showAccount: Boolean, onOpen: (TransactionRow) -> Unit) {
     val byDay = rows.groupBy { it.date }
-    LazyColumn(Modifier.testTag("transaction-list"), contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // LazyColumn keeps its position on the first visible key, so a new newest row (a new day
+    // group) would be inserted above the viewport. Follow it when the list was at the top.
+    androidx.compose.runtime.LaunchedEffect(rows.firstOrNull()?.id) {
+        if (listState.firstVisibleItemIndex <= 3) listState.scrollToItem(0)
+    }
+    LazyColumn(Modifier.testTag("transaction-list"), state = listState, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for ((day, dayRows) in byDay) {
             item(key = "day-$day") {
                 Text(day?.format(dayFormat) ?: "No date", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
