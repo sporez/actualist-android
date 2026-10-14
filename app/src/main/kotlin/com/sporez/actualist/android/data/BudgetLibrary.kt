@@ -76,6 +76,8 @@ class BudgetLibrary(context: Context) {
         val file = databaseFile(id)
         if (!file.exists()) return null
         val database = BudgetDatabase.open(driver, file.absolutePath, metadata.nodeId)
+        // Older files may hold account-group CRDT without the table or column (Actualist's compatibility step).
+        com.sporez.actualist.core.accountgroups.AccountGroupCompatibility.prepare(database)
         return BudgetSession(id, metadata.name, database, isDemo = false)
     }
 
