@@ -34,9 +34,16 @@ if ! adb shell pidof "$APP_ID" > /dev/null; then
 fi
 adb shell am force-stop "$APP_ID"
 
-# Instrumentation and Compose UI tests.
+# Instrumentation and Compose UI tests. When the job runs a disposable Actual server, expose
+# it on the device's own loopback (the only place the app allows plain http) and pass it on.
+SERVER_ARGS=()
+if [ -n "${ACTUAL_TEST_SERVER_URL:-}" ]; then
+  adb reverse tcp:5006 tcp:5006
+  SERVER_ARGS=(-e actualServerUrl "http://127.0.0.1:5006" -e actualServerPassword "$ACTUAL_TEST_SERVER_PASSWORD")
+  echo "Real Actual server exposed to the device at 127.0.0.1:5006" | tee "$OUT/real-server.txt"
+fi
 adb logcat -c
-adb shell am instrument -w -r "$RUNNER" | tee "$OUT/instrumentation-raw.txt"
+adb shell am instrument -w -r "${SERVER_ARGS[@]}" "$RUNNER" | tee "$OUT/instrumentation-raw.txt"
 adb logcat -d > "$OUT/logcat.txt"
 
 # Process death: open the app on the budget the last test left selected, send it to the

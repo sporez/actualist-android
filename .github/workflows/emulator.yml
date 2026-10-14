@@ -17,6 +17,16 @@ jobs:
     name: Instrumented and Compose UI tests (API 34)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # A disposable Actual server (the oracle's version) for one device test; synthetic password,
+    # no volume, gone when the job ends.
+    services:
+      actual:
+        image: actualbudget/actual-server:26.10.0
+        ports:
+          - 5006:5006
+    env:
+      ACTUAL_TEST_SERVER_URL: http://localhost:5006
+      ACTUAL_TEST_SERVER_PASSWORD: ci-synthetic-password-1
     steps:
       - uses: actions/checkout@v7
 
@@ -44,6 +54,17 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+
+      - name: Bootstrap the disposable Actual server
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5006/account/needs-bootstrap > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -sf -X POST -H 'Content-Type: application/json' \
+            -d "{\"password\":\"$ACTUAL_TEST_SERVER_PASSWORD\"}" \
+            http://localhost:5006/account/bootstrap > /dev/null
+          echo "bootstrapped"
 
       - name: Build APKs
         run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
