@@ -172,6 +172,13 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("reconcile-balance").performTextInput("20000.00")
         compose.waitForTag("reconcile-difference")
         compose.screenshot("12-reconcile")
+        // Reconciling is a review in steps, as Actualist's: review, create the adjustment, then lock.
+        compose.onNodeWithTag("reconcile-continue").performClick()
+        compose.waitForTag("reconcile-adjust")
+        compose.onNodeWithTag("reconcile-adjust").performClick()
+        compose.waitForTag("reconcile-adjust-confirm")
+        compose.onNodeWithTag("reconcile-adjust-confirm").performClick()
+        compose.waitForTag("reconcile-finish")
         compose.onNodeWithTag("reconcile-finish").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Reconciled and locked")).fetchSemanticsNodes().isNotEmpty() }
         compose.waitOrCapture("reconcile-adjustment-row") { compose.onAllNodes(hasText("Reconciliation balance adjustment", substring = true)).fetchSemanticsNodes().isNotEmpty() }
@@ -373,12 +380,16 @@ class DemoBudgetFlowTest {
         compose.screenshot("29-selection")
         // Clear first, then unclear: whatever the rows' state, the second action changes both.
         compose.onNodeWithTag("batch-clear").performClick()
+        compose.waitForTag("batch-review-confirm")
+        compose.onNodeWithTag("batch-review-confirm").performClick()
         compose.waitForGone("selection-bar")
         compose.onAllNodes(rowMatcher)[0].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
         compose.waitForTag("selection-bar")
         compose.onAllNodes(rowMatcher)[1].performClick()
         compose.waitOrCapture("two-selected-again") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("batch-unclear").performClick()
+        compose.waitForTag("batch-review-confirm")
+        compose.onNodeWithTag("batch-review-confirm").performClick()
         compose.waitForGone("selection-bar")
         compose.waitOrCapture("batch-message") { compose.onAllNodes(hasText("Uncleared 2", substring = true)).fetchSemanticsNodes().isNotEmpty() }
     }
@@ -439,7 +450,7 @@ class DemoBudgetFlowTest {
         compose.waitForTag("open-explorer")
         compose.onNodeWithTag("open-explorer").performClick()
         compose.waitForTag("explorer-totals")
-        compose.onNodeWithTag("explorer-range-Last 3 months").performClick()
+        compose.onNodeWithTag("explorer-range-Last 3 Months").performClick()
         compose.waitOrCapture("explorer-categories") { compose.onAllNodes(hasText("transactions", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("33-explorer")
         // The matching transactions are further down the list.
