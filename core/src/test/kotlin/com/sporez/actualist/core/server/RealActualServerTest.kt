@@ -169,4 +169,19 @@ class RealActualServerTest {
         client.deleteUserFile(token, fileId)
         assertTrue(client.listUserFiles(token).none { it.fileId == fileId })
     }
+
+    @Test
+    fun simpleFinRoutesAnswerAsAnUnconfiguredServer() {
+        assumeTrue("set ACTUAL_TEST_SERVER_URL to run against a disposable Actual server", url != null)
+        val token = ActualServerClient(url!!).login(password)
+        TestDatabases.starter(clock = TestClock()).use { db ->
+            // The disposable server has no SimpleFIN token: status says so, and the accounts route
+            // refuses without contacting SimpleFIN.
+            val sync = com.sporez.actualist.core.banksync.SimpleFinSync(db, com.sporez.actualist.core.banksync.SimpleFinServerClient(url), token)
+            assertEquals(com.sporez.actualist.core.banksync.SimpleFinServerSupport.NOT_CONFIGURED, sync.serverSupport())
+            assertThrows(com.sporez.actualist.core.banksync.SimpleFinException::class.java) { sync.remoteAccounts() }
+            val unauthenticated = com.sporez.actualist.core.banksync.SimpleFinSync(db, com.sporez.actualist.core.banksync.SimpleFinServerClient(url), "not-a-token")
+            assertThrows(Exception::class.java) { unauthenticated.serverSupport() }
+        }
+    }
 }
