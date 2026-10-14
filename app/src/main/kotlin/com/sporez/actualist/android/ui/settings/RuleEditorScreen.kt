@@ -32,6 +32,7 @@ import com.sporez.actualist.android.ui.components.LoadingBox
 import com.sporez.actualist.android.ui.components.PickerDialog
 import com.sporez.actualist.android.ui.components.PickerOption
 import com.sporez.actualist.android.ui.components.SectionCard
+import com.sporez.actualist.android.ui.components.money
 import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.rules.RuleAction
 import com.sporez.actualist.core.rules.RuleCondition
@@ -39,12 +40,15 @@ import com.sporez.actualist.core.rules.RuleConditionJoin
 import com.sporez.actualist.core.rules.RuleDraft
 import com.sporez.actualist.core.rules.RuleEngine
 import com.sporez.actualist.core.rules.RuleFields
+import com.sporez.actualist.core.rules.RuleMatchPreview
+import com.sporez.actualist.core.rules.RuleMatches
 import com.sporez.actualist.core.rules.RuleStage
 import com.sporez.actualist.core.rules.RuleValue
 import com.sporez.actualist.core.rules.RuleWrites
 import com.sporez.actualist.core.store.BudgetSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -145,7 +149,18 @@ data class RuleEditorData(
     val editable: Boolean,
 )
 
-class RuleEditorViewModel(private val session: BudgetSession, private val ruleId: String?) : ViewModel() {
+/** What the editor's match preview shows: the draft's matches among existing transactions, or why not. */
+sealed class RuleMatchState {
+    data object Idle : RuleMatchState()
+    data class Ready(val preview: RuleMatchPreview) : RuleMatchState()
+    data class Failed(val message: String) : RuleMatchState()
+}
+
+/** [initialPayeeId] seeds a new rule with a "payee is X" condition (the payees page's Add rule). */
+class RuleEditorViewModel(private val session: BudgetSession, private val ruleId: String?, val initialPayeeId: String? = null) : ViewModel() {
+    private val _matches = MutableStateFlow<RuleMatchState>(RuleMatchState.Idle)
+    val matches: StateFlow<RuleMatchState> = _matches.asStateFlow()
+
     private val _data = MutableStateFlow<RuleEditorData?>(null)
     val data: StateFlow<RuleEditorData?> = _data.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
@@ -190,8 +205,24 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
                 }
             }
 
-    fun save(stage: RuleStage, join: RuleConditionJoin, conditions: List<RuleLine>, actions: List<RuleLine>) = launch {
-        val draft = RuleDraft(
+    /** Which existing transactions the conditions match (the preview ignores the actions). Incomplete conditions clear it. */
+    suspend fun refreshMatches(stage: RuleStage, join: RuleConditionJoin, conditions: List<RuleLine>) {
+        if (conditions.isEmpty() || !conditions.all { RuleEditorFields.conditionValid(it) }) {
+            _matches.value = RuleMatchState.Idle
+            return
+        }
+        _matches.value = try {
+            val draft = buildDraft(stage, join, conditions, emptyList())
+            RuleMatchState.Ready(session.read { RuleMatches(database).matching(draft, limit = 25) })
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            RuleMatchState.Failed(e.message ?: "The matches could not be read.")
+        }
+    }
+
+    private fun buildDraft(stage: RuleStage, join: RuleConditionJoin, conditions: List<RuleLine>, actions: List<RuleLine>): RuleDraft =
+        RuleDraft(
             stage = stage,
             join = join,
             conditions = conditions.map {
@@ -208,6 +239,9 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
                 else RuleAction(it.op, null, RuleValue.Text(it.value))
             },
         )
+
+    fun save(stage: RuleStage, join: RuleConditionJoin, conditions: List<RuleLine>, actions: List<RuleLine>) = launch {
+        val draft = buildDraft(stage, join, conditions, actions)
         session.write { if (ruleId == null) RuleWrites(database).create(draft) else RuleWrites(database).update(ruleId, draft) }
     }
 
@@ -266,7 +300,7 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
     val existing = loaded.existing
     var join by remember { mutableStateOf(existing?.join ?: RuleConditionJoin.AND) }
     var conditions by remember {
-        mutableStateOf(existing?.conditions?.map { RuleLine(it.editorField, it.op, RuleEditorViewModel.text(it.editorField, it.value)) } ?: listOf(RuleLine("payee", "is", "")))
+        mutableStateOf(existing?.conditions?.map { RuleLine(it.editorField, it.op, RuleEditorViewModel.text(it.editorField, it.value)) } ?: listOf(RuleLine("payee", "is", viewModel.initialPayeeId ?: "")))
     }
     var actions by remember {
         mutableStateOf(existing?.actions?.map { RuleLine(it.fieldName ?: "notes", it.op, RuleEditorViewModel.text(it.fieldName ?: "notes", it.value)) } ?: listOf(RuleLine("category", "set", "")))
@@ -327,6 +361,12 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
             )
         }
         if (loaded.editable) TextButton(onClick = { actions = actions + RuleLine("notes", "set", "") }, modifier = Modifier.testTag("rule-add-action")) { Text("Add action") }
+        val matchState by viewModel.matches.collectAsState()
+        LaunchedEffect(conditions, join, stage) {
+            delay(250)
+            viewModel.refreshMatches(stage, join, conditions)
+        }
+        MatchPreviewSection(matchState)
         Row {
             if (loaded.editable) {
                 Button(onClick = { viewModel.save(stage, join, conditions, actions) }, enabled = valid, modifier = Modifier.testTag("rule-save")) { Text("Save rule") }
@@ -456,6 +496,36 @@ private fun LineCard(
                     },
                     modifier = Modifier.fillMaxWidth().testTag("rule-$kind-$index-text"),
                 )
+            }
+        }
+    }
+}
+
+/** Count and first rows of the existing transactions the draft's conditions match. */
+@Composable
+private fun MatchPreviewSection(state: RuleMatchState) {
+    Text("Matching transactions", style = MaterialTheme.typography.titleMedium)
+    when (state) {
+        RuleMatchState.Idle -> Text("Complete the conditions to see matches.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("rule-matches-idle"))
+        is RuleMatchState.Failed -> ErrorBanner(state.message, Modifier.testTag("rule-matches-error"))
+        is RuleMatchState.Ready -> {
+            val preview = state.preview
+            Text(
+                if (preview.totalCount == 0) "No matching transactions" else "${preview.totalCount} matching ${if (preview.totalCount == 1) "transaction" else "transactions"}",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag("rule-matches-count"),
+            )
+            preview.transactions.forEach { match ->
+                Row(Modifier.fillMaxWidth().testTag("rule-match-${match.id}"), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(match.payeeName, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                        Text("${match.date} · ${match.categoryName} · ${match.accountName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
+                    Text(money(match.amount), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            if (preview.totalCount > preview.transactions.size) {
+                Text("and ${preview.totalCount - preview.transactions.size} more", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

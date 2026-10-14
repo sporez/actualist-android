@@ -267,18 +267,24 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
             composable("payees") {
                 val vm = viewModel(key = "payees-$key") { com.sporez.actualist.android.ui.settings.PayeesViewModel(session) }
-                com.sporez.actualist.android.ui.settings.PayeesScreen(vm)
+                com.sporez.actualist.android.ui.settings.PayeesScreen(vm) { ruleId, payeeId ->
+                    navController.navigate(if (ruleId == null) "rule-edit?payee=${encode(payeeId)}" else "rule-edit?id=${encode(ruleId)}&payee=${encode(payeeId)}")
+                }
             }
             composable("rules") {
                 val vm = viewModel(key = "rules-$key") { com.sporez.actualist.android.ui.settings.RulesViewModel(session) }
                 com.sporez.actualist.android.ui.settings.RulesScreen(vm) { id -> navController.navigate(if (id == null) "rule-edit" else "rule-edit?id=${encode(id)}") }
             }
             composable(
-                "rule-edit?id={id}",
-                arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),
+                "rule-edit?id={id}&payee={payee}",
+                arguments = listOf(
+                    navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("payee") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
             ) { backStack ->
                 val id = backStack.arguments?.getString("id")
-                val vm = viewModel(key = "rule-edit-$id-$key") { com.sporez.actualist.android.ui.settings.RuleEditorViewModel(session, id) }
+                val payee = backStack.arguments?.getString("payee")
+                val vm = viewModel(key = "rule-edit-$id-$payee-$key") { com.sporez.actualist.android.ui.settings.RuleEditorViewModel(session, id, payee) }
                 com.sporez.actualist.android.ui.settings.RuleEditorScreen(vm) { navController.popBackStack() }
             }
             composable("server") {

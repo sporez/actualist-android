@@ -66,6 +66,9 @@ class RuleEngine(
 
     fun fetchRules(): List<ManagedRule> = sql.locked { loadRules() }
 
+    /** Account, category and payee lookups, as a rule pass reads them (for match previews). */
+    fun metadata(): RuleMetadata = sql.locked { loadMetadata() }
+
     fun run(input: RuleTransactionInput, today: LocalDate): RuleRunResult = run(listOf(input), today).first()
 
     /** Evaluates a batch against one rules, schedules and metadata snapshot. */
