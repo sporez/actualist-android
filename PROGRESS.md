@@ -41,9 +41,9 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38531745514 — 2,990 JVM tests, 0 failures; 3 skipped by design (the real-server tests, which need the server from the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38531745535 — 3/3 (login, plain and encrypted new budgets, download, two-device sync, conflict, merkle agreement, SimpleFIN routes unconfigured).
-- Emulator (API 34): https://github.com/sporez/actualist-android/actions/runs/38531061124 — 19/19, none skipped: every main screen, assign with undo/redo, add transaction, rule preview, reconcile, schedules (post, edit, add), rule editor, duplicate, templates (apply, edit), activity recreation, loopback-server sign-in/download/edit/sync, new budget, background sync worker, SimpleFIN link and sync, OpenID redirect, and the app against the real actual-server through `adb reverse`; process-death relaunch reopened the selected budget. One earlier round had a single `reconcilesAnAccount` timeout that did not reproduce; that wait now captures the screen on failure.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38553402929 — 3,008 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38540782254 — 4/4, none skipped (login, plain and encrypted new budgets, imported ZIP as a new budget, download, two-device sync, conflicts, merkle agreement, SimpleFIN routes unconfigured).
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38553381521 — 23/23, none skipped: every main screen, assign with undo/redo and History, add transaction, rule preview, rule editor, reconcile, schedules (post, edit, add, from a transaction), duplicate, multi-select batch actions, templates (apply, edit), account groups, reports month switch and drill-down, activity recreation, loopback-server sign-in/download/edit/sync, new budget, background sync worker, SimpleFIN link and sync, OpenID redirect, and the app against the real actual-server through `adb reverse`; process-death relaunch reopened the selected budget.
 
 ## Known limitations
 
