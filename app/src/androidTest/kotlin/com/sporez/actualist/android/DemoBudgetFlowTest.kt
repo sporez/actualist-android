@@ -331,11 +331,16 @@ class DemoBudgetFlowTest {
         compose.onAllNodes(rowMatcher)[1].performClick()
         compose.waitOrCapture("two-selected") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("29-selection")
+        // Clear first, then unclear: whatever the rows' state, the second action changes both.
+        compose.onNodeWithTag("batch-clear").performClick()
+        compose.waitForGone("selection-bar")
+        compose.onAllNodes(rowMatcher)[0].performTouchInput { longClick() }
+        compose.waitForTag("selection-bar")
+        compose.onAllNodes(rowMatcher)[1].performClick()
+        compose.waitOrCapture("two-selected-again") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("batch-unclear").performClick()
         compose.waitForGone("selection-bar")
-        compose.waitOrCapture("undo-enabled") {
-            compose.onAllNodes(hasTestTag("undo") and androidx.compose.ui.test.isEnabled()).fetchSemanticsNodes().isNotEmpty()
-        }
+        compose.waitOrCapture("batch-message") { compose.onAllNodes(hasText("Uncleared 2", substring = true)).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
