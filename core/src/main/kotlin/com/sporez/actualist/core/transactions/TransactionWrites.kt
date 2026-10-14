@@ -141,8 +141,8 @@ class TransactionWrites(
      * Actual's insert sends only the cells it sets: an absent payee, category or notes stays
      * unwritten and structural columns keep their defaults.
      */
-    fun simpleDrafts(draft: TransactionDraft, transactionId: String, payeeId: String?): List<CellDraft> {
-        validateAccount(draft.accountId)
+    fun simpleDrafts(draft: TransactionDraft, transactionId: String, payeeId: String?, checkAccount: Boolean = true): List<CellDraft> {
+        if (checkAccount) validateAccount(draft.accountId)
         draft.categoryId?.let(::validateCategory)
         val columns = database.requiredColumns("transactions", listOf("date", "amount"))
         val cells = mutableListOf(
@@ -294,6 +294,7 @@ class TransactionWrites(
         date: LocalDate,
         onBudget: Boolean,
         sortOrder: Double?,
+        checkAccount: Boolean = true,
     ): List<CellDraft> {
         val (payeeId, payeeDrafts) = resolveOrCreatePayeeDrafts(null, "Starting Balance")
         val draft = TransactionDraft(
@@ -306,7 +307,7 @@ class TransactionWrites(
             cleared = true,
             sortOrder = sortOrder,
         )
-        val rows = simpleDrafts(draft, transactionId, payeeId)
+        val rows = simpleDrafts(draft, transactionId, payeeId, checkAccount)
         val flag = if ("starting_balance_flag" in database.columnSet("transactions")) {
             listOf(CellDraft("transactions", transactionId, "starting_balance_flag", SyncValue.int(1)))
         } else {
@@ -314,6 +315,10 @@ class TransactionWrites(
         }
         return payeeDrafts + rows + flag
     }
+
+    /** For an account created in the same commit, whose row is not in the database yet. */
+    fun openingBalanceDraftsForNewAccount(transactionId: String, accountId: String, amount: Long, date: LocalDate, onBudget: Boolean) =
+        openingBalanceDrafts(transactionId, accountId, amount, date, onBudget, null, checkAccount = false)
 
     fun startingBalanceCategoryId(): String? {
         val columns = database.columnSet("categories")

@@ -67,6 +67,14 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
             "total-budget-income", "total-saved", "real-saved", "last-month-overspent",
         )
         private val comparedCategoryFields = setOf("budgeted", "spent", "leftover", "carryover")
+
+        /**
+         * AND-01, inherited from Actualist: a refused hold refuses the whole action, where
+         * Actual's UI has already dispatched `reset-income-carryover`, which commits even when
+         * the hold then fails. Only these cases make the reset observable. Actualist's own
+         * replay attributes the same rows to OP-32 through its cascade rule.
+         */
+        val refusedHoldResetCases = setOf("generated-004-2027-11", "generated-057-2026-11")
         private val seedTables = listOf(
             "accounts", "category_groups", "categories", "category_mapping", "transactions",
             "zero_budgets", "reflect_budgets", "zero_budget_months", "preferences", "notes",
@@ -160,8 +168,19 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
                 if (e == a) null else Mismatch(key, e, a)
             }
             // OP-32: a move or cover writes no "Reassigned" month note, where the pinned Actual writes one.
-            val (op32, unexplained) = mismatches.partition {
+            val (op32, rest) = mismatches.partition {
                 it.path.contains(".cell.") && it.path.endsWith("/note") && it.actual == "missing" && it.expected.startsWith("S:- Reassigned")
+            }
+            val refusedHoldStep = actions.firstOrNull { it.kind is Kind.Hold && it.returned == false }?.stepIndex
+            fun stepOf(path: String): Int = when {
+                path.startsWith("final.") -> Int.MAX_VALUE
+                path.startsWith("step") -> path.substring(4, path.indexOf('.')).toIntOrNull() ?: -1
+                else -> -1
+            }
+            val (and01, unexplained) = if (caseId in refusedHoldResetCases && refusedHoldStep != null) {
+                rest.partition { stepOf(it.path) >= refusedHoldStep }
+            } else {
+                emptyList<Mismatch>() to rest
             }
             val report = buildString {
                 appendLine("$caseId seed ${entry["seed"]}")
@@ -171,7 +190,11 @@ class BudgetMonthOracleReplayTest(private val caseId: String) {
                 if (unexplained.size + consistency.size > 40) appendLine("... ${unexplained.size + consistency.size - 40} more")
             }
             assertTrue(report, unexplained.isEmpty() && consistency.isEmpty())
+            if (caseId in refusedHoldResetCases) {
+                assertTrue("$caseId no longer shows AND-01; remove it from refusedHoldResetCases", and01.isNotEmpty())
+            }
             if (op32.isNotEmpty()) println("$caseId: ${op32.size} OP-32 note cell(s) excused")
+            if (and01.isNotEmpty()) println("$caseId: ${and01.size} AND-01 row(s) excused")
         }
     }
 
