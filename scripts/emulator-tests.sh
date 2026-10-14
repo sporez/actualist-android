@@ -43,7 +43,12 @@ if [ -n "${ACTUAL_TEST_SERVER_URL:-}" ]; then
   echo "Real Actual server exposed to the device at 127.0.0.1:5006" | tee "$OUT/real-server.txt"
 fi
 adb logcat -c
-adb shell am instrument -w -r "${SERVER_ARGS[@]}" "$RUNNER" | tee "$OUT/instrumentation-raw.txt"
+FILTER_ARGS=()
+if [ -n "${TEST_FILTER:-}" ]; then
+  FILTER_ARGS=(-e class "$TEST_FILTER")
+  echo "Running only $TEST_FILTER" | tee "$OUT/filter.txt"
+fi
+adb shell am instrument -w -r "${SERVER_ARGS[@]}" "${FILTER_ARGS[@]}" "$RUNNER" | tee "$OUT/instrumentation-raw.txt"
 adb logcat -d > "$OUT/logcat.txt"
 
 # Process death: open the app on the budget the last test left selected, send it to the

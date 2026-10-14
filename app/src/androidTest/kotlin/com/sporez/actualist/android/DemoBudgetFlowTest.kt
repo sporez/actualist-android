@@ -327,7 +327,7 @@ class DemoBudgetFlowTest {
         }
         compose.waitUntil(30_000) { compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size >= 2 }
         compose.onAllNodes(rowMatcher)[0].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
-        compose.waitForTag("selection-bar")
+        compose.waitOrCapture("selection-bar") { compose.onAllNodes(hasTestTag("selection-bar")).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodes(rowMatcher)[1].performClick()
         compose.waitOrCapture("two-selected") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("29-selection")
