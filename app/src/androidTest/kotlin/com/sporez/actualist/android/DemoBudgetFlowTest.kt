@@ -243,7 +243,11 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("rule-action-1-text").performScrollTo().performTextInput(" #shop")
         compose.screenshot("15-rule-editor")
         compose.onNodeWithTag("rule-save").performScrollTo().performClick()
-        compose.waitOrCapture("rule-saved") { compose.onAllNodes(hasText("payee is MarketPlace", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        // Post-stage rules are listed last, below the fold of the lazy list.
+        compose.waitOrCapture("rule-saved") {
+            runCatching { compose.onNodeWithTag("rules-screen").performScrollToNode(hasText("payee is MarketPlace", substring = true)) }.isSuccess &&
+                compose.onAllNodes(hasText("payee is MarketPlace", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
         compose.waitOrCapture("rule-notes-action") { compose.onAllNodes(hasText("append-notes \" #shop\"", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Stage: post").assertExists()
         compose.waitOrCapture("rule-range-condition") { compose.onAllNodes(hasText("amount isbetween", substring = true)).fetchSemanticsNodes().isNotEmpty() }
