@@ -82,8 +82,19 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
             )
         }
 
-    /** Edits name, amount and auto-posting through the ported schedule writer; only changed fields are sent. */
-    fun update(item: ScheduleListItem, name: String, amount: Long?, approximate: Boolean, posts: Boolean) =
+    /** The schedule's current date rule, for the editor. */
+    suspend fun dateRule(item: ScheduleListItem): com.sporez.actualist.core.schedules.ScheduleDateRule? =
+        session.read { Schedules(database, clock).editor(item.id, today())?.dateRule }
+
+    /** Edits name, amount, auto-posting and (for simple rules) the date rule; only changed fields are sent. */
+    fun update(
+        item: ScheduleListItem,
+        name: String,
+        amount: Long?,
+        approximate: Boolean,
+        posts: Boolean,
+        dateRule: com.sporez.actualist.core.schedules.ScheduleDateRule? = null,
+    ) =
         write("Updated ${name.ifBlank { item.name }}") {
             val trimmed = name.trim()
             val amountChanged = amount != null && (amount != item.amountMinorUnits || approximate != item.isApproximate)
@@ -99,6 +110,8 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
                     com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged
                 },
                 postsTransaction = posts.takeIf { it != item.postsTransaction },
+                dateRule = dateRule?.let { com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(it) }
+                    ?: com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
             )
             if (!fields.isEmpty) Schedules(database, clock).update(item.id, fields, today())
         }
@@ -284,6 +297,46 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
     var approximate by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.isApproximate) }
     var posts by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.postsTransaction) }
     val magnitude = com.sporez.actualist.core.money.Money.parse(amountText)
+    var rule by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.sporez.actualist.core.schedules.ScheduleDateRule?>(null) }
+    var startText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var frequency by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(item.id) {
+        val loaded = viewModel.dateRule(item)
+        rule = loaded
+        when (val current = loaded) {
+            is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> { startText = current.dayId; frequency = "ONCE" }
+            is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> { startText = current.recurrenceValue.startDayId; frequency = current.recurrenceValue.frequency.name }
+            else -> {}
+        }
+    }
+    // Only one-time and plain recurring rules are edited here; others keep their rule.
+    val simpleRule = when (val current = rule) {
+        is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> true
+        is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> current.recurrenceValue.let {
+            it.interval == 1L && it.patterns.isEmpty() && !it.skipWeekend && it.ending == com.sporez.actualist.core.rules.ScheduleEnding.Never &&
+                it.frequency != com.sporez.actualist.core.rules.ScheduleFrequency.DAILY
+        }
+        else -> false
+    }
+    val start = runCatching { java.time.LocalDate.parse(startText.trim()) }.getOrNull()
+    fun editedRule(): com.sporez.actualist.core.schedules.ScheduleDateRule? {
+        val current = rule ?: return null
+        if (!simpleRule || start == null) return null
+        val operation = when (current) {
+            is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> current.operation
+            is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> current.operation
+            else -> return null
+        }
+        val next = if (frequency == "ONCE") {
+            com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), operation)
+        } else {
+            com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(
+                com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)),
+                operation,
+            )
+        }
+        return next.takeIf { it != current }
+    }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit schedule") },
@@ -307,15 +360,24 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                     androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
                     Text("Post the transaction automatically")
                 }
-                Text("Repeats: ${item.recurrenceDescription}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (simpleRule) {
+                    androidx.compose.material3.OutlinedTextField(startText, { startText = it }, label = { Text("First date (YYYY-MM-DD)") }, singleLine = true, isError = start == null, modifier = Modifier.fillMaxWidth().testTag("schedule-edit-start"))
+                    Row {
+                        for ((key, label) in listOf("ONCE" to "Once", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly", "YEARLY" to "Yearly")) {
+                            androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-edit-frequency-$key"))
+                        }
+                    }
+                } else {
+                    Text("Repeats: ${item.recurrenceDescription} (edit this rule in Actual)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         },
         confirmButton = {
             TextButton(
-                enabled = isRange || (magnitude != null && magnitude != 0L),
+                enabled = (isRange || (magnitude != null && magnitude != 0L)) && (!simpleRule || start != null),
                 onClick = {
                     val signed = if (isRange) null else kotlin.math.abs(magnitude!!).let { if (outflow) -it else it }
-                    viewModel.update(item, name, signed, approximate, posts)
+                    viewModel.update(item, name, signed, approximate, posts, editedRule())
                     onDismiss()
                 },
                 modifier = Modifier.testTag("schedule-edit-save"),
