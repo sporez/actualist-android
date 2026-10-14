@@ -184,4 +184,43 @@ class RealActualServerTest {
             assertThrows(Exception::class.java) { unauthenticated.serverSupport() }
         }
     }
+
+    @Test
+    fun anImportedBudgetZipRegistersAndSyncsOnARealActualServer() {
+        assumeTrue("set ACTUAL_TEST_SERVER_URL to run against a disposable Actual server", url != null)
+        val client = ActualServerClient(url!!)
+        val token = client.login(password)
+        val dir = TestDatabases.tempFile().parentFile
+        val clock = TestClock(System.currentTimeMillis())
+        val archive = com.sporez.actualist.core.demo.DemoBudget.create(TestDatabases.driver, File(dir, "zip-source.sqlite").absolutePath, LocalDate.now(), clock).use { source ->
+            PortableBudget.exportArchive(source, "Synthetic Import", TestDatabases.driver, File(dir, "zip-scratch"))
+        }
+        // What the app's "Import a budget ZIP" does: sanitize, reset the history, register as new.
+        val fileId = UUID.randomUUID().toString()
+        val staged = File(dir, "zip-imported.sqlite")
+        BudgetImporter.install(archive, staged, TestDatabases.driver)
+        PortableBudget.resetSyncHistory(staged, TestDatabases.driver)
+        val groupId = client.uploadUserFile(token, fileId, "Synthetic Import ${fileId.take(6)}", null, NewBudget.archive(staged, fileId, "Synthetic Import"))
+            ?: client.userFileInfo(token, fileId)?.groupId
+        val other = File(dir, "zip-other.sqlite")
+        BudgetImporter.install(client.downloadUserFile(token, fileId), other, TestDatabases.driver)
+        val configuration = SyncConfiguration(fileId, groupId, null, null)
+        BudgetDatabase.open(TestDatabases.driver, staged.absolutePath, "z1z1z1z1z1z1z1z1", clock).use { importer ->
+            BudgetDatabase.open(TestDatabases.driver, other.absolutePath, "z2z2z2z2z2z2z2z2", clock).use { phone ->
+                val month = "%04d-%02d".format(java.util.Locale.ROOT, LocalDate.now().year, LocalDate.now().monthValue)
+                val category = importer.sql.queryString("SELECT id FROM categories WHERE tombstone = 0 AND is_income = 0 ORDER BY sort_order LIMIT 1")!!
+                BudgetWrites(importer).assign(month, category, 77_700)
+                assertEquals(0, SyncEngine(importer, client, configuration, clock).sync(token).pendingAfter)
+                clock.advance(1_000)
+                SyncEngine(phone, client, configuration, clock).sync(token)
+                assertEquals(77_700L, BudgetReads(phone).fetchBudgetMonth(month).category(category)!!.budgeted)
+                assertEquals(
+                    LedgerReads(importer).accounts().associate { it.id to it.balance },
+                    LedgerReads(phone).accounts().associate { it.id to it.balance },
+                )
+                assertEquals(importer.merkleTrie().hash, phone.merkleTrie().hash)
+            }
+        }
+        client.deleteUserFile(token, fileId)
+    }
 }
