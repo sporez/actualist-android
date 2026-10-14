@@ -81,6 +81,7 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
     val message by viewModel.messages.message.collectAsState()
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var showToBudget by remember { mutableStateOf(false) }
+    var addingCategory by remember { mutableStateOf(false) }
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
 
     Column(Modifier.fillMaxSize().testTag("budget-screen")) {
@@ -127,6 +128,9 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                             }
                         }
                     }
+                    item(key = "add-category") {
+                        TextButton(onClick = { addingCategory = true }, modifier = Modifier.testTag("add-category")) { Text("Add category") }
+                    }
                 }
                 val category = selectedCategory?.let { id -> screen.month.category(id) }
                 if (category != null) {
@@ -142,6 +146,7 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                     )
                 }
                 if (showToBudget) ToBudgetSheet(screen, viewModel) { showToBudget = false }
+                if (addingCategory) AddCategoryDialog(screen, viewModel) { addingCategory = false }
             }
         }
     }
@@ -300,7 +305,10 @@ private fun CategorySheet(
                     Switch(checked = category.carryover, onCheckedChange = { viewModel.setCarryover(category.id, it) }, modifier = Modifier.testTag("rollover-switch"))
                 }
             }
-            TextButton(onClick = onShowTransactions, modifier = Modifier.testTag("category-transactions")) { Text("Show transactions") }
+            Row {
+                TextButton(onClick = onShowTransactions, modifier = Modifier.testTag("category-transactions")) { Text("Show transactions") }
+                if (!category.isIncome) TextButton(onClick = { viewModel.hideCategory(category.id); onDismiss() }, modifier = Modifier.testTag("hide-category")) { Text("Hide category") }
+            }
         }
     }
     val expenseCategories = screen.month.categoryGroups.filter { !it.isIncome }.flatMap { group -> group.categories.map { it to group } }.filter { it.first.id != category.id }
@@ -361,6 +369,50 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
                 picking = false
                 Money.parse(amountText)?.let { viewModel.move(null, option.id, it) }
                 onDismiss()
+            },
+            onDismiss = { picking = false },
+        )
+    }
+}
+
+
+@Composable
+private fun AddCategoryDialog(screen: BudgetScreenState, viewModel: BudgetViewModel, onDismiss: () -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var groupId by rememberSaveable { mutableStateOf<String?>(screen.month.categoryGroups.firstOrNull { !it.isIncome }?.id) }
+    var newGroup by rememberSaveable { mutableStateOf("") }
+    var picking by remember { mutableStateOf(false) }
+    val groups = screen.month.categoryGroups.filter { !it.isIncome }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add category") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("new-category-name"))
+                OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth().testTag("new-category-group")) {
+                    Text(groups.firstOrNull { it.id == groupId }?.name ?: newGroup.ifBlank { "New group" })
+                }
+                if (groupId == null) {
+                    androidx.compose.material3.OutlinedTextField(newGroup, { newGroup = it }, label = { Text("New group name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank() && (groupId != null || newGroup.isNotBlank()),
+                onClick = { viewModel.addCategory(name, groupId, newGroup.ifBlank { null }); onDismiss() },
+                modifier = Modifier.testTag("new-category-save"),
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+    if (picking) {
+        PickerDialog(
+            title = "Group",
+            options = groups.map { PickerOption(it.id, it.name) } + PickerOption(null, "New group…"),
+            onPick = { option ->
+                groupId = option.id
+                picking = false
             },
             onDismiss = { picking = false },
         )

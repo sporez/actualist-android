@@ -55,6 +55,14 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
         budgetWrites.setCarryover(categoryId, carryover, month.value, month.value)
     }
 
+    fun addCategory(name: String, groupId: String?, newGroupName: String?) = write("Added $name") {
+        val writes = com.sporez.actualist.core.budget.CategoryWrites(database)
+        val group = groupId ?: writes.createGroup(newGroupName ?: error("Choose a group")).first
+        writes.createCategory(name, group)
+    }
+
+    fun hideCategory(categoryId: String) = write("Hidden") { com.sporez.actualist.core.budget.CategoryWrites(database).setCategoryHidden(categoryId, true) }
+
     fun hold(amount: Long) = write("Held for next month") { budgetWrites.hold(month.value, HoldCommand.Hold(amount)) }
 
     fun releaseHold() = write("Hold released") { budgetWrites.hold(month.value, HoldCommand.Reset) }
