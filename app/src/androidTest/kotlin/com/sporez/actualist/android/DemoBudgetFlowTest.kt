@@ -446,7 +446,10 @@ class DemoBudgetFlowTest {
         compose.onAllNodes(categoryRow)[0].performClick()
         compose.waitForTag("transaction-list")
         compose.onNodeWithTag("nav-back").performClick()
-        // The explorer: a wider range, then focus one category's transactions.
+        // The explorer: a wider range, then focus one category's transactions. The list comes
+        // back scrolled to the drill-down row, so bring the explorer button into view.
+        compose.waitForTag("reports-list")
+        compose.onNodeWithTag("reports-list").performScrollToNode(hasTestTag("open-explorer"))
         compose.waitForTag("open-explorer")
         compose.onNodeWithTag("open-explorer").performClick()
         compose.waitForTag("explorer-totals")

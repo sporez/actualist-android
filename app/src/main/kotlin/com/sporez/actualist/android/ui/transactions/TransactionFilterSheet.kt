@@ -2,6 +2,7 @@
 
 package com.sporez.actualist.android.ui.transactions
 
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -278,21 +279,22 @@ private fun FilterOptionsDialog(
                     items(shown, key = { it.id ?: it.title }) { option ->
                         val id = option.id ?: return@items
                         val checked = id in value.ids
+                        // The whole row toggles, not just the box.
                         Row(
-                            Modifier.fillMaxWidth().testTag("filter-option-${option.title}"),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(
-                                checked = checked,
-                                onCheckedChange = {
+                            Modifier
+                                .fillMaxWidth()
+                                .toggleable(value = checked, role = androidx.compose.ui.semantics.Role.Checkbox) {
                                     val ids = when {
                                         checked -> value.ids - id
                                         scalar -> setOf(id)
                                         else -> value.ids + id
                                     }
                                     onChange(value.copy(ids = ids, includesNull = if (scalar && !checked) false else value.includesNull))
-                                },
-                            )
+                                }
+                                .testTag("filter-option-${option.title}"),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = checked, onCheckedChange = null)
                             Text(option.title)
                         }
                     }
