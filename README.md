@@ -30,7 +30,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
 | Wide screens: the next two months beside the edited one (read-only, tap to switch) | Done | device test (landscape) |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
-| Budget templates: preview, apply, edit (monthly, up to, by date, schedule, % of income, average, copy, goal) | Done (other multi-entry templates read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
+| Budget templates: preview, apply, edit with several entries (monthly, up to, by date, schedule, % of income, average, copy, goal) | Done (other kinds and options read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
 | Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge, make a schedule | Done | Transactions 21, TransactionCommand 39 |
 | Multi-select: clear, unclear, categorize, duplicate, delete together (atomic, one undo) | Done | unit + device tests |
 | Split transactions: create, edit, delete | Done | Splits 23 |
@@ -43,7 +43,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Payees: rename, merge | Done | unit tests |
 | Reports: net worth, cash flow, spending | Done | UI screenshots |
 | Undo / redo of every local edit, History screen | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
-| SimpleFIN bank sync (through the Actual server, as Actualist) | Done: link, sync, unlink | 5 provider-mapping cases; unit tests; real-server status check |
+| SimpleFIN bank sync (through the Actual server, or the device bridge when the server does not host it, as Actualist) | Done: link, sync, unlink, connect on device | 5 provider-mapping cases; unit tests; real-server status check |
 | Background sync (WorkManager, hourly, shared session) | Done | device test |
 | Server: OpenID sign-in (browser redirect) | Done | unit + device tests |
 | Server: password sign-in, (encrypted) download, sync with confirmation, merkle repair | Done | multi-device tests; JVM and on-device loopback server |
@@ -52,7 +52,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Custom request headers for servers behind an access proxy | Done | unit tests |
 | Home-screen widget: To Budget and net worth (Glance) | Done | device test |
 | Category and account notes | Done (template directives preserved) | unit tests |
-| GoCardless, direct SimpleFIN bridge, Actual dashboard widgets | Not ported | — |
+| GoCardless (Actualist has none either), Actual dashboard widgets | Not ported | — |
 
 ## Building
 

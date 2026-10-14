@@ -29,6 +29,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 ## Completed milestones
 
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
+- SimpleFIN direct bridge (device-claimed access key) when the server does not host SimpleFIN; templates with several entries in the template editor; a 50,000-transaction performance smoke test.
 - Wide screens (840dp and up) show the next two months beside the edited one; schedule and "up to" templates in the template editor.
 - Category learning (Actual's `updateCategoryRules`) after editor and batch categorization, with budget-wide and per-payee switches; schedule every-N intervals, monthly last-day / nth-weekday patterns, weekend handling and end rules; percentage-of-income templates.
 - Budget overview home-screen widget (Jetpack Glance) through the session hub; template editing for by-date, average, copy and goal templates; category notes; reports month switcher, Budget vs Spent and drill-down; rule editor "one of" and "approximately".
@@ -51,13 +52,12 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Known limitations
 
-- Not ported: GoCardless, the direct SimpleFIN bridge fallback, header auth, schedules with several day patterns in the editor, editing templates with several independent entries in the UI, rule editor operators beyond is/is not/one of/contains/matches/comparisons/approximately (other rules stay read-only), Actual's dashboard widgets, editing in the side-by-side months.
+- Not ported: GoCardless, header auth, schedules with several day patterns in the editor, template kinds and options beyond those listed in the README, rule editor operators beyond is/is not/one of/contains/matches/comparisons/approximately (other rules stay read-only), Actual's dashboard widgets, editing in the side-by-side months.
 - Real-server coverage is a disposable `actualbudget/actual-server:26.10.0` container in CI with synthetic data (login, new plain and encrypted budgets, download, two-device sync, conflicts); the on-device tests use an in-process loopback server.
 - Background sync runs hourly on any network; its first run waits 30 minutes, since opening the app syncs anyway.
 - Plain-http servers are refused except on loopback.
 
 ## Next recommended work
 
-1. Templates with several independent entries in the UI (edited in Actual today).
-2. Editing in the side-by-side months (today they are read-only; tap a month to edit it).
+1. Editing in the side-by-side months (today they are read-only; tap a month to edit it).
 
