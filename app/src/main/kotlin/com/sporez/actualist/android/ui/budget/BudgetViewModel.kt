@@ -71,6 +71,41 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun hideCategory(categoryId: String) = write("Hidden") { com.sporez.actualist.core.budget.CategoryWrites(database).setCategoryHidden(categoryId, true) }
 
+    fun unhideCategory(categoryId: String) = write("Shown") { com.sporez.actualist.core.budget.CategoryWrites(database).setCategoryHidden(categoryId, false) }
+
+    fun renameCategory(categoryId: String, name: String) = write("Renamed") { com.sporez.actualist.core.budget.CategoryWrites(database).renameCategory(categoryId, name) }
+
+    fun renameGroup(groupId: String, name: String) = write("Renamed") { com.sporez.actualist.core.budget.CategoryWrites(database).renameGroup(groupId, name) }
+
+    /** One step up (-1) or down (+1) inside the category's group. */
+    fun moveCategoryBy(categoryId: String, delta: Int) = write("Moved") { com.sporez.actualist.core.budget.CategoryWrites(database).moveCategoryBy(categoryId, delta) }
+
+    /** Moves a category to the end of another group. */
+    fun moveCategoryToGroup(categoryId: String, groupId: String) = write("Moved") {
+        com.sporez.actualist.core.budget.CategoryWrites(database).moveCategory(categoryId, groupId, null)
+    }
+
+    fun moveGroupBy(groupId: String, delta: Int) = write("Moved") { com.sporez.actualist.core.budget.CategoryWrites(database).moveGroupBy(groupId, delta) }
+
+    /** Whether deleting the category (or, for a group, any of its categories) needs a transfer destination; null when unreadable. */
+    suspend fun needsTransfer(id: String, isGroup: Boolean): Boolean? = try {
+        session.read {
+            val writes = com.sporez.actualist.core.budget.CategoryWrites(database)
+            if (isGroup) writes.groupNeedsTransfer(id) else writes.categoryNeedsTransfer(id)
+        }
+    } catch (error: Exception) {
+        messages.show(error.message ?: "The category could not be read.")
+        null
+    }
+
+    fun deleteCategory(categoryId: String, transferId: String?) = write("Deleted") {
+        com.sporez.actualist.core.budget.CategoryWrites(database).deleteCategory(categoryId, transferId)
+    }
+
+    fun deleteGroup(groupId: String, transferId: String?) = write("Deleted") {
+        com.sporez.actualist.core.budget.CategoryWrites(database).deleteGroup(groupId, transferId)
+    }
+
     fun copyPreviousMonth() = write("Copied last month's budget") { budgetWrites.applyBulk(month.value) { copyPreviousMonthDrafts(month.value) } }
 
     fun setThreeMonthAverage() = write("Set to 3-month averages") {
