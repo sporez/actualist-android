@@ -45,10 +45,20 @@ import com.sporez.actualist.android.ui.components.money
 import com.sporez.actualist.android.ui.reloading
 import com.sporez.actualist.android.ui.theme.LocalMoneyColors
 import com.sporez.actualist.core.budget.Months
+import com.sporez.actualist.core.reports.MonthComparisonReport
+import com.sporez.actualist.core.reports.ReportCardReads
 import com.sporez.actualist.core.reports.ReportsDashboard
+import com.sporez.actualist.core.reports.ThreeMonthAverageReport
+import com.sporez.actualist.core.reports.TransactionCalendarMonth
 import com.sporez.actualist.core.store.BudgetSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.time.LocalDate
+
+class ReportCards(
+    val comparison: MonthComparisonReport,
+    val average: ThreeMonthAverageReport,
+    val calendar: List<TransactionCalendarMonth>,
+)
 
 class ReportsViewModel(session: BudgetSession) : ViewModel() {
     private val today = LocalDate.now()
@@ -60,6 +70,13 @@ class ReportsViewModel(session: BudgetSession) : ViewModel() {
     val dashboard = reloading(session, _month) { month ->
         val end = if (month == currentMonth) today else java.time.YearMonth.parse(month).atEndOfMonth()
         reports.dashboard(month, end.toString())
+    }
+
+    /** The "This Month", "3-Month Average" and calendar cards for the same month. */
+    val cards = reloading(session, _month) { month ->
+        val end = if (month == currentMonth) today else java.time.YearMonth.parse(month).atEndOfMonth()
+        val reads = ReportCardReads(database)
+        ReportCards(reads.monthComparison(month, end.toString()), reads.threeMonthAverage(month, end.toString()), reads.transactionCalendar(month))
     }
 
     fun shift(months: Int) {
@@ -74,6 +91,8 @@ class ReportsViewModel(session: BudgetSession) : ViewModel() {
 fun ReportsScreen(viewModel: ReportsViewModel, onExplore: () -> Unit = {}, onOpenCategory: (String, String) -> Unit = { _, _ -> }) {
     val state by viewModel.dashboard.collectAsState()
     val month by viewModel.month.collectAsState()
+    val cardsState by viewModel.cards.collectAsState()
+    val cards = (cardsState as? Loadable.Ready)?.value
     Box(Modifier.fillMaxSize().testTag("reports-screen")) {
         when (val current = state) {
             Loadable.Loading -> LoadingBox()
@@ -98,8 +117,13 @@ fun ReportsScreen(viewModel: ReportsViewModel, onExplore: () -> Unit = {}, onOpe
                         }
                         item { NetWorthCard(dashboard) }
                         item { CashFlowCard(dashboard) }
+                        if (cards != null) item { MonthComparisonCard(cards.comparison) }
                         item { SpendingCard(dashboard, onOpenCategory) }
                         item { BudgetComparisonCard(dashboard, onOpenCategory) }
+                        if (cards != null) {
+                            item { ThreeMonthAverageCard(cards.average) }
+                            item { TransactionCalendarCard(cards.calendar) }
+                        }
                     }
                 }
             }
@@ -241,6 +265,114 @@ private fun BudgetComparisonCard(dashboard: ReportsDashboard, onOpenCategory: (S
                 }
             }
             if (rows.isEmpty()) Text("Nothing budgeted or spent this month.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Spending above the comparison is overspending, so it reads as negative. */
+@Composable
+private fun VarianceHeadline(variance: Long, tag: String) {
+    val colors = LocalMoneyColors.current
+    val color = when {
+        variance > 0 -> colors.negative
+        variance < 0 -> colors.positive
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val text = (if (variance > 0) "+" else if (variance < 0) "-" else "") + money(kotlin.math.abs(variance))
+    Text(text, Modifier.testTag(tag), style = MaterialTheme.typography.headlineSmall, color = color)
+}
+
+@Composable
+private fun ComparisonChart(points: List<com.sporez.actualist.core.reports.DailyComparisonPoint>) {
+    val currentColor = MaterialTheme.colorScheme.primary
+    val referenceColor = MaterialTheme.colorScheme.outline
+    Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+        val maxValue = points.maxOfOrNull { maxOf(it.current ?: 0L, it.comparison) }?.takeIf { it > 0 } ?: 1L
+        val step = if (points.size > 1) size.width / (points.size - 1) else 0f
+        fun y(value: Long) = size.height - value.toFloat() / maxValue * size.height * 0.95f - size.height * 0.02f
+        val reference = Path()
+        val current = Path()
+        points.forEachIndexed { index, point ->
+            val x = index * step
+            if (index == 0) reference.moveTo(x, y(point.comparison)) else reference.lineTo(x, y(point.comparison))
+            val value = point.current
+            if (value != null) {
+                if (current.isEmpty) current.moveTo(x, y(value)) else current.lineTo(x, y(value))
+            }
+        }
+        drawPath(reference, referenceColor, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(current, currentColor, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
+    }
+}
+
+@Composable
+private fun MonthComparisonCard(report: MonthComparisonReport) {
+    SectionCard(Modifier.testTag("report-month-comparison")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CardTitle("This Month", "Compare ${monthTitle(report.currentMonth)} to ${monthTitle(report.comparisonMonth)}")
+            VarianceHeadline(report.variance, "month-comparison-variance")
+            ComparisonChart(report.points)
+        }
+    }
+}
+
+@Composable
+private fun ThreeMonthAverageCard(report: ThreeMonthAverageReport) {
+    SectionCard(Modifier.testTag("report-three-month-average")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CardTitle("3-Month Average", "Compare ${monthTitle(report.month)} to the last 3 months")
+            VarianceHeadline(report.variance, "three-month-variance")
+            ComparisonChart(report.points)
+        }
+    }
+}
+
+@Composable
+private fun TransactionCalendarCard(months: List<TransactionCalendarMonth>) {
+    val colors = LocalMoneyColors.current
+    val maximum = months.maxOfOrNull { month -> month.days.maxOfOrNull { maxOf(it.income, it.expenses) } ?: 0L }?.takeIf { it > 0 } ?: 1L
+    fun intensity(amount: Long): Float = if (amount == 0L) 0f else (amount.toFloat() / maximum).coerceIn(0.22f, 1f)
+    val weekdays = listOf("S", "M", "T", "W", "T", "F", "S")
+    SectionCard(Modifier.testTag("report-transaction-calendar")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CardTitle("Transaction Calendar", "${monthTitle(months.first().month)} – ${monthTitle(months.last().month)}")
+            for (month in months) {
+                Column(Modifier.testTag("calendar-month-${month.month}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(monthTitle(month.month), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                        Text("↑ ${money(month.income)}", Modifier.testTag("calendar-income-${month.month}"), style = MaterialTheme.typography.labelMedium, color = colors.positive)
+                        Spacer(Modifier.width(10.dp))
+                        Text("↓ ${money(month.expenses)}", Modifier.testTag("calendar-expenses-${month.month}"), style = MaterialTheme.typography.labelMedium, color = colors.negative)
+                    }
+                    Row {
+                        weekdays.forEach { Text(it, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+                    }
+                    val cells: List<com.sporez.actualist.core.reports.TransactionCalendarDay?> =
+                        List(month.leadingBlankCount) { null } + month.days
+                    for (week in cells.chunked(7)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            for (index in 0 until 7) {
+                                val day = week.getOrNull(index)
+                                if (day == null) {
+                                    Spacer(Modifier.weight(1f).height(34.dp))
+                                } else {
+                                    Box(
+                                        Modifier.weight(1f).height(34.dp)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(5.dp))
+                                            .testTag("calendar-day-${day.dayId}"),
+                                    ) {
+                                        Text(day.day.toString(), Modifier.align(Alignment.TopCenter).padding(top = 3.dp), style = MaterialTheme.typography.labelSmall)
+                                        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                            Box(Modifier.fillMaxWidth().weight(1f).background(colors.positive.copy(alpha = intensity(day.income))))
+                                            Box(Modifier.fillMaxWidth().weight(1f).background(colors.negative.copy(alpha = intensity(day.expenses))))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
