@@ -105,4 +105,20 @@ class ReconciliationTest {
         assertThrows(LocalFirstException.InvalidLocalWrite::class.java) { writes.update("simple", TransactionEdit(amount = -1)) }
         assertThrows(LocalFirstException.InvalidLocalWrite::class.java) { writes.delete("simple") }
     }
+
+    @Test
+    fun theAdjustmentShowsInTheDemoAccountList() {
+        val day = LocalDate.of(2026, 10, 15)
+        com.sporez.actualist.core.demo.DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, clock).use { db ->
+            val reconciliation = Reconciliation(db, clock)
+            val cleared = reconciliation.snapshot("savings").clearedBalance
+            reconciliation.createAdjustment("savings", cleared + 728_955, day)
+            reconciliation.finish("savings", cleared + 728_955)
+            val rows = LedgerReads(db).transactions(TransactionQuery(accountId = "savings", limit = 500))
+            val adjustment = rows.firstOrNull { it.notes == Reconciliation.ADJUSTMENT_NOTE }
+            assertTrue("adjustment missing from ${rows.take(3)}", adjustment != null)
+            assertEquals(728_955L, adjustment!!.amount)
+            assertEquals(adjustment.id, rows.first().id)
+        }
+    }
 }

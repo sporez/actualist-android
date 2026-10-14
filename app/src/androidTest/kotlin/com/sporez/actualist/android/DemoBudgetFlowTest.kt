@@ -156,7 +156,7 @@ class DemoBudgetFlowTest {
         compose.screenshot("12-reconcile")
         compose.onNodeWithTag("reconcile-finish").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Reconciled and locked")).fetchSemanticsNodes().isNotEmpty() }
-        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Reconciliation balance adjustment", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitOrCapture("reconcile-adjustment-row") { compose.onAllNodes(hasText("Reconciliation balance adjustment", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("13-after-reconcile")
     }
 

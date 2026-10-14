@@ -7,6 +7,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToLog
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sporez.actualist.android.data.Settings
 import org.junit.rules.ExternalResource
@@ -25,6 +26,17 @@ class FreshAppState : ExternalResource() {
 
 fun ComposeTestRule.waitForTag(tag: String, timeoutMillis: Long = 60_000) {
     waitUntil(timeoutMillis) { onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+}
+
+/** [waitUntil] that saves a screenshot and logs the semantics tree before failing. */
+fun ComposeTestRule.waitOrCapture(name: String, timeoutMillis: Long = 30_000, condition: () -> Boolean) {
+    try {
+        waitUntil(timeoutMillis, condition)
+    } catch (error: Throwable) {
+        runCatching { screenshot("failure-$name") }
+        runCatching { onRoot().printToLog("failure-$name") }
+        throw error
+    }
 }
 
 fun ComposeTestRule.waitForGone(tag: String, timeoutMillis: Long = 30_000) {
