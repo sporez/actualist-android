@@ -34,6 +34,9 @@ class RuleWrites(private val database: BudgetDatabase, private val newId: () -> 
         listOf(CellDraft("rules", ruleId, "tombstone", SyncValue.bool(true))) to Unit
     }.messages
 
+    /** The cells [update] would write, for callers composing a larger batch. */
+    fun updateDrafts(ruleId: String, draft: RuleDraft): List<CellDraft> = cells(ruleId, draft)
+
     fun createDrafts(ruleId: String, draft: RuleDraft): List<CellDraft> =
         cells(ruleId, draft) + CellDraft("rules", ruleId, "tombstone", SyncValue.bool(false))
 

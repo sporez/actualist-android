@@ -107,7 +107,11 @@ class TransactionEditorViewModel(
 
     fun save(draft: TransactionDraft) = launchWrite {
         if (transactionId == null) {
-            session.write { transactionWrites.create(draft) }
+            session.write {
+                val created = transactionWrites.create(draft)
+                // Actual learns categories from the user's edits (transactions-batch-update with learnCategories).
+                if (draft.categoryId != null) com.sporez.actualist.core.rules.CategoryLearning(database).learn(listOf(created.transactionId), java.time.LocalDate.now())
+            }
         } else {
             val existing = data.value?.existing
             session.write {
@@ -125,6 +129,9 @@ class TransactionEditorViewModel(
                         cleared = draft.cleared,
                     ),
                 )
+                if (draft.categoryId != null && draft.categoryId != existing?.categoryId) {
+                    com.sporez.actualist.core.rules.CategoryLearning(database).learn(listOf(transactionId), java.time.LocalDate.now())
+                }
             }
         }
     }

@@ -189,8 +189,10 @@ class TransactionsViewModel(
         com.sporez.actualist.core.transactions.TransactionBatch(database, clock).setCleared(it, cleared)
     }
 
-    fun categorizeSelected(categoryId: String) = batch({ "Categorized ${it.changed}" }) {
-        com.sporez.actualist.core.transactions.TransactionBatch(database, clock).categorize(it, categoryId)
+    fun categorizeSelected(categoryId: String) = batch({ "Categorized ${it.changed}" }) { ids ->
+        val result = com.sporez.actualist.core.transactions.TransactionBatch(database, clock).categorize(ids, categoryId)
+        com.sporez.actualist.core.rules.CategoryLearning(database).learn(ids, java.time.LocalDate.now())
+        result
     }
 
     fun deleteSelected() = batch({ "Deleted ${it.changed}" }) {
