@@ -514,8 +514,11 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
     var amountText by rememberSaveable(category.id) { mutableStateOf("") }
     var monthText by rememberSaveable(category.id) { mutableStateOf(java.time.YearMonth.now().plusMonths(6).toString()) }
     var countText by rememberSaveable(category.id) { mutableStateOf("3") }
+    var scheduleId by rememberSaveable(category.id) { mutableStateOf<String?>(null) }
+    var schedules by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     androidx.compose.runtime.LaunchedEffect(category.id) {
         draft = runCatching { viewModel.templateDraft(category.id) }.getOrNull()
+        schedules = runCatching { viewModel.scheduleChoices() }.getOrDefault(emptyList())
         fun money(value: Double) = Money.format(Math.round(value * 100), symbol = "", grouping = false)
         when (val entry = draft?.entries?.singleOrNull()) {
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.MonthlyFixed -> { kind = "monthly"; amountText = money(entry.amount) }
@@ -523,6 +526,7 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average -> { kind = "average"; countText = entry.numMonths.toString() }
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy -> { kind = "copy"; countText = entry.lookBack.toString() }
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal -> { kind = "goal"; amountText = money(entry.amount) }
+            is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Schedule -> { kind = "schedule"; scheduleId = entry.scheduleId ?: schedules.firstOrNull { it.second == entry.name }?.first }
             is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Percentage -> { kind = "percent"; countText = entry.percent.let { if (it == Math.rint(it)) it.toLong().toString() else it.toString() } }
             else -> {}
         }
@@ -539,7 +543,8 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Average && single.adjustment == null) ||
             (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Copy && single.legacyLimit == null) ||
             single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Goal ||
-            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Percentage && single.sourceCategory == "all income" && !single.previous)
+            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Percentage && single.sourceCategory == "all income" && !single.previous) ||
+            (single is com.sporez.actualist.core.templates.editor.TemplateDraftEntry.Schedule && single.adjustment == null && !single.full)
         )
     val amount = Money.parse(amountText)
     val count = countText.trim().toIntOrNull()
@@ -560,6 +565,9 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             "average" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.average(numMonths = it, priority = priority) }
             "copy" -> count?.takeIf { it in 1..12 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.copyPrevious(lookBack = it, priority = priority) }
             "goal" -> amount?.takeIf { it > 0 }?.let { com.sporez.actualist.core.templates.editor.TemplateDraftEntry.goal(amount = it / 100.0) }
+            "schedule" -> schedules.firstOrNull { it.first == scheduleId }?.let { (id, name) ->
+                com.sporez.actualist.core.templates.editor.TemplateDraftEntry.schedule(name = name, scheduleId = id, priority = priority)
+            }
             "percent" -> countText.trim().toDoubleOrNull()?.takeIf { it > 0 && it <= 100 }?.let {
                 com.sporez.actualist.core.templates.editor.TemplateDraftEntry.percentage(percent = it, sourceCategory = "all income", priority = priority)
             }
@@ -576,7 +584,7 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
                     current == null -> Text("This template is managed in the category's note or uses options this app cannot change. Edit it in Actual.")
                     editable -> {
                         androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val kinds = listOf("monthly" to "Monthly", "by" to "By date", "percent" to "% of income", "average" to "Average", "copy" to "Copy", "goal" to "Goal")
+                            val kinds = listOf("monthly" to "Monthly", "by" to "By date", "schedule" to "Schedule", "percent" to "% of income", "average" to "Average", "copy" to "Copy", "goal" to "Goal")
                             items(kinds.size) { index ->
                                 val (key, label) = kinds[index]
                                 androidx.compose.material3.FilterChip(
@@ -600,6 +608,16 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
                             "average", "copy" -> {
                                 Text(if (kind == "average") "Budget the average spent over the last months." else "Budget what was budgeted that many months ago.", style = MaterialTheme.typography.bodySmall)
                                 androidx.compose.material3.OutlinedTextField(countText, { countText = it.filter(Char::isDigit) }, label = { Text("Months (1-12)") }, singleLine = true, isError = count == null || count !in 1..12, modifier = Modifier.fillMaxWidth().testTag("template-months"))
+                            }
+                            "schedule" -> {
+                                Text("Budget what a schedule needs before its next date.", style = MaterialTheme.typography.bodySmall)
+                                if (schedules.isEmpty()) Text("No active schedules yet.", style = MaterialTheme.typography.bodySmall)
+                                for ((id, name) in schedules) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { scheduleId = id }.testTag("template-schedule-$id")) {
+                                        androidx.compose.material3.RadioButton(selected = scheduleId == id, onClick = { scheduleId = id })
+                                        Text(name)
+                                    }
+                                }
                             }
                             "percent" -> {
                                 Text("Budget a share of this month's income.", style = MaterialTheme.typography.bodySmall)

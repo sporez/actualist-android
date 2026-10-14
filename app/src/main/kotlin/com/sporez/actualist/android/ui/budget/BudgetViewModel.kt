@@ -92,6 +92,13 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun releaseHold() = write("Hold released") { budgetWrites.hold(month.value, HoldCommand.Reset) }
 
+    /** Active schedules a schedule template can budget for: id to name. */
+    suspend fun scheduleChoices(): List<Pair<String, String>> = session.read {
+        com.sporez.actualist.core.schedules.Schedules(database, clock).list(java.time.LocalDate.now().toString())
+            .filter { !it.completed && it.name.isNotBlank() }
+            .map { it.id to it.name }
+    }
+
     suspend fun categoryNote(categoryId: String): String? =
         session.read { com.sporez.actualist.core.notes.EntityNotes(database).read(com.sporez.actualist.core.notes.NoteTarget.Category(categoryId)) }
 
