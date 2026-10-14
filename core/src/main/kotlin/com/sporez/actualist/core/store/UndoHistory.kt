@@ -39,6 +39,13 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     @Synchronized
     fun items(): List<Item> = entries.mapIndexed { index, entry -> Item(describe(entry.batches), index >= cursor) }.reversed()
 
+    /** A recorded gesture with its batches, for [HistoryPresenter]. */
+    class Detail(val batches: List<UndoBatch>, val undone: Boolean)
+
+    /** Recorded gestures, newest first, with their batches. */
+    @Synchronized
+    fun details(): List<Detail> = entries.mapIndexed { index, entry -> Detail(entry.batches, index >= cursor) }.reversed()
+
     /** Runs [block], recording everything it commits as one gesture. Nested calls join the outer one. */
     @Synchronized
     fun <T> record(block: () -> T): T {
