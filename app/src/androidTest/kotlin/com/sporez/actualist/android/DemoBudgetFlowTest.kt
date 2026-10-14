@@ -423,7 +423,8 @@ class DemoBudgetFlowTest {
             compose.screenshot("32-landscape-months")
             val next = java.time.YearMonth.now().plusMonths(1).toString()
             compose.onNodeWithTag("following-$next").performClick()
-            compose.waitOrCapture("switched-month") { compose.onAllNodes(hasTestTag("following-${java.time.YearMonth.parse(next).plusMonths(1)}")).fetchSemanticsNodes().isNotEmpty() }
+            // Only after switching to next month does the month after next-plus-one get a column.
+            compose.waitOrCapture("switched-month") { compose.onAllNodes(hasTestTag("following-${java.time.YearMonth.parse(next).plusMonths(2)}")).fetchSemanticsNodes().isNotEmpty() }
         } finally {
             compose.activityRule.scenario.onActivity { it.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
         }
