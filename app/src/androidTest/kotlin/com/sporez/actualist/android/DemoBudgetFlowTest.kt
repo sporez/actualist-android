@@ -191,6 +191,9 @@ class DemoBudgetFlowTest {
         compose.onNodeWithText("Rent").assertExists()
         compose.screenshot("14-schedules")
         compose.onNodeWithTag("schedule-post-demo-schedule-streaming").performClick()
+        // Posting now asks for the date first, as Actualist's posting review does.
+        compose.waitForTag("schedule-post-confirm")
+        compose.onNodeWithTag("schedule-post-confirm").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Posted StreamFlix")).fetchSemanticsNodes().isNotEmpty() }
         // Edit the schedule's name through the ported schedule writer.
         compose.onNodeWithTag("schedule-edit-demo-schedule-streaming").performClick()

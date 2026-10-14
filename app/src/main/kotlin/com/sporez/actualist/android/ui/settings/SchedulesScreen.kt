@@ -1,5 +1,6 @@
 package com.sporez.actualist.android.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +35,7 @@ import com.sporez.actualist.android.ui.components.SectionCard
 import com.sporez.actualist.android.ui.components.money
 import com.sporez.actualist.android.ui.reloading
 import com.sporez.actualist.core.schedules.ScheduleListItem
+import com.sporez.actualist.core.schedules.ScheduleListPresentation
 import com.sporez.actualist.core.schedules.ScheduleStatus
 import com.sporez.actualist.core.schedules.Schedules
 import com.sporez.actualist.core.store.BudgetSession
@@ -46,7 +48,16 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
     private fun today() = LocalDate.now().toString()
     val schedules = reloading(session, MutableStateFlow(Unit)) { Schedules(database, clock).list(today()) }
 
-    fun post(item: ScheduleListItem) = write("Posted ${item.name}") { Schedules(database, clock).postNow(item.id, today()) }
+    fun todayId(): String = today()
+
+    /** Posts the occurrence on its scheduled date, or today when [postsToday] (the review's choice). */
+    fun post(item: ScheduleListItem, postsToday: Boolean = false) =
+        write("Posted ${item.name}") { Schedules(database, clock).postNow(item.id, today(), postsToday) }
+
+    /** The schedule's editable definition, for the detail view. */
+    suspend fun detail(item: ScheduleListItem): com.sporez.actualist.core.schedules.ScheduleEditorModel? =
+        session.read { Schedules(database, clock).editor(item.id, today()) }
+
     fun skip(item: ScheduleListItem) = write("Skipped to the next date") { Schedules(database, clock).skipNextDate(item.id) }
     fun complete(item: ScheduleListItem) = write("Completed") { Schedules(database, clock).complete(item.id) }
     suspend fun choices(): Pair<List<com.sporez.actualist.android.ui.components.PickerOption>, List<com.sporez.actualist.android.ui.components.PickerOption>> = session.read {
@@ -147,16 +158,64 @@ fun SchedulesScreen(viewModel: SchedulesViewModel) {
     val state by viewModel.schedules.collectAsState()
     val message by viewModel.messages.message.collectAsState()
     var adding by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var showCompleted by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     when (val current = state) {
         Loadable.Loading -> LoadingBox()
         is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
-        is Loadable.Ready -> LazyColumn(Modifier.fillMaxSize().testTag("schedules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item {
-                androidx.compose.material3.OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().testTag("schedule-add")) { Text("Add schedule") }
+        is Loadable.Ready -> {
+            val all = current.value
+            val groups = ScheduleListPresentation.groups(all, query, showCompleted)
+            val completedCount = ScheduleListPresentation.completedCount(all)
+            LazyColumn(Modifier.fillMaxSize().testTag("schedules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item {
+                    androidx.compose.material3.OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().testTag("schedule-add")) { Text("Add schedule") }
+                }
+                item {
+                    androidx.compose.material3.OutlinedTextField(
+                        query,
+                        { query = it },
+                        label = { Text("Search schedules") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("schedule-search"),
+                    )
+                }
+                message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("schedules-message")) } }
+                if (groups.isEmpty()) {
+                    item {
+                        Text(
+                            when {
+                                all.isEmpty() -> "No schedules yet."
+                                query.isNotBlank() -> "No matching schedules. Try another name, account, payee, amount, date, or status."
+                                else -> "No active schedules. Show completed schedules to review past items."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("schedules-empty"),
+                        )
+                    }
+                }
+                for (group in groups) {
+                    item(key = "section-${group.section.name}") {
+                        Text(group.section.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.testTag("schedule-section-${group.section.name}"))
+                    }
+                    items(group.items, key = { it.id }) { item -> ScheduleCard(item, viewModel) }
+                }
+                if (completedCount > 0) {
+                    item(key = "show-completed") {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            Text("Show Completed ($completedCount)", modifier = Modifier.weight(1f))
+                            androidx.compose.material3.Switch(
+                                checked = showCompleted,
+                                onCheckedChange = { showCompleted = it },
+                                modifier = Modifier.testTag("schedule-show-completed"),
+                            )
+                        }
+                    }
+                    item(key = "completed-footnote") {
+                        Text("Completed schedules are hidden by default.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
-            message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("schedules-message")) } }
-            if (current.value.isEmpty()) item { Text("No schedules yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(current.value, key = { it.id }) { item -> ScheduleCard(item, viewModel) }
         }
     }
     if (adding) AddScheduleDialog(viewModel) { adding = false }
@@ -200,7 +259,7 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
                     androidx.compose.material3.Checkbox(checked = approximate, onCheckedChange = { approximate = it })
                     Text("Approximate amount")
                 }
-                androidx.compose.material3.OutlinedTextField(startText, { startText = it }, label = { Text("First date (YYYY-MM-DD)") }, singleLine = true, isError = start == null, modifier = Modifier.fillMaxWidth().testTag("schedule-start"))
+                ScheduleDateField(startText, { startText = it }, "schedule-start")
                 Row {
                     for ((key, label) in listOf("ONCE" to "Once", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly", "YEARLY" to "Yearly")) {
                         androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-frequency-$key"))
@@ -248,10 +307,25 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
 @Composable
 private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) {
     var editing by androidx.compose.runtime.saveable.rememberSaveable(item.id) { androidx.compose.runtime.mutableStateOf(false) }
+    var reviewing by androidx.compose.runtime.saveable.rememberSaveable(item.id) { androidx.compose.runtime.mutableStateOf(false) }
+    var showingDetail by androidx.compose.runtime.saveable.rememberSaveable(item.id) { androidx.compose.runtime.mutableStateOf(false) }
     if (editing) EditScheduleDialog(item, viewModel) { editing = false }
+    if (reviewing) {
+        SchedulePostReviewDialog(
+            item = item,
+            today = viewModel.todayId(),
+            onConfirm = { postsToday ->
+                reviewing = false
+                viewModel.post(item, postsToday)
+            },
+            onDismiss = { reviewing = false },
+        )
+    }
+    if (showingDetail) ScheduleDetailDialog(item, load = { viewModel.detail(item) }, onDismiss = { showingDetail = false })
     SectionCard(Modifier.testTag("schedule-${item.id}")) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Only the header opens the detail, so the action buttons below keep their own semantics.
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { showingDetail = true }.testTag("schedule-open-${item.id}")) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 // Actual shows an approximate amount as "~$X" and only a between-amount as a range.
                 when {
@@ -282,9 +356,9 @@ private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) 
             )
             Row {
                 if (item.isSupported && !item.completed) TextButton(onClick = { editing = true }, modifier = Modifier.testTag("schedule-edit-${item.id}")) { Text("Edit") }
-                if (item.canPost) TextButton(onClick = { viewModel.post(item) }, modifier = Modifier.testTag("schedule-post-${item.id}")) { Text("Post now") }
+                if (item.canPost) TextButton(onClick = { reviewing = true }, modifier = Modifier.testTag("schedule-post-${item.id}")) { Text("Post now") }
                 if (item.canSkip) TextButton(onClick = { viewModel.skip(item) }, modifier = Modifier.testTag("schedule-skip-${item.id}")) { Text("Skip") }
-                if (item.canComplete) TextButton(onClick = { viewModel.complete(item) }) { Text("Complete") }
+                if (item.canComplete) TextButton(onClick = { viewModel.complete(item) }, modifier = Modifier.testTag("schedule-complete-${item.id}")) { Text("Complete") }
                 if (item.canDelete) TextButton(onClick = { viewModel.delete(item) }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             }
         }
@@ -380,7 +454,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                     Text("Post the transaction automatically")
                 }
                 if (simpleRule) {
-                    androidx.compose.material3.OutlinedTextField(startText, { startText = it }, label = { Text("First date (YYYY-MM-DD)") }, singleLine = true, isError = start == null, modifier = Modifier.fillMaxWidth().testTag("schedule-edit-start"))
+                    ScheduleDateField(startText, { startText = it }, "schedule-edit-start")
                     Row {
                         for ((key, label) in listOf("ONCE" to "Once", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly", "YEARLY" to "Yearly")) {
                             androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-edit-frequency-$key"))
