@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.sporez.actualist.android"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         // Experimental, unpublished build. Never use a production application ID.
