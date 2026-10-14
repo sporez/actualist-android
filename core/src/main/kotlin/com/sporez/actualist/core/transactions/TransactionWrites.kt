@@ -2,6 +2,10 @@ package com.sporez.actualist.core.transactions
 
 import com.sporez.actualist.core.LocalFirstException
 import com.sporez.actualist.core.budget.Months
+import com.sporez.actualist.core.splits.SplitChildDraft
+import com.sporez.actualist.core.splits.SplitFamilies
+import com.sporez.actualist.core.splits.SplitFamilyDraft
+import com.sporez.actualist.core.splits.SplitOptionalField
 import com.sporez.actualist.core.db.BudgetDatabase
 import com.sporez.actualist.core.db.CellDraft
 import com.sporez.actualist.core.db.Clock
@@ -244,63 +248,36 @@ class TransactionWrites(
     }
 
     /**
-     * A split family: the parent carries the total and no category; each child carries its
-     * own category and amount and inherits account, date, payee and cleared from the parent.
-     * Children must add up to the parent; the editor enforces this before saving.
+     * A new split family through the ported family operations ([SplitFamilies], replayed against
+     * Actual's Splits oracle): the parent carries the total and no category, children inherit
+     * account, date, payee and cleared state. Children must add up to the parent; the editor
+     * enforces this, and a mismatch is refused here rather than written with Actual's error cell.
      */
     fun splitDrafts(draft: TransactionDraft, parentId: String, payeeId: String?): List<CellDraft> {
         validateAccount(draft.accountId)
-        val offBudget = accountOffBudget(draft.accountId)
-        val splits = if (offBudget) draft.splits.map { it.copy(categoryId = null) } else draft.splits
-        splits.forEach { split -> split.categoryId?.let(::validateCategory) }
-        val total = splits.sumOf { it.amount }
+        val total = draft.splits.sumOf { it.amount }
         if (total != draft.amount) {
             throw LocalFirstException.InvalidLocalWrite("split amounts (${total}) do not add up to the transaction (${draft.amount})")
         }
-        val date = Months.packedDate(draft.date)
-        val sortOrder = draft.sortOrder ?: newRowSortOrder()
-        val drafts = mutableListOf<CellDraft>()
-        drafts += snapshotCells(parentId, draft.accountId, date, draft.amount, payeeId, null, draft.notes, draft.cleared, isParent = true, parentId = null, sortOrder = sortOrder)
-        draft.importedPayee?.takeIf { it.isNotEmpty() }?.let { drafts += CellDraft("transactions", parentId, "imported_description", SyncValue.text(it)) }
-        draft.importedId?.takeIf { it.isNotEmpty() }?.let { drafts += CellDraft("transactions", parentId, "financial_id", SyncValue.text(it)) }
-        splits.forEachIndexed { index, split ->
-            drafts += snapshotCells(
-                newId(), draft.accountId, date, split.amount, payeeId, split.categoryId, split.notes, draft.cleared,
-                isParent = false, parentId = parentId, sortOrder = -(index + 1).toDouble(),
-            )
-        }
-        return drafts
+        draft.splits.forEach { split -> split.categoryId?.let(::validateCategory) }
+        return SplitFamilies(database, clock, newId).createDrafts(
+            SplitFamilyDraft(
+                accountId = draft.accountId,
+                date = draft.date,
+                amount = draft.amount,
+                payeeId = payeeId,
+                notes = draft.notes,
+                cleared = draft.cleared,
+                sortOrder = draft.sortOrder ?: newRowSortOrder(),
+                importedPayee = draft.importedPayee,
+                importedId = draft.importedId,
+                splits = draft.splits.map { SplitChildDraft(categoryId = it.categoryId, amount = it.amount, notes = optional(it.notes)) },
+            ),
+            parentId,
+        ).drafts
     }
 
-    /** Actualist's `.snapshot` row shape: every stored column, so a new family row is complete. */
-    private fun snapshotCells(
-        rowId: String,
-        accountId: String,
-        date: Int,
-        amount: Long,
-        payeeId: String?,
-        categoryId: String?,
-        notes: String?,
-        cleared: Boolean,
-        isParent: Boolean,
-        parentId: String?,
-        sortOrder: Double,
-    ): List<CellDraft> = listOf(
-        "acct" to SyncValue.text(accountId),
-        "date" to SyncValue.int(date),
-        "amount" to SyncValue.int(amount),
-        "description" to SyncValue.textOrNull(payeeId),
-        "category" to SyncValue.textOrNull(if (isParent) null else categoryId),
-        "notes" to SyncValue.textOrNull(notes),
-        "cleared" to SyncValue.bool(cleared),
-        "reconciled" to SyncValue.bool(false),
-        "isParent" to SyncValue.bool(isParent),
-        "parent_id" to SyncValue.textOrNull(parentId),
-        "isChild" to SyncValue.bool(parentId != null),
-        "sort_order" to SyncValue.Real(sortOrder),
-        "tombstone" to SyncValue.bool(false),
-        "error" to SyncValue.Null,
-    ).map { (column, value) -> CellDraft("transactions", rowId, column, value) }
+    private fun optional(text: String?): SplitOptionalField<String> = if (text == null) SplitOptionalField.Omitted else SplitOptionalField.Value(text)
 
     /** Opening-balance row: Starting Balance payee, an income category only on budget, flagged. */
     fun openingBalanceDrafts(
@@ -496,39 +473,22 @@ class TransactionWrites(
     ).map { (column, value) -> CellDraft("transactions", id, column, value) }
 
     /**
-     * Edits a split family, or turns a simple row into one. Follows Actual's
-     * `updateTransaction` for families: children take the parent's date, account and
-     * cleared state, a child whose payee matched the old parent payee follows the new one,
-     * removed children are tombstoned and new ones are written whole. The children must add
-     * up to the parent amount.
+     * Edits a split family, or turns a simple row into one, through the ported family operations
+     * ([SplitFamilies.updateDrafts], Actual's `updateTransaction` on a family). Children not listed
+     * are removed. The children must add up to the parent amount.
      */
     fun updateSplitDrafts(transactionId: String, edit: SplitFamilyEdit): List<CellDraft> {
         val parent = loadRow(transactionId)?.takeIf { !it.tombstone } ?: throw LocalFirstException.InvalidLocalWrite("missing transaction")
         if (parent.isChild) throw LocalFirstException.InvalidLocalWrite("edit the whole split transaction instead")
         if (parent.transferId != null) throw LocalFirstException.InvalidLocalWrite("transfers cannot be split")
-        if (parent.reconciled) throw LocalFirstException.InvalidLocalWrite("reconciled transactions are locked")
         if (edit.splits.isEmpty()) throw LocalFirstException.InvalidLocalWrite("a split needs at least one category")
         val total = edit.splits.sumOf { it.amount }
         if (total != edit.amount) {
             throw LocalFirstException.InvalidLocalWrite("split amounts ($total) do not add up to the transaction (${edit.amount})")
         }
         val accountId = parent.accountId ?: throw LocalFirstException.InvalidLocalWrite("missing account")
-        val offBudget = accountOffBudget(accountId)
-        edit.splits.forEach { split -> if (!offBudget) split.categoryId?.let(::validateCategory) }
-        val children = if (parent.isParent) {
-            sql.query("SELECT id FROM transactions WHERE parent_id = ? AND (tombstone IS NULL OR tombstone = 0)", transactionId)
-                .mapNotNull { it.string("id") }.mapNotNull(::loadRow)
-        } else {
-            emptyList()
-        }
-        if (children.any { it.reconciled }) throw LocalFirstException.InvalidLocalWrite("reconciled transactions are locked")
-
+        edit.splits.forEach { split -> split.categoryId?.let(::validateCategory) }
         val drafts = mutableListOf<CellDraft>()
-        fun cell(id: String, column: String, value: SyncValue) {
-            drafts += CellDraft("transactions", id, column, value)
-        }
-        val date = edit.date?.let(Months::packedDate)?.toLong() ?: parent.date ?: throw LocalFirstException.InvalidLocalWrite("missing date")
-        val cleared = edit.cleared ?: parent.cleared
         var payee = parent.payeeId
         if (edit.payeeId != null || !edit.payeeName.isNullOrBlank()) {
             val (payeeId, payeeDrafts) = resolveOrCreatePayeeDrafts(edit.payeeId, edit.payeeName ?: "")
@@ -536,39 +496,20 @@ class TransactionWrites(
             drafts += payeeDrafts
             payee = payeeId
         }
-        // Parent row.
-        if (!parent.isParent) cell(transactionId, "isParent", SyncValue.bool(true))
-        if (parent.categoryId != null) cell(transactionId, "category", SyncValue.Null)
-        if (date != parent.date) cell(transactionId, "date", SyncValue.int(date))
-        if (edit.amount != parent.amount) cell(transactionId, "amount", SyncValue.int(edit.amount))
-        if (payee != parent.payeeId) cell(transactionId, "description", SyncValue.textOrNull(payee))
-        if (edit.notes != null && edit.notes != (parent.notes ?: "")) cell(transactionId, "notes", if (edit.notes.isEmpty()) SyncValue.Null else SyncValue.text(edit.notes))
-        if (cleared != parent.cleared) cell(transactionId, "cleared", SyncValue.bool(cleared))
-
-        val existing = children.associateBy { it.id }
-        val keptIds = edit.splits.mapNotNull { it.id }.toSet()
-        edit.splits.forEachIndexed { index, split ->
-            val category = if (offBudget) null else split.categoryId
-            val child = split.id?.let { existing[it] }
-            if (child == null) {
-                drafts += snapshotCells(
-                    newId(), accountId, date.toInt(), split.amount, payee, category, split.notes, cleared,
-                    isParent = false, parentId = transactionId, sortOrder = -(index + 1).toDouble(),
-                )
-            } else {
-                val childPayee = if (child.payeeId == parent.payeeId) payee else child.payeeId
-                if (child.date != date) cell(child.id, "date", SyncValue.int(date))
-                if (child.accountId != accountId) cell(child.id, "acct", SyncValue.text(accountId))
-                if (child.cleared != cleared) cell(child.id, "cleared", SyncValue.bool(cleared))
-                if (childPayee != child.payeeId) cell(child.id, "description", SyncValue.textOrNull(childPayee))
-                if (category != child.categoryId) cell(child.id, "category", SyncValue.textOrNull(category))
-                if (split.amount != child.amount) cell(child.id, "amount", SyncValue.int(split.amount))
-                if ((split.notes ?: "") != (child.notes ?: "")) cell(child.id, "notes", SyncValue.textOrNull(split.notes?.ifEmpty { null }))
-            }
-        }
-        for (child in children) {
-            if (child.id !in keptIds) cell(child.id, "tombstone", SyncValue.bool(true))
-        }
+        val date = edit.date ?: parent.date?.let(Months::dateFromPacked) ?: throw LocalFirstException.InvalidLocalWrite("missing date")
+        drafts += SplitFamilies(database, clock, newId).updateDrafts(
+            transactionId,
+            SplitFamilyDraft(
+                accountId = accountId,
+                date = date,
+                amount = edit.amount,
+                payeeId = payee,
+                notes = edit.notes?.ifEmpty { null } ?: if (edit.notes == null) parent.notes else null,
+                cleared = edit.cleared ?: parent.cleared,
+                reconciled = parent.reconciled,
+                splits = edit.splits.map { SplitChildDraft(id = it.id, categoryId = it.categoryId, amount = it.amount, notes = optional(it.notes)) },
+            ),
+        ).drafts
         return drafts
     }
 
