@@ -1,6 +1,5 @@
 package com.sporez.actualist.android
 
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
