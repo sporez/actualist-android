@@ -55,7 +55,11 @@ class RulesViewModel(session: BudgetSession) : ViewModel() {
             RuleSummary(
                 id = rule.id,
                 stage = rule.rawStage ?: "default",
-                conditions = draft?.conditions?.map { "${it.editorField} ${it.op} ${describe(it.editorField, it.value)}" } ?: listOf("(unreadable conditions)"),
+                conditions = draft?.conditions?.map { condition ->
+                    // On/off-budget conditions carry no value.
+                    if (condition.value is RuleValue.Null && (condition.op == "onBudget" || condition.op == "offBudget")) "${condition.editorField} ${condition.op}"
+                    else "${condition.editorField} ${condition.op} ${describe(condition.editorField, condition.value)}"
+                } ?: listOf("(unreadable conditions)"),
                 join = draft?.join?.raw ?: "and",
                 actions = draft?.actions?.map { action ->
                     listOfNotNull(action.op, action.editorField, describe(action.editorField, action.value)).joinToString(" ")

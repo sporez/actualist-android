@@ -111,6 +111,29 @@ class RuleWritesTest {
     }
 
     @Test
+    fun offBudgetAccountAndTagConditionsRoundTripAndMatch() {
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
+            val draft = RuleDraft(
+                stage = RuleStage.NORMAL,
+                join = RuleConditionJoin.AND,
+                conditions = listOf(
+                    RuleCondition("account", "offBudget", RuleValue.Null, "id"),
+                    RuleCondition("notes", "hasTags", RuleValue.Text("#food #weekly"), "string"),
+                ),
+                actions = listOf(RuleAction("append-notes", null, RuleValue.Text(" (tracked)"))),
+            )
+            assertTrue(draft.canRoundTripAndEvaluate)
+            val (id, _) = RuleWrites(database) { "rule-offbudget" }.create(draft)
+            val engine = RuleEngine(database)
+            assertEquals(draft, engine.fetchRules().first { it.id == id }.draft)
+            // carloan is the demo's off-budget account.
+            assertEquals("Lunch #food #weekly (tracked)", engine.run(RuleTransactionInput(accountId = "carloan", date = day, amount = -100, notes = "Lunch #food #weekly"), day).notes)
+            assertTrue(id !in engine.run(RuleTransactionInput(accountId = "checking", date = day, amount = -100, notes = "Lunch #food #weekly"), day).appliedRuleIds)
+            assertTrue(id !in engine.run(RuleTransactionInput(accountId = "carloan", date = day, amount = -100, notes = "Lunch #food"), day).appliedRuleIds)
+        }
+    }
+
+    @Test
     fun amountBetweenRoundTripsAndMatchesEitherOrder() {
         DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
             val range = RuleValue.Obj(mapOf("num1" to RuleValue.Num(-1_000.0), "num2" to RuleValue.Num(-5_000.0)))

@@ -57,8 +57,8 @@ object RuleEditorFields {
     val actionFields = listOf("category", "payee", "notes", "cleared")
 
     fun conditionOps(field: String): List<String> = when (RuleFields.valueKind(field)) {
-        com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf")
-        com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "isNot", "contains", "doesNotContain", "matches")
+        com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf") + if (field == "account") listOf("onBudget", "offBudget") else emptyList()
+        com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "isNot", "contains", "doesNotContain", "matches") + if (field == "notes") listOf("hasTags", "hasAnyTag") else emptyList()
         com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "isapprox", "isbetween", "gt", "gte", "lt", "lte")
         // Plain dates only; Actual's recurring date values stay view-only.
         com.sporez.actualist.core.rules.RuleValueKind.DATE -> listOf("is", "isapprox", "gt", "gte", "lt", "lte")
@@ -88,11 +88,15 @@ object RuleEditorFields {
     /** Operators whose value is a list of ids (stored as a JSON array, edited as a set of picks). */
     fun isMulti(op: String) = op == "oneOf" || op == "notOneOf"
 
+    /** Operators that take no value (Actual stores null). */
+    fun isValueless(op: String) = op == "onBudget" || op == "offBudget"
+
     /** "is between" keeps both amounts in the line's text as "low|high". */
     fun rangeParts(text: String): Pair<String, String> = text.substringBefore('|') to text.substringAfter('|', "")
 
     /** Whether a condition's typed value is complete for its field and operator. */
     fun conditionValid(line: RuleLine): Boolean = when {
+        isValueless(line.op) -> true
         line.value.isBlank() -> false
         RuleFields.valueKind(line.field) == com.sporez.actualist.core.rules.RuleValueKind.DATE ->
             com.sporez.actualist.core.rules.RuleCondition(line.field, line.op, RuleValue.Text(line.value.trim()), "date").canRoundTripAndEvaluate
@@ -114,6 +118,10 @@ object RuleEditorFields {
         "notOneOf" -> "is not one of"
         "isapprox" -> "is approximately"
         "isbetween" -> "is between"
+        "onBudget" -> "is on budget"
+        "offBudget" -> "is off budget"
+        "hasTags" -> "has all tags"
+        "hasAnyTag" -> "has any tag"
         "doesNotContain" -> "does not contain"
         "matches" -> "matches (regex)"
         "gt" -> "is greater than"
@@ -193,6 +201,8 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
 
     private fun value(field: String, text: String, op: String = "set"): RuleValue = if (RuleEditorFields.isMulti(op)) {
         RuleValue.Arr(text.split(',').filter { it.isNotBlank() }.map { RuleValue.Text(it) })
+    } else if (RuleEditorFields.isValueless(op)) {
+        RuleValue.Null
     } else if (op == "isbetween") {
         val (low, high) = RuleEditorFields.rangeParts(text)
         fun amount(part: String) = RuleValue.Num((Money.parse(part) ?: error("Enter amounts like -12.34")).toDouble())
@@ -342,7 +352,8 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                 onPick = { option ->
                     val op = option.id!!
                     // Switching between a single value and a list or range clears the value.
-                    val reshaped = RuleEditorFields.isMulti(op) != RuleEditorFields.isMulti(line.op) || (op == "isbetween") != (line.op == "isbetween")
+                    val reshaped = RuleEditorFields.isMulti(op) != RuleEditorFields.isMulti(line.op) || (op == "isbetween") != (line.op == "isbetween") ||
+                        RuleEditorFields.isValueless(op) != RuleEditorFields.isValueless(line.op)
                     set(line.copy(op = op, value = if (reshaped) "" else line.value))
                 },
                 onDismiss = { picking = null },
@@ -399,7 +410,9 @@ private fun LineCard(
                 }
                 if (onRemove != null && enabled) TextButton(onClick = onRemove) { Text("Remove") }
             }
-            if (picked) {
+            if (RuleEditorFields.isValueless(line.op)) {
+                // Nothing to choose: the operator is the whole condition.
+            } else if (picked) {
                 OutlinedButton(onClick = { onPick("value") }, enabled = enabled, modifier = Modifier.fillMaxWidth().testTag("rule-$kind-$index-value")) {
                     Text(when {
                         line.value.isBlank() -> "Choose…"
@@ -424,7 +437,7 @@ private fun LineCard(
                         Text(when (valueKind) {
                             com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> "Amount (negative for outflow)"
                             com.sporez.actualist.core.rules.RuleValueKind.DATE -> "Date (YYYY-MM-DD, YYYY-MM or YYYY)"
-                            else -> "Text"
+                            else -> if (line.op == "hasTags" || line.op == "hasAnyTag") "Tags (e.g. #food #weekly)" else "Text"
                         })
                     },
                     modifier = Modifier.fillMaxWidth().testTag("rule-$kind-$index-text"),
