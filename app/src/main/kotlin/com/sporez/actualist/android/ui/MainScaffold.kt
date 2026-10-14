@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
 
 package com.sporez.actualist.android.ui
 
@@ -52,6 +52,8 @@ import com.sporez.actualist.android.ui.transactions.TransactionsViewModel
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.store.SyncStatus
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -79,6 +81,19 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
 
     // Pull from the server when a synced budget opens; demo budgets never touch the network.
     LaunchedEffect(session) { if (!session.isDemo) container.server.sync(session) }
+    // Opportunistic flush after local writes, as Actualist does: a short debounce batches
+    // quick edits, and a failure leaves the changes queued for the next attempt.
+    LaunchedEffect(session) {
+        if (session.isDemo) return@LaunchedEffect
+        session.revision.drop(1).debounce(1_500).collect {
+            val pending = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { session.database.pendingLocalMessageCount() }
+            if (pending > 0 && session.syncStatus.value !is SyncStatus.Syncing) container.server.sync(session)
+        }
+    }
+    // Sync again whenever the app returns to the foreground.
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        if (!session.isDemo) scope.launch { container.server.sync(session) }
+    }
 
     Scaffold(
         topBar = {
