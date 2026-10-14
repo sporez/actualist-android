@@ -142,6 +142,28 @@ class TransactionEditorViewModel(
         session.write { transactionWrites.updateSplit(transactionId!!, edit) }
     }
 
+    fun duplicate() = launchWrite {
+        session.write { com.sporez.actualist.core.commands.TransactionCommands(database, clock).duplicate(listOf(transactionId!!)) }
+    }
+
+    /** Same-account, same-amount rows: the pairs Actual's merge is meant for. */
+    suspend fun mergeCandidates(): List<TransactionRow> {
+        val row = data.value?.existing ?: return emptyList()
+        return session.read {
+            ledger.transactions(com.sporez.actualist.core.transactions.TransactionQuery(accountId = row.accountId, limit = 2_000))
+                .filter { it.id != row.id && it.amount == row.amount }
+        }
+    }
+
+    /** Merges, asking first when reconciled rows are involved (as Actualist does). */
+    fun merge(otherId: String, allowReconciled: Boolean) = launchWrite {
+        session.write { com.sporez.actualist.core.commands.TransactionCommands(database, clock).merge(transactionId!!, otherId, allowReconciled) }
+    }
+
+    suspend fun mergeNeedsConfirmation(otherId: String): Boolean = session.read {
+        com.sporez.actualist.core.commands.TransactionCommands(database, clock).previewMerge(transactionId!!, otherId).reconciledIds.isNotEmpty()
+    }
+
     fun delete() = launchWrite { session.write { transactionWrites.delete(transactionId!!) } }
 
     private fun launchWrite(block: suspend () -> Unit) {
@@ -333,8 +355,12 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 }
             }
             if (existing != null) {
-                TextButton(onClick = { viewModel.delete() }, modifier = Modifier.testTag("editor-delete")) {
-                    Text("Delete transaction", color = MaterialTheme.colorScheme.error)
+                Row {
+                    TextButton(onClick = { viewModel.duplicate() }, modifier = Modifier.testTag("editor-duplicate")) { Text("Duplicate") }
+                    TextButton(onClick = { picking = "merge" }, modifier = Modifier.testTag("editor-merge")) { Text("Merge with…") }
+                    TextButton(onClick = { viewModel.delete() }, modifier = Modifier.testTag("editor-delete")) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }
@@ -390,6 +416,41 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 },
                 dismissButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
             ) { DatePicker(state = state) }
+        }
+        "merge" -> {
+            var candidates by remember { mutableStateOf<List<TransactionRow>?>(null) }
+            var confirmFor by remember { mutableStateOf<String?>(null) }
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            LaunchedEffect(Unit) { candidates = viewModel.mergeCandidates() }
+            val list = candidates
+            if (list != null && confirmFor == null) {
+                PickerDialog(
+                    title = if (list.isEmpty()) "No transaction with the same amount in this account" else "Merge with",
+                    options = list.map { PickerOption(it.id, it.displayPayee.ifBlank { "No payee" }, listOfNotNull(it.date?.format(dateLabel), it.categoryName, it.notes).joinToString(" · ")) },
+                    onPick = { option ->
+                        option.id?.let { other ->
+                            scope.launch {
+                                if (viewModel.mergeNeedsConfirmation(other)) {
+                                    confirmFor = other
+                                } else {
+                                    viewModel.merge(other, allowReconciled = false)
+                                    picking = null
+                                }
+                            }
+                        }
+                    },
+                    onDismiss = { picking = null },
+                )
+            }
+            confirmFor?.let { other ->
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmFor = null; picking = null },
+                    title = { Text("Merge reconciled transactions?") },
+                    text = { Text("One of these transactions is reconciled. Merging changes reconciled history.") },
+                    confirmButton = { TextButton(onClick = { viewModel.merge(other, allowReconciled = true); confirmFor = null; picking = null }) { Text("Merge") } },
+                    dismissButton = { TextButton(onClick = { confirmFor = null; picking = null }) { Text("Cancel") } },
+                )
+            }
         }
         null -> {}
         else -> if (target.startsWith("split-")) {

@@ -177,6 +177,44 @@ class DemoBudgetFlowTest {
     }
 
     @Test
+    fun createsARuleInTheEditor() {
+        openDemo()
+        compose.onNodeWithTag("open-settings").performClick()
+        compose.waitForTag("settings-screen")
+        compose.onNodeWithTag("show-rules").performClick()
+        compose.waitForTag("rule-add")
+        compose.onNodeWithTag("rule-add").performClick()
+        compose.waitForTag("rule-editor")
+        compose.onNodeWithTag("rule-condition-0-value").performClick()
+        compose.waitForTag("picker-search")
+        compose.onNodeWithTag("picker-search").performTextInput("MarketPlace")
+        compose.onNodeWithTag("pick-store").performClick()
+        compose.onNodeWithTag("rule-action-0-value").performClick()
+        compose.waitForTag("picker-search")
+        compose.onNodeWithTag("picker-search").performTextInput("Shopping")
+        compose.onNodeWithTag("pick-shopping").performClick()
+        compose.screenshot("15-rule-editor")
+        compose.onNodeWithTag("rule-save").performClick()
+        compose.waitOrCapture("rule-saved") { compose.onAllNodes(hasText("payee is MarketPlace", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("16-rules")
+    }
+
+    @Test
+    fun duplicatesATransaction() {
+        openDemo()
+        compose.onNodeWithTag("tab-accounts").performClick()
+        compose.waitForTag("budget-accounts")
+        compose.onNodeWithTag("account-checking").performClick()
+        compose.waitForTag("transaction-list")
+        val before = compose.onAllNodes(hasText("Payroll Inc", substring = true)).fetchSemanticsNodes().size
+        compose.onAllNodes(hasText("Payroll Inc", substring = true))[0].performClick()
+        compose.waitForTag("editor-duplicate")
+        compose.onNodeWithTag("editor-duplicate").performClick()
+        compose.waitForTag("transaction-list")
+        compose.waitOrCapture("duplicated") { compose.onAllNodes(hasText("Payroll Inc", substring = true)).fetchSemanticsNodes().size > before }
+    }
+
+    @Test
     fun theOpenBudgetSurvivesActivityRecreation() {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()
