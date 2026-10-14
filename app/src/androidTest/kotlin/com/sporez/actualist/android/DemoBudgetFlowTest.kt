@@ -323,7 +323,7 @@ class DemoBudgetFlowTest {
         compose.waitForTag("transaction-list")
         val rowMatcher = androidx.compose.ui.test.SemanticsMatcher("a transaction row") { node ->
             val tag = node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)
-            tag != null && tag.startsWith("transaction-") && tag != "transaction-list"
+            tag != null && tag.startsWith("transaction-") && tag !in setOf("transaction-list", "transaction-search")
         }
         compose.waitUntil(30_000) { compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size >= 2 }
         compose.onAllNodes(rowMatcher)[0].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
