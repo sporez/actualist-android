@@ -160,6 +160,7 @@ class DemoBudgetFlowTest {
         // The header reloads too: the cleared balance now equals the statement balance.
         compose.waitOrCapture("reconcile-cleared-header") { compose.onAllNodes(hasText("$20,000.00")).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("13-after-reconcile")
+        compose.displayScreenshot("13b-after-reconcile-display")
     }
 
     @Test
