@@ -50,6 +50,7 @@ fun SettingsScreen(
     onShowPayees: () -> Unit,
     onShowSchedules: () -> Unit,
     onShowHistory: () -> Unit = {},
+    onShowBankSync: () -> Unit = {},
 ) {
     val current by settings.settings.collectAsState()
     val syncStatus by session.syncStatus.collectAsState()
@@ -72,7 +73,10 @@ fun SettingsScreen(
                     TextButton(onClick = onShowSchedules, modifier = Modifier.testTag("show-schedules")) { Text("Schedules") }
                     TextButton(onClick = onCloseBudget, modifier = Modifier.testTag("close-budget")) { Text("Close budget") }
                 }
-                TextButton(onClick = onShowHistory, modifier = Modifier.testTag("show-history")) { Text("History (undo and redo)") }
+                Row {
+                    TextButton(onClick = onShowHistory, modifier = Modifier.testTag("show-history")) { Text("History (undo and redo)") }
+                    TextButton(onClick = onShowBankSync, modifier = Modifier.testTag("show-bank-sync")) { Text("Bank sync") }
+                }
                 ExportBudgetButton(session)
             }
         }

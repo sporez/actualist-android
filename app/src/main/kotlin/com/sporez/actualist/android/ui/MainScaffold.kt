@@ -142,6 +142,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                             route == "payees" -> "Payees"
                             route == "schedules" -> "Schedules"
                             route == "history" -> "History"
+                            route == "bank-sync" -> "Bank sync"
                             route == "explorer" -> "Explorer"
                             route.startsWith("account/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Account"
                             route.startsWith("category/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Category"
@@ -238,7 +239,11 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                     onShowPayees = { navController.navigate("payees") },
                     onShowSchedules = { navController.navigate("schedules") },
                     onShowHistory = { navController.navigate("history") },
+                    onShowBankSync = { navController.navigate("bank-sync") },
                 )
+            }
+            composable("bank-sync") {
+                com.sporez.actualist.android.ui.banksync.BankSyncScreen(session, container.server)
             }
             composable("history") {
                 com.sporez.actualist.android.ui.settings.HistoryScreen(session)
