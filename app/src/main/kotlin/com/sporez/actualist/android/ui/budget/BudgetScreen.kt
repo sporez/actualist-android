@@ -312,6 +312,7 @@ private fun CategorySheet(
                     Switch(checked = category.carryover, onCheckedChange = { viewModel.setCarryover(category.id, it) }, modifier = Modifier.testTag("rollover-switch"))
                 }
             }
+            CategoryNoteField(category.id, viewModel)
             Row {
                 TextButton(onClick = onShowTransactions, modifier = Modifier.testTag("category-transactions")) { Text("Show transactions") }
                 if (!category.isIncome) TextButton(onClick = { picking = "template" }, modifier = Modifier.testTag("category-template")) { Text("Template") }
@@ -560,4 +561,23 @@ private fun TemplateEditorDialog(category: BudgetMonthCategory, viewModel: Budge
             }
         },
     )
+}
+
+
+/** The category's note text (template directives in the same note are kept as they are). */
+@Composable
+private fun CategoryNoteField(categoryId: String, viewModel: BudgetViewModel) {
+    var original by remember(categoryId) { mutableStateOf<String?>(null) }
+    var text by remember(categoryId) { mutableStateOf("") }
+    var loaded by remember(categoryId) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(categoryId) {
+        original = runCatching { viewModel.categoryNote(categoryId) }.getOrNull()
+        text = original.orEmpty()
+        loaded = true
+    }
+    if (!loaded) return
+    androidx.compose.material3.OutlinedTextField(text, { text = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("category-notes"))
+    if (text.trim() != original.orEmpty()) {
+        TextButton(onClick = { viewModel.saveCategoryNote(categoryId, text); original = text.trim() }, modifier = Modifier.testTag("category-notes-save")) { Text("Save notes") }
+    }
 }

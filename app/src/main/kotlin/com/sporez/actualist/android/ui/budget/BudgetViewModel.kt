@@ -92,6 +92,13 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun releaseHold() = write("Hold released") { budgetWrites.hold(month.value, HoldCommand.Reset) }
 
+    suspend fun categoryNote(categoryId: String): String? =
+        session.read { com.sporez.actualist.core.notes.EntityNotes(database).read(com.sporez.actualist.core.notes.NoteTarget.Category(categoryId)) }
+
+    fun saveCategoryNote(categoryId: String, text: String) = write("Notes saved") {
+        com.sporez.actualist.core.notes.EntityNotes(database).write(com.sporez.actualist.core.notes.NoteTarget.Category(categoryId), text)
+    }
+
     /** The category's template as an editor draft; null when it is note-managed or locked (see TemplateEditorWrites). */
     suspend fun templateDraft(categoryId: String): com.sporez.actualist.core.templates.editor.TemplateEditorDraft? =
         session.read { com.sporez.actualist.core.templates.editor.TemplateEditorWrites(database, clock).load(categoryId) }
