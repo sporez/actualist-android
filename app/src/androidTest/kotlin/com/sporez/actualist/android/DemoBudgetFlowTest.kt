@@ -399,6 +399,14 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("reports-list").performScrollToNode(categoryRow)
         compose.onAllNodes(categoryRow)[0].performClick()
         compose.waitForTag("transaction-list")
+        compose.onNodeWithTag("nav-back").performClick()
+        // The explorer: a wider range, then focus one category's transactions.
+        compose.waitForTag("open-explorer")
+        compose.onNodeWithTag("open-explorer").performClick()
+        compose.waitForTag("explorer-totals")
+        compose.onNodeWithTag("explorer-range-Last 3 months").performClick()
+        compose.waitOrCapture("explorer-rows") { compose.onAllNodes(hasTestTag("explorer-row")).fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("33-explorer")
     }
 
     @Test

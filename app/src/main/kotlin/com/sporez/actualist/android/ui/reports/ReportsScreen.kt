@@ -71,7 +71,7 @@ class ReportsViewModel(session: BudgetSession) : ViewModel() {
 }
 
 @Composable
-fun ReportsScreen(viewModel: ReportsViewModel, onOpenCategory: (String, String) -> Unit = { _, _ -> }) {
+fun ReportsScreen(viewModel: ReportsViewModel, onExplore: () -> Unit = {}, onOpenCategory: (String, String) -> Unit = { _, _ -> }) {
     val state by viewModel.dashboard.collectAsState()
     val month by viewModel.month.collectAsState()
     Box(Modifier.fillMaxSize().testTag("reports-screen")) {
@@ -89,6 +89,11 @@ fun ReportsScreen(viewModel: ReportsViewModel, onOpenCategory: (String, String) 
                                 androidx.compose.material3.TextButton(onClick = { viewModel.shift(-1) }, modifier = Modifier.testTag("reports-previous")) { Text("‹ Previous") }
                                 Text(monthTitle(month), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                 androidx.compose.material3.TextButton(onClick = { viewModel.shift(1) }, enabled = !viewModel.isCurrentMonth, modifier = Modifier.testTag("reports-next")) { Text("Next ›") }
+                            }
+                        }
+                        item {
+                            androidx.compose.material3.OutlinedButton(onClick = onExplore, modifier = Modifier.fillMaxWidth().testTag("open-explorer")) {
+                                Text("Explore: any range, accounts and categories")
                             }
                         }
                         item { NetWorthCard(dashboard) }

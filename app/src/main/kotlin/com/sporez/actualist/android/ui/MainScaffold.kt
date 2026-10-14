@@ -129,6 +129,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                             route == "payees" -> "Payees"
                             route == "schedules" -> "Schedules"
                             route == "history" -> "History"
+                            route == "explorer" -> "Explorer"
                             route.startsWith("account/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Account"
                             route.startsWith("category/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Category"
                             route == "server" -> "Server"
@@ -206,7 +207,11 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
             composable("reports") {
                 val vm = viewModel(key = "reports-$key") { ReportsViewModel(session) }
-                ReportsScreen(vm) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
+                ReportsScreen(vm, onExplore = { navController.navigate("explorer") }) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
+            }
+            composable("explorer") {
+                val vm = viewModel(key = "explorer-$key") { com.sporez.actualist.android.ui.reports.ExplorerViewModel(session) }
+                com.sporez.actualist.android.ui.reports.ExplorerScreen(vm)
             }
             composable("settings") {
                 SettingsScreen(
