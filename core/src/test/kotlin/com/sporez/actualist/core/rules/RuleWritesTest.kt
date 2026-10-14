@@ -89,6 +89,28 @@ class RuleWritesTest {
     }
 
     @Test
+    fun amountBetweenRoundTripsAndMatchesEitherOrder() {
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
+            val range = RuleValue.Obj(mapOf("num1" to RuleValue.Num(-1_000.0), "num2" to RuleValue.Num(-5_000.0)))
+            val draft = RuleDraft(
+                stage = RuleStage.NORMAL,
+                join = RuleConditionJoin.AND,
+                conditions = listOf(RuleCondition("amount", "isbetween", range, "number")),
+                actions = listOf(RuleAction("set", "notes", RuleValue.Text("Mid-size"), "string")),
+            )
+            val (id, messages) = RuleWrites(database) { "rule-between" }.create(draft)
+            assertEquals(
+                """S:[{"field":"amount","op":"isbetween","type":"number","value":{"num1":-1000,"num2":-5000}}]""",
+                messages.associate { it.column to it.serializedValue }["conditions"],
+            )
+            val engine = RuleEngine(database)
+            assertEquals(draft, engine.fetchRules().first { it.id == id }.draft)
+            assertEquals("Mid-size", engine.run(RuleTransactionInput(accountId = "checking", date = day, amount = -5_000), day).notes)
+            assertTrue(id !in engine.run(RuleTransactionInput(accountId = "checking", date = day, amount = -5_001), day).appliedRuleIds)
+        }
+    }
+
+    @Test
     fun oneOfAndApproximateConditionsRoundTripAndMatch() {
         DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, day, TestClock()).use { database ->
             val draft = RuleDraft(

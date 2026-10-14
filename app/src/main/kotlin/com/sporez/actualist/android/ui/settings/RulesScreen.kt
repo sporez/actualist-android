@@ -45,6 +45,7 @@ class RulesViewModel(session: BudgetSession) : ViewModel() {
                 value is RuleValue.Text && names.containsKey(value.value) -> names.getValue(value.value)
                 value is RuleValue.Num && field == "amount" -> Money.format(value.value.toLong())
                 value is RuleValue.Arr -> value.values.joinToString(", ") { describe(field, it) }
+                value is RuleValue.Obj && value.values.containsKey("num1") -> "${describe(field, value.values.getValue("num1"))} and ${value.values["num2"]?.let { describe(field, it) } ?: "…"}"
                 value is RuleValue.Text -> "\"${value.value}\""
                 value is RuleValue.Num -> value.value.toLong().toString()
                 value is RuleValue.Bool -> value.value.toString()

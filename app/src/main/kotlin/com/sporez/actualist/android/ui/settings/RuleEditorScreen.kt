@@ -59,7 +59,7 @@ object RuleEditorFields {
     fun conditionOps(field: String): List<String> = when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf")
         com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "isNot", "contains", "doesNotContain", "matches")
-        com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "isapprox", "gt", "gte", "lt", "lte")
+        com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> listOf("is", "isapprox", "isbetween", "gt", "gte", "lt", "lte")
         else -> emptyList()
     }
 
@@ -86,11 +86,23 @@ object RuleEditorFields {
     /** Operators whose value is a list of ids (stored as a JSON array, edited as a set of picks). */
     fun isMulti(op: String) = op == "oneOf" || op == "notOneOf"
 
+    /** "is between" keeps both amounts in the line's text as "low|high". */
+    fun rangeParts(text: String): Pair<String, String> = text.substringBefore('|') to text.substringAfter('|', "")
+
+    /** Whether a condition's typed value is complete for its field and operator. */
+    fun conditionValid(line: RuleLine): Boolean = when {
+        line.value.isBlank() -> false
+        RuleFields.valueKind(line.field) != com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> true
+        line.op == "isbetween" -> rangeParts(line.value).let { (low, high) -> Money.parse(low) != null && Money.parse(high) != null }
+        else -> Money.parse(line.value) != null
+    }
+
     fun opLabel(op: String) = when (op) {
         "isNot" -> "is not"
         "oneOf" -> "is one of"
         "notOneOf" -> "is not one of"
         "isapprox" -> "is approximately"
+        "isbetween" -> "is between"
         "doesNotContain" -> "does not contain"
         "matches" -> "matches (regex)"
         "gt" -> "is greater than"
@@ -170,6 +182,10 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
 
     private fun value(field: String, text: String, op: String = "set"): RuleValue = if (RuleEditorFields.isMulti(op)) {
         RuleValue.Arr(text.split(',').filter { it.isNotBlank() }.map { RuleValue.Text(it) })
+    } else if (op == "isbetween") {
+        val (low, high) = RuleEditorFields.rangeParts(text)
+        fun amount(part: String) = RuleValue.Num((Money.parse(part) ?: error("Enter amounts like -12.34")).toDouble())
+        RuleValue.Obj(mapOf("num1" to amount(low), "num2" to amount(high)))
     } else when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> RuleValue.Num((Money.parse(text) ?: error("Enter an amount like -12.34")).toDouble())
         com.sporez.actualist.core.rules.RuleValueKind.BOOLEAN -> RuleValue.Bool(text == "true")
@@ -191,6 +207,7 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
         /** The form's text for a stored value: amounts are minor units shown as decimals. */
         fun text(field: String, value: RuleValue): String = when {
             value is RuleValue.Arr -> value.values.mapNotNull { it.string }.joinToString(",")
+            value is RuleValue.Obj -> listOf("num1", "num2").joinToString("|") { key -> value.values[key]?.integer?.let { Money.format(it, symbol = "", grouping = false) } ?: "" }
             RuleFields.valueKind(field) == com.sporez.actualist.core.rules.RuleValueKind.NUMBER ->
                 value.integer?.let { Money.format(it, symbol = "", grouping = false) } ?: ""
             value is RuleValue.Bool -> value.value.toString()
@@ -221,7 +238,7 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
     var stage by remember { mutableStateOf(existing?.stage ?: RuleStage.NORMAL) }
     var picking by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     val valid = conditions.isNotEmpty() && actions.isNotEmpty() &&
-        conditions.all { it.value.isNotBlank() && (RuleFields.valueKind(it.field) != com.sporez.actualist.core.rules.RuleValueKind.NUMBER || Money.parse(it.value) != null) } &&
+        conditions.all { RuleEditorFields.conditionValid(it) } &&
         actions.all { it.value.isNotBlank() }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("rule-editor"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -312,8 +329,9 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                 options = RuleEditorFields.conditionOps(line.field).map { PickerOption(it, RuleEditorFields.opLabel(it)) },
                 onPick = { option ->
                     val op = option.id!!
-                    // Switching between a single id and a list clears the value.
-                    set(line.copy(op = op, value = if (RuleEditorFields.isMulti(op) != RuleEditorFields.isMulti(line.op)) "" else line.value))
+                    // Switching between a single value and a list or range clears the value.
+                    val reshaped = RuleEditorFields.isMulti(op) != RuleEditorFields.isMulti(line.op) || (op == "isbetween") != (line.op == "isbetween")
+                    set(line.copy(op = op, value = if (reshaped) "" else line.value))
                 },
                 onDismiss = { picking = null },
             )
@@ -377,6 +395,12 @@ private fun LineCard(
                         RuleEditorFields.isMulti(line.op) -> line.value.split(',').filter { it.isNotBlank() }.joinToString(", ") { names[it] ?: it } + "  (tap to add or remove)"
                         else -> names[line.value] ?: line.value
                     })
+                }
+            } else if (line.op == "isbetween") {
+                val (low, high) = RuleEditorFields.rangeParts(line.value)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(low, { onChange(line.copy(value = "$it|$high")) }, enabled = enabled, singleLine = true, label = { Text("From") }, modifier = Modifier.weight(1f).testTag("rule-$kind-$index-text"))
+                    OutlinedTextField(high, { onChange(line.copy(value = "$low|$it")) }, enabled = enabled, singleLine = true, label = { Text("To") }, modifier = Modifier.weight(1f).testTag("rule-$kind-$index-text2"))
                 }
             } else {
                 OutlinedTextField(
