@@ -696,7 +696,8 @@ private fun FollowingMonths(screen: BudgetScreenState, viewModel: BudgetViewMode
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(key = "months") {
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Next months", Modifier.weight(1.2f), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 for (month in months) {
                     TextButton(onClick = { viewModel.showMonth(month.month) }, modifier = Modifier.weight(1f).testTag("following-${month.month}")) {
                         Text(monthTitle(month.month), maxLines = 1)
@@ -712,7 +713,8 @@ private fun FollowingMonths(screen: BudgetScreenState, viewModel: BudgetViewMode
                 item(key = "card-${group.id}") {
                     SectionCard {
                         for (category in group.categories.filter { !it.hidden }) {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(category.name, Modifier.weight(1.2f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 for (month in months) {
                                     val value = month.category(category.id)
                                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
