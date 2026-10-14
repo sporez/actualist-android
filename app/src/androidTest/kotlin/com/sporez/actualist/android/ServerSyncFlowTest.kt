@@ -121,4 +121,25 @@ class ServerSyncFlowTest {
         compose.screenshot("21-synced-settings")
         assertTrue(server.requests.any { it == "POST /sync/sync" })
     }
+
+    @Test
+    fun createsANewBudgetOnTheServer() {
+        compose.waitForTag("onboarding")
+        compose.onNodeWithTag("onboarding-connect").performClick()
+        compose.waitForTag("server-url-field")
+        compose.onNodeWithTag("server-url-field").performTextClearance()
+        compose.onNodeWithTag("server-url-field").performTextInput(server.url)
+        compose.onNodeWithTag("server-password-field").performTextInput(LoopbackActualServer.PASSWORD)
+        compose.onNodeWithTag("server-sign-in").performClick()
+        compose.waitForTag("new-budget-name", 30_000)
+        compose.onNodeWithTag("new-budget-name").performTextInput("Synthetic New Budget")
+        compose.onNodeWithTag("new-budget-create").performClick()
+        compose.waitForTag("bottom-bar", 60_000)
+        assertTrue(server.uploadedNames.values.contains("Synthetic New Budget"))
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("Usual Expenses").fetchSemanticsNodes().isNotEmpty() }
+        compose.screenshot("22-new-budget")
+        compose.onNodeWithTag("open-settings").performClick()
+        compose.waitForTag("settings-screen")
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synced", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+    }
 }

@@ -26,6 +26,8 @@ class LoopbackActualServer(
     private val socket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val lock = Any()
     private val messages = TreeMap<String, SyncProto.MessageEnvelope>()
+    /** Files registered through upload-user-file, by id; each shares this server's message log. */
+    val uploadedNames = java.util.concurrent.ConcurrentHashMap<String, String>()
     private var trie = MerkleTrie.EMPTY
     @Volatile var budgetZip: ByteArray = ByteArray(0)
     @Volatile private var running = true
@@ -56,7 +58,7 @@ class LoopbackActualServer(
     /** The sync handler, also used directly to seed the server before the app downloads. */
     fun sync(body: ByteArray): ByteArray = synchronized(lock) {
         val request = SyncProto.decodeRequest(body)
-        require(request.fileId == fileId && request.groupId == groupId) { "wrong file or group" }
+        require((request.fileId == fileId || request.fileId in uploadedNames) && request.groupId == groupId) { "wrong file or group" }
         val reply = messages.tailMap(request.since, false).values.toList()
         for (envelope in request.messages) {
             if (envelope.timestamp !in messages) {
@@ -102,6 +104,12 @@ class LoopbackActualServer(
                 """{"status":"ok","data":[{"deleted":0,"fileId":"$fileId","groupId":"$groupId","name":"$budgetName","encryptKeyId":null}]}""".toByteArray(),
             )
             path == "/sync/download-user-file" -> Triple(200, "application/octet-stream", budgetZip)
+            path == "/sync/upload-user-file" -> {
+                val id = headers["x-actual-file-id"] ?: ""
+                uploadedNames[id] = java.net.URLDecoder.decode(headers["x-actual-name"] ?: "", "UTF-8")
+                budgetZip = body
+                Triple(200, "application/json", """{"status":"ok","groupId":"$groupId"}""".toByteArray())
+            }
             path == "/sync/sync" -> Triple(200, "application/actual-sync", sync(body))
             else -> Triple(404, "text/plain", "not found".toByteArray())
         }
