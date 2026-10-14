@@ -31,6 +31,8 @@ sealed class SyncStatus {
     data class Failed(val message: String, val pendingChanges: Int) : SyncStatus()
 }
 
+data class UndoState(val canUndo: Boolean, val canRedo: Boolean)
+
 /**
  * One open budget. Reads run on [io]; writes are serialized and bump [revision] so
  * screens reload from the database, the single source of truth.
@@ -49,6 +51,11 @@ class BudgetSession(
     val budgetWrites = BudgetWrites(database)
     val transactionWrites = TransactionWrites(database, clock)
 
+    /** Undo and redo of this session's writes (in memory, as in Actual). */
+    val history = UndoHistory(database)
+    private val _undoState = MutableStateFlow(UndoState(false, false))
+    val undoState: StateFlow<UndoState> = _undoState.asStateFlow()
+
     private val writeLock = Mutex()
     private val _revision = MutableStateFlow(0L)
     val revision: StateFlow<Long> = _revision.asStateFlow()
@@ -66,9 +73,23 @@ class BudgetSession(
      */
     suspend fun <T> write(block: BudgetSession.() -> T): T = writeLock.withLock {
         withContext(io) {
-            val result = block()
+            val result = history.record { block() }
             if (isDemo) database.drainAllPendingLocalMessages()
             result
+        }.also { changed() }
+    }
+
+    /** Undoes the latest write; false when there was nothing to undo. Throws when it was edited since. */
+    suspend fun undo(): Boolean = historyStep { history.undo() != null }
+
+    /** Redoes the write undone last; false when there was nothing to redo. */
+    suspend fun redo(): Boolean = historyStep { history.redo() != null }
+
+    private suspend fun historyStep(step: () -> Boolean): Boolean = writeLock.withLock {
+        withContext(io) {
+            val stepped = step()
+            if (isDemo) database.drainAllPendingLocalMessages()
+            stepped
         }.also { changed() }
     }
 
@@ -82,6 +103,7 @@ class BudgetSession(
     }
 
     fun changed() {
+        _undoState.value = UndoState(history.canUndo, history.canRedo)
         _revision.value = _revision.value + 1
     }
 

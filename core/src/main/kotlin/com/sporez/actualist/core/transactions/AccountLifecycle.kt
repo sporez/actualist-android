@@ -103,11 +103,11 @@ class AccountLifecycle(
         return AccountCloseReview(accountId, balance, count, source.offBudget, simpleFin, if (blockers.isEmpty()) action else null, blockers)
     }
 
-    fun closeDrafts(accountId: String, destinationAccountId: String?, categoryId: String?, today: LocalDate): List<CellDraft> {
+    fun closeDrafts(accountId: String, destinationAccountId: String?, categoryId: String?, today: LocalDate, includeUnlink: Boolean = true): List<CellDraft> {
         val review = review(accountId, destinationAccountId, categoryId)
         val action = review.action ?: throw LocalFirstException.InvalidLocalWrite(review.blockers.firstOrNull()?.message ?: "this account cannot be closed")
         val drafts = mutableListOf<CellDraft>()
-        if (review.hasSimpleFinLink) drafts += unlinkCells(accountId)
+        if (review.hasSimpleFinLink && includeUnlink) drafts += unlinkCells(accountId)
         when (action) {
             AccountCloseAction.DeleteEmpty -> drafts += CellDraft("accounts", accountId, "tombstone", SyncValue.bool(true))
             AccountCloseAction.CloseAtZero -> drafts += CellDraft("accounts", accountId, "closed", SyncValue.bool(true))
@@ -187,8 +187,16 @@ class AccountLifecycle(
         return listOf(CellDraft("accounts", accountId, "name", SyncValue.text(trimmed)))
     }
 
-    fun close(accountId: String, destinationAccountId: String?, categoryId: String?, today: LocalDate): List<SyncMessage> =
-        database.commitLocal { closeDrafts(accountId, destinationAccountId, categoryId, today) to Unit }.messages
+    /**
+     * Closes as Actual does: a SimpleFIN link is cleared first in its own batch, outside the undo
+     * history, so undoing the close reopens the account without restoring the bank link.
+     */
+    fun close(accountId: String, destinationAccountId: String?, categoryId: String?, today: LocalDate): List<SyncMessage> {
+        val review = review(accountId, destinationAccountId, categoryId)
+        if (review.action == null) throw LocalFirstException.InvalidLocalWrite(review.blockers.firstOrNull()?.message ?: "this account cannot be closed")
+        val unlinked = if (review.hasSimpleFinLink) database.commitLocal(undoable = false) { unlinkCells(accountId) to Unit }.messages else emptyList()
+        return unlinked + database.commitLocal { closeDrafts(accountId, destinationAccountId, categoryId, today, includeUnlink = false) to Unit }.messages
+    }
 
     fun reopen(accountId: String): List<SyncMessage> = database.commitLocal { reopenDrafts(accountId) to Unit }.messages
 

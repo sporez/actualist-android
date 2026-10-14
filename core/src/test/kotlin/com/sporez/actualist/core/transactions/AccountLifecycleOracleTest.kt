@@ -5,6 +5,7 @@ import com.sporez.actualist.core.TestClock
 import com.sporez.actualist.core.TestDatabases
 import com.sporez.actualist.core.db.BudgetDatabase
 import com.sporez.actualist.core.db.CellDraft
+import com.sporez.actualist.core.store.UndoHistory
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -27,9 +28,11 @@ import java.time.LocalDate
  * [AccountLifecycle], comparing each operation's CRDT cells as a multiset, as Actualist's
  * `AccountLifecycleOracleFixtureTests` does.
  *
- * Not compared: the `undoMessages`/`afterUndo` observations (this port has no action log)
- * and the schedule case's automatic-posting service messages (the posting service is not
- * driven here). Excused: OP-22, rename trims and skips unchanged names (Actualist, intended).
+ * `undoMessages` run through [UndoHistory], the port of Actual's cell-level undo. Not compared:
+ * the schedule case's automatic-posting service messages (the posting service is not driven
+ * here). Excused: OP-22, rename trims and skips unchanged names (Actualist, intended); AND-02,
+ * Actual closes with a transfer in two batches, so undo nulls two cells of the source leg that
+ * this single-batch port tombstones (the leg is tombstoned either way).
  * Not replayed, as in Actualist: forced delete and the GoCardless remote-removal cases.
  */
 @RunWith(Parameterized::class)
@@ -88,12 +91,18 @@ class AccountLifecycleOracleTest(private val caseId: String) {
         )
     }
 
-    /** Commits like production and returns the drafts, or an empty list when refused. */
+    private var history: UndoHistory? = null
+
+    /** Commits like production, as one undoable gesture, and returns the drafts, or nothing when refused. */
     private fun run(database: BudgetDatabase, plan: () -> List<CellDraft>): List<String> = try {
-        cells(database.commitLocal { plan().let { it to it } }.outcome)
+        history!!.record { cells(database.commitLocal { plan().let { it to it } }.outcome) }
     } catch (e: LocalFirstException) {
         emptyList()
     }
+
+    private fun messages(list: List<com.sporez.actualist.core.sync.SyncMessage>) = list.map { "${it.dataset}/${it.row}/${it.column}=${it.serializedValue}" }
+
+    private fun undo(): List<String> = messages(history!!.undo() ?: emptyList())
 
     @Test
     fun replaysCase() {
@@ -103,6 +112,7 @@ class AccountLifecycleOracleTest(private val caseId: String) {
         var ids = 1
         TestDatabases.starter(clock = TestClock(NOW)).use { db ->
             val lifecycle = AccountLifecycle(db, TestClock(NOW)) { "id${++ids}" }
+            history = UndoHistory(db)
             val actual = LinkedHashMap<String, List<String>>()
             fun balanceCase(sourceOff: Boolean, destOff: Boolean, balance: Long, category: Pair<String, Boolean>? = null) {
                 db.account("source", offBudget = sourceOff)
@@ -113,12 +123,14 @@ class AccountLifecycleOracleTest(private val caseId: String) {
                     db.sql.execute("INSERT INTO categories (id, name, is_income, cat_group, hidden, tombstone, sort_order) VALUES (?, 'Synthetic', 0, 'g', ?, 0, 1)", id, hidden)
                 }
                 actual["operationMessages"] = run(db) { lifecycle.closeDrafts("source", "destination", category?.first, today) }
+                if (caseId == "close-positive-on-to-on-history") actual["undoMessages"] = undo()
             }
             when (caseId) {
                 "rename-open-history", "rename-closed" -> {
                     val account = input["account"]!!.jsonObject
                     db.account("source", account["name"]!!.jsonPrimitive.content, closed = caseId == "rename-closed")
                     actual["operationMessages"] = run(db) { lifecycle.renameDrafts("source", input["name"]!!.jsonPrimitive.content) }
+                    if (caseId == "rename-open-history") actual["undoMessages"] = undo()
                 }
                 "rename-handler-input-boundary" -> {
                     db.account("source", "Original")
@@ -130,13 +142,13 @@ class AccountLifecycleOracleTest(private val caseId: String) {
                 "reopen-repeat-history" -> {
                     db.account("source", "Closed", closed = true)
                     actual["firstMessages"] = run(db) { lifecycle.reopenDrafts("source") }
-                    // Stand-in for History undo, which this port does not have.
-                    db.sql.execute("UPDATE accounts SET closed = 1 WHERE id = 'source'")
+                    actual["undoMessages"] = undo()
                     actual["repeatMessages"] = (1..2).flatMap { run(db) { lifecycle.reopenDrafts("source") } }
                 }
                 "close-empty-history" -> {
                     db.account("source", "Empty")
                     actual["operationMessages"] = run(db) { lifecycle.closeDrafts("source", null, null, today) }
+                    actual["undoMessages"] = undo()
                 }
                 "close-zero" -> {
                     db.account("source")
@@ -174,7 +186,10 @@ class AccountLifecycleOracleTest(private val caseId: String) {
                         assertEquals("synthetic-last-sync", db.sql.queryString("SELECT last_sync FROM accounts WHERE id = 'source'"))
                     } else {
                         db.row("zero-row", "source", 0)
-                        actual["operationMessages"] = run(db) { lifecycle.closeDrafts("source", null, null, today) }
+                        // The production path: the unlink is its own batch outside the undo history.
+                        actual["operationMessages"] = messages(history!!.record { lifecycle.close("source", null, null, today) })
+                        actual["undoMessages"] = undo()
+                        assertEquals(null, db.sql.queryString("SELECT account_sync_source FROM accounts WHERE id = 'source'"))
                     }
                 }
                 "schedule-close-reopen-eligibility" -> {
@@ -196,8 +211,19 @@ class AccountLifecycleOracleTest(private val caseId: String) {
                 } else {
                     emptyList()
                 }
-                (missing - excused.toSet()).forEach { problems += "$key missing $it" }
-                remaining.forEach { problems += "$key extra $it" }
+                var extra: List<String> = remaining
+                var stillMissing = missing - excused.toSet()
+                if (caseId == "close-positive-on-to-on-history" && key == "undoMessages") {
+                    // AND-02: Actual's second close batch writes these two source-leg cells onto an existing row.
+                    val and02Missing = listOf("transactions/id2/category=0:", "transactions/id2/transferred_id=0:")
+                    val and02Extra = listOf("transactions/id2/tombstone=N:1", "transactions/id2/tombstone=N:1")
+                    assertEquals("AND-02 no longer shows; update the excuse", and02Missing.sorted(), stillMissing.sorted())
+                    assertEquals("AND-02 no longer shows; update the excuse", and02Extra, extra)
+                    stillMissing = emptyList()
+                    extra = emptyList()
+                }
+                stillMissing.forEach { problems += "$key missing $it" }
+                extra.forEach { problems += "$key extra $it" }
                 if (caseId == "rename-handler-input-boundary") assertEquals("OP-22 no longer shows; update the excuse", 2, excused.size)
             }
             assertTrue("$caseId\n" + problems.joinToString("\n"), problems.isEmpty())

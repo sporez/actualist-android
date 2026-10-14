@@ -304,8 +304,11 @@ class BudgetDatabase private constructor(
      * Drafts are applied in the order given. [prepare] runs inside the transaction so
      * the writes it plans start from the latest committed state.
      */
-    fun <T> commitLocal(nowMillis: Long = clock.nowMillis(), prepare: () -> Pair<List<CellDraft>, T>): CommitResult<T> {
+    /** [undoable] false keeps the batch out of the undo history (Actual's `undoListening: false`). */
+    fun <T> commitLocal(nowMillis: Long = clock.nowMillis(), undoable: Boolean = true, prepare: () -> Pair<List<CellDraft>, T>): CommitResult<T> {
+        val recordUndo = undoable && undoListener != null
         var committedClock = localClock
+        var undoBatch: UndoBatch? = null
         val result = sql.transaction {
             val (drafts, outcome) = prepare()
             if (drafts.isEmpty()) return@transaction CommitResult(outcome, emptyList())
@@ -316,6 +319,14 @@ class BudgetDatabase private constructor(
             var trie = currentMerkleTrie()
             val insertedRows = HashSet<Pair<String, String>>()
             val committed = mutableListOf<SyncMessage>()
+            // Rows as they were before this batch, as Actual's `applyMessages` reads `oldData`.
+            val oldRows = HashMap<Pair<String, String>, SqlRow?>()
+            for (draft in drafts) {
+                val key = draft.dataset to draft.row
+                if (recordUndo && key !in oldRows) {
+                    oldRows[key] = sql.queryOne("SELECT * FROM ${Sql.quoted(draft.dataset)} WHERE id = ? LIMIT 1", draft.row)
+                }
+            }
             for (draft in drafts) {
                 val minted = clock.next(nowMillis)
                 clock = minted.clock
@@ -345,11 +356,26 @@ class BudgetDatabase private constructor(
             }
             persistMerkleTrie(trie.pruned(), clock)
             committedClock = clock
+            if (recordUndo) undoBatch = UndoBatch.of(committed, drafts, oldRows)
             CommitResult(outcome, committed)
         }
         localClock = committedClock
+        undoBatch?.let { batch -> undoListener?.invoke(batch) }
         return result
     }
+
+    /**
+     * Receives every committed local batch with its undo and redo cells (see [UndoBatch]); set by
+     * the session's undo history. Remote changes applied by sync never reach it.
+     */
+    @Volatile
+    var undoListener: ((UndoBatch) -> Unit)? = null
+
+    /** The timestamp currently winning a cell, or null when nothing was ever written to it. */
+    fun winningTimestamp(dataset: String, row: String, column: String): String? = sql.queryString(
+        "SELECT MAX(timestamp) FROM messages_crdt WHERE dataset = ? AND row = ? AND column = ?",
+        dataset, row, column,
+    )
 
     fun commitLocal(drafts: List<CellDraft>, nowMillis: Long = clock.nowMillis()): List<SyncMessage> =
         commitLocal(nowMillis) { drafts to Unit }.messages
