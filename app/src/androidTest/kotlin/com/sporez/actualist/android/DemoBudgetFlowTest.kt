@@ -181,6 +181,13 @@ class DemoBudgetFlowTest {
         compose.screenshot("14-schedules")
         compose.onNodeWithTag("schedule-post-demo-schedule-streaming").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Posted StreamFlix")).fetchSemanticsNodes().isNotEmpty() }
+        // Edit the schedule's name through the ported schedule writer.
+        compose.onNodeWithTag("schedule-edit-demo-schedule-streaming").performClick()
+        compose.waitForTag("schedule-edit-dialog")
+        compose.onNodeWithTag("schedule-edit-name").performTextClearance()
+        compose.onNodeWithTag("schedule-edit-name").performTextInput("Synthetic Streaming")
+        compose.onNodeWithTag("schedule-edit-save").performClick()
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synthetic Streaming")).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

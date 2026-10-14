@@ -82,6 +82,27 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
             )
         }
 
+    /** Edits name, amount and auto-posting through the ported schedule writer; only changed fields are sent. */
+    fun update(item: ScheduleListItem, name: String, amount: Long?, approximate: Boolean, posts: Boolean) =
+        write("Updated ${name.ifBlank { item.name }}") {
+            val trimmed = name.trim()
+            val amountChanged = amount != null && (amount != item.amountMinorUnits || approximate != item.isApproximate)
+            val fields = com.sporez.actualist.core.schedules.ScheduleEditFields(
+                name = if (trimmed != item.name) com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(trimmed.ifEmpty { null })
+                else com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
+                amount = if (amountChanged) {
+                    com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(
+                        if (approximate) com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(amount!!)
+                        else com.sporez.actualist.core.schedules.ScheduleAmountDraft.Exact(amount!!),
+                    )
+                } else {
+                    com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged
+                },
+                postsTransaction = posts.takeIf { it != item.postsTransaction },
+            )
+            if (!fields.isEmpty) Schedules(database, clock).update(item.id, fields, today())
+        }
+
     fun delete(item: ScheduleListItem) = write("Deleted ${item.name}") { Schedules(database, clock).delete(item.id) }
 
     private fun write(done: String, block: BudgetSession.() -> Any?) {
@@ -198,6 +219,8 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
 
 @Composable
 private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) {
+    var editing by androidx.compose.runtime.saveable.rememberSaveable(item.id) { androidx.compose.runtime.mutableStateOf(false) }
+    if (editing) EditScheduleDialog(item, viewModel) { editing = false }
     SectionCard(Modifier.testTag("schedule-${item.id}")) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -230,6 +253,7 @@ private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) 
                 modifier = Modifier.testTag("schedule-status-${item.id}"),
             )
             Row {
+                if (item.isSupported && !item.completed) TextButton(onClick = { editing = true }, modifier = Modifier.testTag("schedule-edit-${item.id}")) { Text("Edit") }
                 if (item.canPost) TextButton(onClick = { viewModel.post(item) }, modifier = Modifier.testTag("schedule-post-${item.id}")) { Text("Post now") }
                 if (item.canSkip) TextButton(onClick = { viewModel.skip(item) }, modifier = Modifier.testTag("schedule-skip-${item.id}")) { Text("Skip") }
                 if (item.canComplete) TextButton(onClick = { viewModel.complete(item) }) { Text("Complete") }
@@ -246,4 +270,57 @@ private fun statusLabel(status: ScheduleStatus) = when (status) {
     ScheduleStatus.UPCOMING -> "Upcoming"
     ScheduleStatus.MISSED -> "Missed"
     ScheduleStatus.SCHEDULED -> "Scheduled"
+}
+
+
+@Composable
+private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewModel, onDismiss: () -> Unit) {
+    val isRange = item.amountLower != null && item.amountUpper != null && item.amountLower != item.amountUpper
+    var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.name) }
+    var amountText by androidx.compose.runtime.saveable.rememberSaveable {
+        androidx.compose.runtime.mutableStateOf(item.amountMinorUnits?.let { com.sporez.actualist.core.money.Money.format(kotlin.math.abs(it), symbol = "", grouping = false) } ?: "")
+    }
+    var outflow by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf((item.amountMinorUnits ?: -1L) < 0) }
+    var approximate by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.isApproximate) }
+    var posts by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.postsTransaction) }
+    val magnitude = com.sporez.actualist.core.money.Money.parse(amountText)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit schedule") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("schedule-edit-dialog")) {
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("schedule-edit-name"))
+                if (isRange) {
+                    Text("This schedule matches an amount range; edit the range in Actual.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.FilterChip(selected = outflow, onClick = { outflow = true }, label = { Text("Outflow") })
+                        androidx.compose.material3.FilterChip(selected = !outflow, onClick = { outflow = false }, label = { Text("Inflow") }, modifier = Modifier.padding(start = 6.dp))
+                    }
+                    com.sporez.actualist.android.ui.components.AmountField(amountText, { amountText = it }, label = "Amount", tag = "schedule-edit-amount")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(checked = approximate, onCheckedChange = { approximate = it })
+                        Text("Approximate amount")
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
+                    Text("Post the transaction automatically")
+                }
+                Text("Repeats: ${item.recurrenceDescription}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isRange || (magnitude != null && magnitude != 0L),
+                onClick = {
+                    val signed = if (isRange) null else kotlin.math.abs(magnitude!!).let { if (outflow) -it else it }
+                    viewModel.update(item, name, signed, approximate, posts)
+                    onDismiss()
+                },
+                modifier = Modifier.testTag("schedule-edit-save"),
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
