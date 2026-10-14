@@ -227,6 +227,14 @@ class DemoBudgetFlowTest {
         compose.waitForTag("picker-search")
         compose.onNodeWithTag("picker-search").performTextInput("Shopping")
         compose.onNodeWithTag("pick-shopping").performClick()
+        // Only amounts in a range.
+        compose.onNodeWithTag("rule-add-condition").performScrollTo().performClick()
+        compose.onNodeWithTag("rule-condition-1-field").performScrollTo().performClick()
+        compose.onNodeWithTag("pick-amount").performClick()
+        compose.onNodeWithTag("rule-condition-1-op").performScrollTo().performClick()
+        compose.onNodeWithTag("pick-isbetween").performClick()
+        compose.onNodeWithTag("rule-condition-1-text").performScrollTo().performTextInput("-500.00")
+        compose.onNodeWithTag("rule-condition-1-text2").performScrollTo().performTextInput("-5.00")
         // A post-stage rule that also adds a tag after the existing notes.
         compose.onNodeWithTag("rule-stage-post").performScrollTo().performClick()
         compose.onNodeWithTag("rule-add-action").performScrollTo().performClick()
@@ -238,6 +246,7 @@ class DemoBudgetFlowTest {
         compose.waitOrCapture("rule-saved") { compose.onAllNodes(hasText("payee is MarketPlace", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.waitOrCapture("rule-notes-action") { compose.onAllNodes(hasText("append-notes \" #shop\"", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Stage: post").assertExists()
+        compose.waitOrCapture("rule-range-condition") { compose.onAllNodes(hasText("amount isbetween", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("16-rules")
     }
 
