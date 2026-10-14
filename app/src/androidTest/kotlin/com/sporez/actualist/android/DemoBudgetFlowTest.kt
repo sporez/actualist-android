@@ -157,7 +157,7 @@ class DemoBudgetFlowTest {
         compose.waitForTag("account-balance")
         compose.onNodeWithTag("reconcile").performClick()
         compose.waitForTag("reconcile-balance")
-        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Cleared balance: …")).fetchSemanticsNodes().isEmpty() }
+        compose.waitOrCapture("reconcile-cleared-loaded") { compose.onAllNodes(hasText("Cleared balance: …")).fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithTag("reconcile-balance").performTextInput("20000.00")
         compose.waitForTag("reconcile-difference")
         compose.screenshot("12-reconcile")
