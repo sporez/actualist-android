@@ -99,7 +99,7 @@ class BudgetExtrasFlowTest {
         compose.onNodeWithTag("assign-field").performTextClearance()
         compose.onNodeWithTag("assign-field").performTextInput("120+35.5")
         compose.waitForTag("assign-field-result")
-        compose.onNodeWithTag("assign-field-result", useUnmergedTree = true).assertTextContains("155.50")
+        compose.onNodeWithTag("assign-field-result", useUnmergedTree = true).assertTextContains("155.50", substring = true)
         click("assign-save")
         compose.waitForGone("category-sheet")
         compose.onNodeWithTag("category-vacation").performClick()

@@ -55,6 +55,9 @@ if [ -n "${ACTUAL_TEST_SERVER_URL:-}" ]; then
   SERVER_ARGS=(-e actualServerUrl "http://127.0.0.1:5006" -e actualServerPassword "$ACTUAL_TEST_SERVER_PASSWORD")
   echo "Real Actual server exposed to the device at 127.0.0.1:5006" | tee "$OUT/real-server.txt"
 fi
+# Warm-up: the first test after boot has twice hung on a cold emulator (and a timeout can poison
+# the next test). Pay that cost on a throwaway smoke run whose result is ignored.
+timeout 300 adb shell am instrument -w -e class com.sporez.actualist.android.LaunchSmokeTest "$RUNNER" > "$OUT/warmup.txt" 2>&1 || true
 adb logcat -c
 FILTER_ARGS=()
 if [ -n "${TEST_FILTER:-}" ]; then
