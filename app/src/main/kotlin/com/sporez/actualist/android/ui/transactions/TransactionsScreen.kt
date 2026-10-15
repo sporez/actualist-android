@@ -71,6 +71,8 @@ data class TransactionListState(
     val filterProblem: String? = null,
     /** Transactions a sync brought in that have not been looked at yet (local only; Actualist's "new" marker). */
     val pendingNewIds: Set<String> = emptySet(),
+    /** True when older transactions exist beyond the loaded page ("Load older transactions"). */
+    val hasMore: Boolean = false,
 )
 
 /** Conditions applied to the feed, saved or not. */
@@ -85,6 +87,7 @@ class TransactionsViewModel(
     accountId: String?,
     categoryId: String?,
     private val server: com.sporez.actualist.android.sync.ServerConnection? = null,
+    private val pageSize: Int = FeedPagingConfig.pageSize,
 ) : ViewModel() {
     val messages = com.sporez.actualist.android.ui.MessageState()
     private val _query = MutableStateFlow(TransactionQuery(accountId = accountId, categoryId = categoryId))
@@ -97,13 +100,33 @@ class TransactionsViewModel(
     private val _adhoc = MutableStateFlow<AppliedFilter?>(null)
     val adhoc: StateFlow<AppliedFilter?> = _adhoc.asStateFlow()
 
-    val state = reloading(session, kotlinx.coroutines.flow.combine(_query, _filterId, _adhoc) { q, f, a -> Triple(q, f, a) }) { (q, filterId, applied) ->
+    /** How many feed rows are loaded; "Load older transactions" grows it by a page, a new search or filter resets it. */
+    private val _limit = MutableStateFlow(pageSize)
+
+    fun loadOlder() {
+        _limit.value = com.sporez.actualist.core.transactions.FeedPaging.grown(_limit.value, pageSize)
+    }
+
+    private fun resetPaging() {
+        _limit.value = pageSize
+    }
+
+    val state = reloading(
+        session,
+        kotlinx.coroutines.flow.combine(
+            kotlinx.coroutines.flow.combine(_query, _filterId, _adhoc) { q, f, a -> Triple(q, f, a) },
+            _limit,
+        ) { inputs, limit -> Pair(inputs, limit) },
+    ) { (inputs, limit) ->
+        val (q, filterId, applied) = inputs
         val queries = com.sporez.actualist.core.query.TransactionQueries(database)
         val filters = runCatching { queries.savedFilters() }.getOrDefault(emptyList())
         val filter = filterId?.let { id -> filters.firstOrNull { it.id == id } }
         var problem: String? = null
-        val rows = if (applied == null && filterId == null) {
-            ledger.transactions(q)
+        var window: com.sporez.actualist.core.transactions.FeedWindow<TransactionRow>
+        if (applied == null && filterId == null) {
+            // One row past the page tells whether older transactions remain.
+            window = com.sporez.actualist.core.transactions.FeedPaging.window(ledger.transactions(q.copy(limit = limit + 1)), limit)
         } else {
             // The ported query engine decides membership (split families group to their parent);
             // rows render through the same ledger read as the unfiltered list.
@@ -115,14 +138,18 @@ class TransactionsViewModel(
             }
             if (page == null) {
                 problem = "\"${filter?.name ?: "This filter"}\" uses a condition this app cannot run yet."
-                emptyList()
+                window = com.sporez.actualist.core.transactions.FeedWindow(emptyList(), false)
             } else {
                 val ids = page.transactions.mapNotNull { it.id }.toSet()
-                ledger.transactions(q.copy(search = null, limit = 100_000)).filter { it.id in ids }
+                window = com.sporez.actualist.core.transactions.FeedPaging.window(
+                    ledger.transactions(q.copy(search = null, limit = 100_000)).filter { it.id in ids },
+                    limit,
+                )
             }
         }
         TransactionListState(
-            rows = rows,
+            rows = window.items,
+            hasMore = window.hasMore,
             account = q.accountId?.let { id -> ledger.accounts().firstOrNull { it.id == id } },
             uncategorizedCount = if (q.accountId == null && q.categoryId == null) ledger.uncategorizedCount() else 0,
             savedFilters = filters,
@@ -143,6 +170,7 @@ class TransactionsViewModel(
 
     /** Picks a saved filter (a second tap clears it); its conditions become the applied ones. */
     fun selectFilter(id: String?) {
+        resetPaging()
         if (id == null || _filterId.value == id) {
             _filterId.value = null
             _adhoc.value = null
@@ -157,11 +185,13 @@ class TransactionsViewModel(
 
     /** Applies conditions from the filter sheet without saving them. */
     fun applyFilter(conditions: List<com.sporez.actualist.core.query.QueryCondition>, join: com.sporez.actualist.core.query.QueryJoin) {
+        resetPaging()
         _filterId.value = null
         _adhoc.value = if (conditions.isEmpty()) null else AppliedFilter(conditions, join)
     }
 
     fun resetFilter() {
+        resetPaging()
         _filterId.value = null
         _adhoc.value = null
     }
@@ -243,6 +273,7 @@ class TransactionsViewModel(
     }
 
     fun search(text: String) {
+        resetPaging()
         _query.value = _query.value.copy(search = text)
     }
 
@@ -380,10 +411,12 @@ class TransactionsViewModel(
     }
 
     fun setStatus(status: com.sporez.actualist.core.query.StatusFilter) {
+        resetPaging()
         _query.value = _query.value.copy(status = if (_query.value.status == status) com.sporez.actualist.core.query.StatusFilter.ALL else status)
     }
 
     fun toggleUncategorized() {
+        resetPaging()
         _query.value = _query.value.copy(uncategorizedOnly = !_query.value.uncategorizedOnly)
     }
 
@@ -524,6 +557,9 @@ class TransactionsViewModel(
 
     fun exportFilename(): String = com.sporez.actualist.core.csv.CsvExport.filename(System.currentTimeMillis())
 
+    /** The rows an export would contain (the export review's count). */
+    suspend fun exportRowCount(): Int = session.read { com.sporez.actualist.core.csv.CsvExport.rows(database, _query.value.accountId).size }
+
     /** Writes Actual's CSV export format for this account (or every account) to [uri]. */
     fun exportCsv(resolver: android.content.ContentResolver, uri: android.net.Uri) {
         viewModelScope.launch {
@@ -541,17 +577,72 @@ class TransactionsViewModel(
         }
     }
 
-    /** Imports a CSV into this account in one transaction; nothing is written on any error. */
+    /** The export as text, for "Share CSV…" (an ACTION_SEND needs no file provider this way). */
+    suspend fun exportCsvText(): String = session.read {
+        com.sporez.actualist.core.csv.CsvExport.encode(com.sporez.actualist.core.csv.CsvExport.rows(database, _query.value.accountId))
+    }
+
+    private val _csvImport = MutableStateFlow<CsvImportState>(CsvImportState.Idle)
+    /** The CSV import review in progress (nothing is written until it is confirmed). */
+    val csvImport: StateFlow<CsvImportState> = _csvImport.asStateFlow()
+
+    /** Reads the chosen file and opens the import review. */
     fun importCsv(resolver: android.content.ContentResolver, uri: android.net.Uri) {
-        val accountId = _query.value.accountId ?: return
+        if (_query.value.accountId == null) return
+        _csvImport.value = CsvImportState.Loading
         viewModelScope.launch {
             try {
-                val plan = session.write {
-                    val bytes = resolver.openInputStream(uri)?.use { it.readNBytesCompat(com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES + 1) }
+                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    resolver.openInputStream(uri)?.use { it.readNBytesCompat(com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES + 1) }
                         ?: error("The file could not be opened.")
-                    if (bytes.size > com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES) error("The file is larger than 10 MB.")
-                    com.sporez.actualist.core.csv.CsvImporter(database, clock).import(accountId, bytes.toString(Charsets.UTF_8))
                 }
+                if (bytes.size > com.sporez.actualist.core.csv.CsvImportMapper.MAXIMUM_BYTES) error("The file is larger than 10 MB.")
+                reviewCsv(bytes.toString(Charsets.UTF_8))
+            } catch (error: Exception) {
+                _csvImport.value = CsvImportState.Failed(error.message ?: "Import failed.")
+            }
+        }
+    }
+
+    /** Opens the import review for CSV [text] already in memory. */
+    fun reviewCsvText(text: String) {
+        if (_query.value.accountId == null) return
+        _csvImport.value = CsvImportState.Loading
+        viewModelScope.launch {
+            try {
+                reviewCsv(text)
+            } catch (error: Exception) {
+                _csvImport.value = CsvImportState.Failed(error.message ?: "Import failed.")
+            }
+        }
+    }
+
+    private suspend fun reviewCsv(text: String) {
+        val accountId = _query.value.accountId ?: return
+        val review = session.read { com.sporez.actualist.core.csv.CsvImportReviewer(database, clock).review(accountId, text) }
+        _csvImport.value = CsvImportState.Reviewing(review, review.defaultIncluded)
+    }
+
+    fun toggleCsvRow(index: Int) {
+        val current = _csvImport.value as? CsvImportState.Reviewing ?: return
+        val row = current.review.rows.firstOrNull { it.index == index } ?: return
+        if (!row.selectable) return
+        _csvImport.value = current.copy(included = current.included.let { if (index in it) it - index else it + index })
+    }
+
+    fun cancelCsvImport() {
+        _csvImport.value = CsvImportState.Idle
+    }
+
+    /** Imports the reviewed rows that were kept, in one transaction; nothing is written on any error. */
+    fun confirmCsvImport() {
+        val current = _csvImport.value as? CsvImportState.Reviewing ?: return
+        val accountId = _query.value.accountId ?: return
+        _csvImport.value = CsvImportState.Submitting
+        viewModelScope.launch {
+            try {
+                val plan = session.write { com.sporez.actualist.core.csv.CsvImportReviewer(database, clock).apply(accountId, current.review, current.included) }
+                _csvImport.value = CsvImportState.Idle
                 messages.show(
                     listOfNotNull(
                         "Imported ${plan.imported} rows",
@@ -561,7 +652,7 @@ class TransactionsViewModel(
                     ).joinToString(", "),
                 )
             } catch (error: Exception) {
-                messages.show(error.message ?: "Import failed.")
+                _csvImport.value = CsvImportState.Failed(error.message ?: "Import failed.")
             }
         }
     }
@@ -592,6 +683,36 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
     val resolver = LocalContext.current.contentResolver
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let { viewModel.exportCsv(resolver, it) } }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importCsv(resolver, it) } }
+    val csvImport by viewModel.csvImport.collectAsState()
+    CsvImportReviewDialog(csvImport, viewModel::toggleCsvRow, viewModel::confirmCsvImport, viewModel::cancelCsvImport)
+    var exportReview by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (exportReview) {
+        var exportCount by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Int?>(null) }
+        androidx.compose.runtime.LaunchedEffect(Unit) { exportCount = runCatching { viewModel.exportRowCount() }.getOrNull() }
+        val context = LocalContext.current
+        val exportScope = androidx.compose.runtime.rememberCoroutineScope()
+        CsvExportReviewDialog(
+            scope = (state as? Loadable.Ready)?.value?.account?.name ?: "every account",
+            count = exportCount,
+            onSave = {
+                exportReview = false
+                exportLauncher.launch(viewModel.exportFilename())
+            },
+            onShare = {
+                exportReview = false
+                exportScope.launch {
+                    val text = runCatching { viewModel.exportCsvText() }.getOrNull() ?: return@launch
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/csv"
+                        putExtra(android.content.Intent.EXTRA_SUBJECT, viewModel.exportFilename())
+                        putExtra(android.content.Intent.EXTRA_TEXT, text)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(send, "Share CSV").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            },
+            onDismiss = { exportReview = false },
+        )
+    }
     var reconciling by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     if (reconciling) ReconcileDialog(viewModel) { reconciling = false }
     var managing by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
@@ -602,7 +723,7 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
     Box(Modifier.fillMaxSize().testTag("transactions-screen")) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { exportLauncher.launch(viewModel.exportFilename()) }, modifier = Modifier.testTag("export-csv")) { Text("Export CSV") }
+                TextButton(onClick = { exportReview = true }, modifier = Modifier.testTag("export-csv")) { Text("Export CSV") }
                 if (query.accountId != null) {
                     TextButton(onClick = { reconciling = true }, modifier = Modifier.testTag("reconcile")) { Text("Reconcile") }
                     TextButton(onClick = { managing = true }, modifier = Modifier.testTag("manage-account")) { Text("Account") }
@@ -665,6 +786,8 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                             pendingNew = list.pendingNewIds,
                             onOpen = { row -> if (selected.isNotEmpty()) viewModel.toggleSelected(row.id) else onOpen(row) },
                             onLongPress = { row -> viewModel.toggleSelected(row.id) },
+                            hasMore = list.hasMore,
+                            onLoadOlder = viewModel::loadOlder,
                         )
                     }
                 }
@@ -684,6 +807,8 @@ private fun TransactionList(
     pendingNew: Set<String>,
     onOpen: (TransactionRow) -> Unit,
     onLongPress: (TransactionRow) -> Unit,
+    hasMore: Boolean,
+    onLoadOlder: () -> Unit,
 ) {
     val byDay = rows.groupBy { it.date }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -706,6 +831,7 @@ private fun TransactionList(
                 }
             }
         }
+        if (hasMore) item(key = "load-older") { LoadOlderRow(onLoadOlder) }
     }
 }
 

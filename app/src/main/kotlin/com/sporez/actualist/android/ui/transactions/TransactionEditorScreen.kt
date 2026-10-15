@@ -75,6 +75,8 @@ data class EditorData(
     val payees: List<Payee>,
     val categories: List<CategoryOption>,
     val existing: TransactionRow?,
+    /** Payees of the newest transactions, most recent first (the picker's "Recent" section). */
+    val recentPayeeIds: List<String> = emptyList(),
 )
 
 class TransactionEditorViewModel(
@@ -98,6 +100,9 @@ class TransactionEditorViewModel(
                         payees = ledger.payees(),
                         categories = ledger.categories(),
                         existing = transactionId?.let { ledger.transaction(it) },
+                        recentPayeeIds = com.sporez.actualist.core.transactions.PayeeRecents.ids(
+                            ledger.transactions(com.sporez.actualist.core.transactions.TransactionQuery(limit = 200)),
+                        ),
                     )
                 }
             } catch (error: Exception) {
@@ -181,14 +186,14 @@ class TransactionEditorViewModel(
      * Turns this transaction into a schedule, as Actualist's "Make schedule" does: same account,
      * payee and (approximate) amount, repeating from the transaction's date.
      */
-    fun makeSchedule(frequency: com.sporez.actualist.core.rules.ScheduleFrequency) = launchWrite {
+    fun makeSchedule(frequency: com.sporez.actualist.core.rules.ScheduleFrequency, name: String? = null) = launchWrite {
         val row = data.value?.existing ?: error("missing transaction")
         val start = row.date ?: error("This transaction has no date.")
         session.write {
             com.sporez.actualist.core.schedules.Schedules(database, clock).create(
                 com.sporez.actualist.core.schedules.ScheduleCreateCommand(
                     identity = com.sporez.actualist.core.schedules.ScheduleCreateIdentity.make(),
-                    name = row.displayPayee.ifBlank { null },
+                    name = (name ?: row.displayPayee).ifBlank { null },
                     definition = com.sporez.actualist.core.schedules.ScheduleDefinitionDraft(
                         accountId = row.accountId,
                         payeeMappingId = row.payeeId,
@@ -265,6 +270,21 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     var notes by rememberSaveable { mutableStateOf(existing?.notes ?: "") }
     var cleared by rememberSaveable { mutableStateOf(existing?.cleared ?: false) }
     var dateEpochDay by rememberSaveable { mutableStateOf((existing?.date ?: LocalDate.now()).toEpochDay()) }
+    // Text shared into the app (Actualist's Import Transaction from Text) prefills a new transaction once.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (existing == null) {
+            com.sporez.actualist.android.TextImportPrefill.take(loaded.accounts, loaded.payees, loaded.categories)?.let { d ->
+                outflow = d.outflow
+                amountText = Money.format(d.amountMinorUnits, symbol = "", grouping = false)
+                d.accountId?.let { accountId = it }
+                payeeId = d.payeeId
+                newPayeeName = d.newPayeeName
+                categoryId = d.categoryId
+                if (d.notes.isNotBlank()) notes = d.notes
+                d.date?.let { dateEpochDay = it.toEpochDay() }
+            }
+        }
+    }
     var picking by remember { mutableStateOf<String?>(null) }
     var splitting by rememberSaveable { mutableStateOf(existing?.isParent == true) }
     var splits by remember {
@@ -476,23 +496,21 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     }
 
     when (val target = picking) {
-        "payee" -> PickerDialog(
-            title = "Payee",
-            options = listOf(PickerOption(null, "No payee")) + loaded.payees.filter { !it.isTransfer || it.transferAccountId != accountId }.map {
-                PickerOption(it.id, if (it.isTransfer) "Transfer: ${it.name}" else it.name, if (it.isTransfer) "Move money between accounts" else null)
-            },
-            searchable = true,
-            onPick = {
-                payeeId = it.id
+        "payee" -> PayeePickerDialog(
+            payees = loaded.payees,
+            recentIds = loaded.recentPayeeIds,
+            currentAccountId = accountId,
+            onPick = { id ->
+                payeeId = id
                 newPayeeName = ""
                 picking = null
             },
-            onDismiss = { picking = null },
-            extraAction = "Create payee" to { name: String ->
+            onCreate = { name ->
                 payeeId = null
                 newPayeeName = name
                 picking = null
             },
+            onDismiss = { picking = null },
         )
         "account" -> PickerDialog(
             title = "Account",
@@ -526,19 +544,20 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 dismissButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
             ) { DatePicker(state = state) }
         }
-        "schedule" -> PickerDialog(
-            title = "Repeat this transaction",
-            options = listOf(
-                PickerOption(com.sporez.actualist.core.rules.ScheduleFrequency.WEEKLY.name, "Every week"),
-                PickerOption(com.sporez.actualist.core.rules.ScheduleFrequency.MONTHLY.name, "Every month"),
-                PickerOption(com.sporez.actualist.core.rules.ScheduleFrequency.YEARLY.name, "Every year"),
-            ),
-            onPick = { option ->
-                picking = null
-                option.id?.let { viewModel.makeSchedule(com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(it)) }
-            },
-            onDismiss = { picking = null },
-        )
+        "schedule" -> existing?.let { row ->
+            ScheduleConversionReviewDialog(
+                defaultName = row.displayPayee,
+                amount = row.amount,
+                accountName = row.accountName,
+                payeeName = row.displayPayee,
+                start = row.date ?: LocalDate.now(),
+                onConfirm = { name, frequency ->
+                    picking = null
+                    viewModel.makeSchedule(frequency, name)
+                },
+                onDismiss = { picking = null },
+            )
+        }
         "merge" -> {
             var candidates by remember { mutableStateOf<List<TransactionRow>?>(null) }
             var confirmFor by remember { mutableStateOf<String?>(null) }

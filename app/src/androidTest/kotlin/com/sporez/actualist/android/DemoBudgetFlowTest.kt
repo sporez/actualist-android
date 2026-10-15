@@ -425,6 +425,9 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("editor-make-schedule").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Every month")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Every month").performClick()
+        // Creating asks for a review first, as Actualist's schedule conversion does.
+        compose.waitForTag("schedule-review-create")
+        compose.onNodeWithTag("schedule-review-create").performClick()
         compose.waitForTag("transaction-list")
         compose.onNodeWithTag("nav-back").performClick()
         compose.waitForTag("bottom-bar")
