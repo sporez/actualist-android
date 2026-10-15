@@ -172,10 +172,15 @@ class LedgerReads(private val database: BudgetDatabase) {
             args += it
         }
         query.search?.trim()?.takeIf { it.isNotEmpty() }?.let { text ->
+            // The amount clause only for text with digits: a NUL placeholder pattern is cut off at the
+            // NUL by SQLite on the device, which made every non-numeric search match every row.
+            val digits = text.filter { it.isDigit() }
+            val amountClause = if (digits.isEmpty()) "" else " OR CAST(abs(${split.amount}) AS TEXT) LIKE ?"
             predicates += "(lower(COALESCE(p.name, '')) LIKE ? OR lower(COALESCE(ta.name, '')) LIKE ? OR lower(COALESCE(${split.notes}, '')) LIKE ? " +
-                "OR lower(COALESCE(cat.name, '')) LIKE ? OR CAST(abs(${split.amount}) AS TEXT) LIKE ?)"
+                "OR lower(COALESCE(cat.name, '')) LIKE ?$amountClause)"
             val like = "%" + text.lowercase() + "%"
-            args.addAll(listOf(like, like, like, like, "%" + text.filter { it.isDigit() }.ifEmpty { "\u0000" } + "%"))
+            args.addAll(listOf(like, like, like, like))
+            if (digits.isNotEmpty()) args += "%$digits%"
         }
         args += query.limit
         val rows = sql.query(

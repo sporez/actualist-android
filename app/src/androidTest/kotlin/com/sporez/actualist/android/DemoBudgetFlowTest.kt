@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -57,7 +58,12 @@ class DemoBudgetFlowTest {
 
         compose.onNodeWithTag("tab-spending").performClick()
         compose.waitForTag("transaction-list")
+        // Rows are taller now; the first Fresh Market row may be below the fold.
+        compose.waitOrCapture("fresh-market") {
+            runCatching { compose.onNodeWithTag("transaction-list").performScrollToNode(hasText("Fresh Market", substring = true)) }.isSuccess
+        }
         compose.onAllNodesWithText("Fresh Market", substring = true).fetchSemanticsNodes().let { assertTrue(it.isNotEmpty()) }
+        compose.onNodeWithTag("transaction-list").performScrollToIndex(0)
         compose.screenshot("02-spending")
 
         compose.onNodeWithTag("tab-accounts").performClick()
