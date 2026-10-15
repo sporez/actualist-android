@@ -73,6 +73,7 @@ import com.sporez.actualist.core.budget.BudgetMonthCategoryGroup
 import com.sporez.actualist.core.budget.BudgetTable
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.money.Money
+import com.sporez.actualist.core.money.MoneyExpression
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -82,7 +83,13 @@ private val monthFormat = DateTimeFormatter.ofPattern("MMM yyyy", Locale.US)
 fun monthTitle(month: String): String = runCatching { YearMonth.parse(month).format(monthFormat) }.getOrDefault(month)
 
 @Composable
-fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String, String) -> Unit) {
+fun BudgetScreen(
+    viewModel: BudgetViewModel,
+    onShowCategoryTransactions: (String, String) -> Unit,
+    onOpenHistory: () -> Unit = {},
+    onOpenSchedules: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsState()
     val month by viewModel.month.collectAsState()
     val message by viewModel.messages.message.collectAsState()
@@ -95,6 +102,12 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
     var choosingMonth by remember { mutableStateOf(false) }
     var reviewingCover by remember { mutableStateOf(false) }
     var reviewingUncategorized by remember { mutableStateOf(false) }
+    var editingMonthNote by remember { mutableStateOf(false) }
+    var browsingTemplates by remember { mutableStateOf(false) }
+    var unlocking by remember { mutableStateOf(false) }
+    val sync by viewModel.syncStatus.collectAsState()
+    val needsUnlock = (sync as? com.sporez.actualist.core.store.SyncStatus.Failed)?.message?.contains("needs its password") == true
+    val server = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.sporez.actualist.android.ActualistApplication).container.server
     val appSettings = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.sporez.actualist.android.ActualistApplication).container.settings
     val display by appSettings.settings.collectAsState()
     val uncategorizedState by viewModel.uncategorized.collectAsState()
@@ -103,7 +116,22 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
     val followingCount = if (display.monthsShown == 0) 2 else display.monthsShown - 1
 
     Column(Modifier.fillMaxSize().testTag("budget-screen")) {
-        MonthHeader(month, onPrevious = viewModel::previousMonth, onNext = viewModel::nextMonth, onChoose = { choosingMonth = true }, onToday = viewModel::showToday)
+        MonthHeader(
+            month,
+            onPrevious = viewModel::previousMonth,
+            onNext = viewModel::nextMonth,
+            onChoose = { choosingMonth = true },
+            onToday = viewModel::showToday,
+            actions = {
+                BudgetActionsMenu(
+                    onHistory = onOpenHistory,
+                    onSchedules = onOpenSchedules,
+                    onNotes = { editingMonthNote = true },
+                    onTemplates = { browsingTemplates = true },
+                    onSettings = onOpenSettings,
+                )
+            },
+        )
         if (choosingMonth) {
             MonthChooserDialog(month, onPick = { picked -> viewModel.showMonth(picked); choosingMonth = false }, onDismiss = { choosingMonth = false })
         }
@@ -131,15 +159,25 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                             }
                         }
                     }
+                    if (needsUnlock) {
+                        item(key = "unlock") {
+                            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().clickable { unlocking = true }.testTag("unlock-banner")) {
+                                Text("This encrypted budget needs its password to sync. Tap to unlock.", Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                            }
+                        }
+                    }
                     if (screen.month.table == BudgetTable.ENVELOPE) {
                         item(key = "to-budget") { ToBudgetBanner(screen.month.toBudget, screen.month.forNextMonth) { showToBudget = true } }
                     } else {
+                        screen.month.trackingSummary?.let { summary ->
+                            item(key = "savings") { BudgetSavingsBanner(summary, screen.month.month, Months.current()) }
+                        }
                         item(key = "tracking") { TrackingSummaryCard(screen) }
                     }
                     screen.note?.let { note ->
                         item(key = "note") {
                             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-                                Text(note, Modifier.padding(12.dp).testTag("month-note"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                MarkdownText(note, Modifier.padding(12.dp).testTag("month-note"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -212,6 +250,9 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
                         },
                     )
                 }
+                if (editingMonthNote) MonthNoteDialog(screen.month.month, screen.note, viewModel) { editingMonthNote = false }
+                if (browsingTemplates) TemplatesBrowserDialog(screen, viewModel) { browsingTemplates = false }
+                if (unlocking) EncryptedBudgetUnlockDialog(viewModel, server) { unlocking = false }
                 if (showToBudget) ToBudgetSheet(screen, viewModel) { showToBudget = false }
                 if (reviewingCover) CoverReviewSheet(screen, viewModel) { reviewingCover = false }
                 if (reviewingUncategorized) UncategorizedReviewSheet(viewModel) { reviewingUncategorized = false }
@@ -226,7 +267,7 @@ fun BudgetScreen(viewModel: BudgetViewModel, onShowCategoryTransactions: (String
 }
 
 @Composable
-private fun MonthHeader(month: String, onPrevious: () -> Unit, onNext: () -> Unit, onChoose: () -> Unit, onToday: () -> Unit) {
+private fun MonthHeader(month: String, onPrevious: () -> Unit, onNext: () -> Unit, onChoose: () -> Unit, onToday: () -> Unit, actions: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onPrevious, modifier = Modifier.testTag("month-previous")) { Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month") }
         Text(
@@ -237,6 +278,7 @@ private fun MonthHeader(month: String, onPrevious: () -> Unit, onNext: () -> Uni
         )
         if (month != Months.current()) TextButton(onClick = onToday, modifier = Modifier.testTag("month-today")) { Text("Today") }
         IconButton(onClick = onNext, modifier = Modifier.testTag("month-next")) { Icon(Icons.Filled.ChevronRight, contentDescription = "Next month") }
+        actions()
     }
 }
 
@@ -345,12 +387,11 @@ private fun CategorySheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var assignText by rememberSaveable(category.id) { mutableStateOf(Money.format(category.budgeted, symbol = "", grouping = false)) }
-    var moveText by rememberSaveable(category.id) { mutableStateOf("") }
     var picking by remember { mutableStateOf<String?>(null) }
     var managing by remember { mutableStateOf(false) }
     val envelope = screen.month.table == BudgetTable.ENVELOPE
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("category-sheet"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("category-sheet"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(category.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 if (!category.isIncome) BalancePill(category.balance)
@@ -360,10 +401,10 @@ private fun CategorySheet(
                 MoneyText(category.spent)
             }
             if (!category.isIncome || !envelope) {
-                AmountField(assignText, { assignText = it }, label = "Assigned in ${monthTitle(screen.month.month)}", tag = "assign-field")
+                AmountField(assignText, { assignText = it }, label = "Assigned in ${monthTitle(screen.month.month)}", tag = "assign-field", expressions = true)
                 Button(
-                    onClick = { Money.parse(assignText)?.let { viewModel.assign(category.id, it); onDismiss() } },
-                    enabled = Money.parse(assignText) != null,
+                    onClick = { MoneyExpression.evaluate(assignText)?.let { viewModel.assign(category.id, it); onDismiss() } },
+                    enabled = MoneyExpression.evaluate(assignText) != null,
                     modifier = Modifier.fillMaxWidth().testTag("assign-save"),
                 ) { Text("Save assignment") }
             }
@@ -373,12 +414,10 @@ private fun CategorySheet(
                         Text("Cover ${money(-category.balance)} overspending")
                     }
                 }
-                AmountField(moveText, { moveText = it }, label = "Move amount", tag = "move-field")
                 OutlinedButton(
                     onClick = { picking = "move" },
-                    enabled = (Money.parse(moveText) ?: 0) > 0,
                     modifier = Modifier.fillMaxWidth().testTag("move-button"),
-                ) { Text("Move to another category…") }
+                ) { Text("Move money…") }
             }
             if (!category.isIncome) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -411,16 +450,7 @@ private fun CategorySheet(
         }
     }
     when (picking) {
-        "move" -> PickerDialog(
-            title = "Move to",
-            options = listOf(PickerOption(null, "To Budget", money(screen.month.toBudget))) + expenseCategories.map { (c, g) -> PickerOption(c.id, c.name, "${g.name} · ${money(c.balance)}") },
-            onPick = { option ->
-                picking = null
-                Money.parse(moveText)?.let { viewModel.move(category.id, option.id, it) }
-                onDismiss()
-            },
-            onDismiss = { picking = null },
-        )
+        "move" -> MoveMoneyDialog(category, screen, viewModel, onDone = { picking = null; onDismiss() }, onDismiss = { picking = null })
         "cover" -> PickerDialog(
             title = "Cover from",
             options = listOf(PickerOption(null, "To Budget", money(screen.month.toBudget))) + expenseCategories.filter { it.first.balance > 0 }.map { (c, g) -> PickerOption(c.id, c.name, "${g.name} · ${money(c.balance)}") },
@@ -441,9 +471,10 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
     var picking by remember { mutableStateOf(false) }
     var showTemplates by remember { mutableStateOf(false) }
     var showBrowser by remember { mutableStateOf(false) }
+    var holding by remember { mutableStateOf(false) }
     val month = screen.month
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("to-budget-sheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("to-budget-sheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(monthTitle(month.month), style = MaterialTheme.typography.titleLarge)
             SummaryLine("Available funds", month.incomeAvailable)
             SummaryLine("Overspent last month", month.lastMonthOverspent)
@@ -452,13 +483,10 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
             HorizontalDivider()
             SummaryLine("To Budget", month.toBudget)
             Spacer(Modifier.height(4.dp))
-            AmountField(amountText, { amountText = it }, label = "Amount", tag = "to-budget-amount-field")
-            val amount = Money.parse(amountText) ?: 0
+            AmountField(amountText, { amountText = it }, label = "Amount", tag = "to-budget-amount-field", expressions = true)
+            val amount = MoneyExpression.evaluate(amountText) ?: 0
             OutlinedButton(onClick = { picking = true }, enabled = amount > 0, modifier = Modifier.fillMaxWidth().testTag("assign-from-to-budget")) { Text("Assign to a category…") }
-            OutlinedButton(onClick = { viewModel.hold(amount); onDismiss() }, enabled = amount > 0, modifier = Modifier.fillMaxWidth().testTag("hold-button")) { Text("Hold for next month") }
-            if (month.forNextMonth != 0L) {
-                TextButton(onClick = { viewModel.releaseHold(); onDismiss() }, modifier = Modifier.testTag("release-hold")) { Text("Release ${money(month.forNextMonth)} hold") }
-            }
+            OutlinedButton(onClick = { holding = true }, modifier = Modifier.fillMaxWidth().testTag("hold-button")) { Text("Hold for next month…") }
             HorizontalDivider()
             Text("Whole month", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row {
@@ -472,6 +500,7 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
             }
         }
     }
+    if (holding) HoldDialog(screen, amountText, viewModel, onDone = { holding = false; onDismiss() }, onDismiss = { holding = false })
     if (showTemplates) TemplatesDialog(viewModel) { showTemplates = false; onDismiss() }
     if (showBrowser) TemplatesBrowserDialog(screen, viewModel) { showBrowser = false }
     if (picking) {
@@ -480,7 +509,7 @@ private fun ToBudgetSheet(screen: BudgetScreenState, viewModel: BudgetViewModel,
             options = month.categoryGroups.filter { !it.isIncome }.flatMap { g -> g.categories.map { PickerOption(it.id, it.name, "${g.name} · ${money(it.balance)}") } },
             onPick = { option ->
                 picking = false
-                Money.parse(amountText)?.let { viewModel.move(null, option.id, it) }
+                MoneyExpression.evaluate(amountText)?.let { viewModel.move(null, option.id, it) }
                 onDismiss()
             },
             onDismiss = { picking = false },
@@ -546,6 +575,8 @@ private fun CategoryNoteField(categoryId: String, viewModel: BudgetViewModel) {
     }
     if (!loaded) return
     androidx.compose.material3.OutlinedTextField(text, { text = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("category-notes"))
+    MarkdownHelp()
+    if (text.isNotBlank()) MarkdownText(text, Modifier.fillMaxWidth().testTag("category-notes-rendered"), color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (text.trim() != original.orEmpty()) {
         TextButton(onClick = { viewModel.saveCategoryNote(categoryId, text); original = text.trim() }, modifier = Modifier.testTag("category-notes-save")) { Text("Save notes") }
     }
@@ -623,14 +654,14 @@ private fun FollowingMonths(
 @Composable
 private fun AssignInMonthDialog(month: String, category: BudgetMonthCategory, viewModel: BudgetViewModel, onDismiss: () -> Unit) {
     var text by rememberSaveable(month, category.id) { mutableStateOf(Money.format(category.budgeted, symbol = "", grouping = false)) }
-    val amount = Money.parse(text)
+    val amount = MoneyExpression.evaluate(text)
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(category.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("following-assign-dialog")) {
                 Text(monthTitle(month), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                AmountField(text, { text = it }, label = "Assigned", tag = "following-assign-field")
+                AmountField(text, { text = it }, label = "Assigned", tag = "following-assign-field", expressions = true)
             }
         },
         confirmButton = {

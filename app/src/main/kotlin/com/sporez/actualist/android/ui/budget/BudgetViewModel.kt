@@ -171,6 +171,14 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
             .apply(month.value, mode = if (overwrite) com.sporez.actualist.core.templates.TemplateApplyMode.OVERWRITE else com.sporez.actualist.core.templates.TemplateApplyMode.FILL_EMPTY)
     }
 
+    /** Holdable money and the hold in force for the shown month (Actualist's hold review); null when unreadable. */
+    suspend fun holdReview(): com.sporez.actualist.core.budget.HoldReview? = try {
+        session.read { budget.holdReview(month.value) }
+    } catch (error: Exception) {
+        messages.show(error.message ?: "The hold could not be read.")
+        null
+    }
+
     fun hold(amount: Long) = write("Held for next month") { budgetWrites.hold(month.value, HoldCommand.Hold(amount)) }
 
     fun releaseHold() = write("Hold released") { budgetWrites.hold(month.value, HoldCommand.Reset) }
@@ -187,6 +195,22 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun saveCategoryNote(categoryId: String, text: String) = write("Notes saved") {
         com.sporez.actualist.core.notes.EntityNotes(database).write(com.sporez.actualist.core.notes.NoteTarget.Category(categoryId), text)
+    }
+
+    fun saveMonthNote(month: String, text: String) = write("Notes saved") {
+        com.sporez.actualist.core.notes.EntityNotes(database).write(com.sporez.actualist.core.notes.NoteTarget.BudgetMonth(month), text)
+    }
+
+    /** Sync progress of the open budget: a failure about a missing password means its key must be re-entered. */
+    val syncStatus: StateFlow<com.sporez.actualist.core.store.SyncStatus> get() = session.syncStatus
+
+    /** Saves the encrypted budget's key from [password] and syncs again; false (with a message) when it did not work. */
+    suspend fun unlock(server: com.sporez.actualist.android.sync.ServerConnection, password: String): Boolean = try {
+        server.unlockBudget(session, password)
+        true
+    } catch (error: Exception) {
+        messages.show(error.message ?: "The budget could not be unlocked.")
+        false
     }
 
     /** The category's template as an editor draft; null when it is note-managed or locked (see TemplateEditorWrites). */

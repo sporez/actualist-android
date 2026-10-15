@@ -238,7 +238,13 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
         NavHost(navController, startDestination = "budget", modifier = Modifier.weight(1f)) {
             composable("budget") {
                 val vm = viewModel(key = "budget-$key") { BudgetViewModel(session, Months.current()) }
-                BudgetScreen(vm) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
+                BudgetScreen(
+                    vm,
+                    onShowCategoryTransactions = { id, name -> navController.navigate("category/$id?name=${encode(name)}") },
+                    onOpenHistory = { navController.navigate("history") },
+                    onOpenSchedules = { navController.navigate("schedules") },
+                    onOpenSettings = { navController.navigate("settings") },
+                )
             }
             composable("spending") {
                 val vm = viewModel(key = "spending-$key") { TransactionsViewModel(session, null, null) }

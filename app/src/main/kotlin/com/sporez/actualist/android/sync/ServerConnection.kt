@@ -237,6 +237,19 @@ class ServerConnection(
         secrets.remove(SIMPLEFIN_BRIDGE)
     }
 
+    /**
+     * Re-enters an encrypted budget's password when its key is missing on this device: validates it against the
+     * server's key, saves the key, and syncs again.
+     */
+    suspend fun unlockBudget(session: BudgetSession, password: String): SyncStatus {
+        val metadata = library.metadata(session.budgetId) ?: throw IllegalStateException("This budget has no server link.")
+        withContext(Dispatchers.IO) {
+            val key = BudgetImporter.validateUserKey(client().userKey(token(), metadata.cloudFileId ?: session.budgetId), password)
+            secrets.put(SecretStore.budgetKey(session.budgetId), key.keyData)
+        }
+        return sync(session)
+    }
+
     /** One sync pass for an open (non-demo) session. Never reports success early. */
     suspend fun sync(session: BudgetSession): SyncStatus {
         if (session.isDemo) return SyncStatus.LocalOnly.also(session::publishSyncStatus)
