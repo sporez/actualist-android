@@ -56,9 +56,12 @@ private data class EditorItem(val id: Int, val entry: TE)
 private fun plain(value: Double): String =
     if (value == Math.rint(value) && Math.abs(value) < 1e15) value.toLong().toString() else value.toString()
 
-private fun moneyText(value: Double): String = Money.format(Math.round(value * 100), symbol = "", grouping = false)
+// Template amounts are in currency units; scale by the budget's fraction digits (none for JPY).
+private fun unitScale(): Double = Math.pow(10.0, com.sporez.actualist.core.money.MoneyFormat.current.decimalPlaces.toDouble())
 
-private fun parseMoney(text: String): Double? = Money.parse(text)?.let { it / 100.0 }
+private fun moneyText(value: Double): String = Money.format(Math.round(value * unitScale()), symbol = "", grouping = false)
+
+private fun parseMoney(text: String): Double? = Money.parse(text)?.let { it / unitScale() }
 
 private fun parseNumber(text: String): Double? = text.trim().toDoubleOrNull()?.takeIf { it.isFinite() }
 

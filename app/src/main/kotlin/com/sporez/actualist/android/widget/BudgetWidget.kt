@@ -37,6 +37,7 @@ object WidgetData {
         val settings = container.settings.settings.value
         val id = settings.selectedBudgetId ?: return@withContext null
         val session = container.sessions.acquire(id) { container.library.open(id) ?: error("The selected budget is no longer on this device.") }
+        applyBudgetMoneyFormat(session)
         try {
             val month = Months.id(today.year, today.monthValue)
             session.read {

@@ -31,7 +31,8 @@ data class HistoryReview(val title: String, val entries: List<HistoryReviewEntry
  * after. Names are read from the database at display time, so a renamed or deleted entity shows
  * its current name. Reads only.
  */
-class HistoryPresenter(private val database: BudgetDatabase, private val symbol: String = "$") {
+/** [symbol] null follows the open budget's currency ([com.sporez.actualist.core.money.MoneyFormat.current]). */
+class HistoryPresenter(private val database: BudgetDatabase, private val symbol: String? = null) {
     private class Cells(val before: Map<Triple<String, String, String>, String?>, val after: Map<Triple<String, String, String>, String?>) {
         fun rows(dataset: String): List<String> = (after.keys + before.keys).filter { it.first == dataset }.map { it.second }.distinct()
         fun before(dataset: String, row: String, column: String): String? = before[Triple(dataset, row, column)]
