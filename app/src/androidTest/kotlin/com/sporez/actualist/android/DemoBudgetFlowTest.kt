@@ -164,6 +164,8 @@ class DemoBudgetFlowTest {
         openDemo()
         compose.onNodeWithTag("tab-accounts").performClick()
         compose.waitForTag("budget-accounts")
+        // Rows can sit below an empty group's card: bring the row into view first.
+        compose.onNodeWithTag("accounts-list").performScrollToNode(hasTestTag("account-savings"))
         compose.onNodeWithTag("account-savings").performClick()
         compose.waitForTag("account-balance")
         compose.onNodeWithTag("reconcile").performClick()
@@ -350,6 +352,8 @@ class DemoBudgetFlowTest {
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synthetic Cash")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Done").performClick()
         compose.waitForGone("groups-dialog")
+        // Rows can sit below an empty group's card: bring the row into view first.
+        compose.onNodeWithTag("accounts-list").performScrollToNode(hasTestTag("account-savings"))
         compose.onNodeWithTag("account-savings").performClick()
         compose.waitForTag("manage-account")
         compose.onNodeWithTag("manage-account").performClick()
