@@ -80,3 +80,15 @@ private fun save(name: String, bitmap: Bitmap) {
     val directory = File(context.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
     File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
 }
+
+/**
+ * Innermost in every rule chain: when a test fails, captures the display while the activity is
+ * still up, as `failure-<test>.png`, so any failure (not only waits) leaves a picture.
+ */
+class FailureScreenshot : org.junit.rules.TestWatcher() {
+    override fun failed(e: Throwable?, description: org.junit.runner.Description) {
+        runCatching {
+            InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()?.let { save("failure-${description.methodName}", it) }
+        }
+    }
+}

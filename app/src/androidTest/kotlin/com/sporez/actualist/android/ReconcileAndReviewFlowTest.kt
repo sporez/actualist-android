@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -29,7 +30,7 @@ class ReconcileAndReviewFlowTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose).around(FailureScreenshot())
 
     private fun openDemo() {
         compose.waitForTag("onboarding")
@@ -108,6 +109,7 @@ class ReconcileAndReviewFlowTest {
         compose.waitOrCapture("two-selected") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
 
         // Cancelling the review changes nothing and keeps the selection.
+        compose.onNodeWithTag("selection-bar").performScrollToNode(hasTestTag("batch-delete"))
         compose.onNodeWithTag("batch-delete").performClick()
         compose.waitForTag("batch-review")
         compose.waitForTag("batch-review-hint")
@@ -116,6 +118,7 @@ class ReconcileAndReviewFlowTest {
         compose.waitForTag("selection-bar")
 
         // Clear then unclear: the unclear review shows each row's before → after.
+        compose.onNodeWithTag("selection-bar").performScrollToNode(hasTestTag("batch-clear"))
         compose.onNodeWithTag("batch-clear").performClick()
         compose.waitForTag("batch-review")
         compose.onNodeWithTag("batch-review-confirm").performClick()
@@ -124,6 +127,7 @@ class ReconcileAndReviewFlowTest {
         compose.waitForTag("selection-bar")
         compose.onAllNodes(rowMatcher)[1].performClick()
         compose.waitOrCapture("two-selected-again") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("selection-bar").performScrollToNode(hasTestTag("batch-unclear"))
         compose.onNodeWithTag("batch-unclear").performClick()
         compose.waitForTag("batch-review")
         compose.waitOrCapture("unclear-effect") { compose.onAllNodes(hasText("Cleared: Cleared → Uncleared")).fetchSemanticsNodes().isNotEmpty() }

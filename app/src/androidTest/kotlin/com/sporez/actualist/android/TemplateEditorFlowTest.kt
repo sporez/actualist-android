@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -23,7 +24,7 @@ class TemplateEditorFlowTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose).around(FailureScreenshot())
 
     private fun openDemo() {
         compose.waitForTag("onboarding")
@@ -39,9 +40,14 @@ class TemplateEditorFlowTest {
         compose.waitForTag("template-editor")
     }
 
+    /**
+     * Chips sit in a horizontal row inside the dialog's scrolling column; a touch can miss a node
+     * the nested scroll leaves clipped, so scroll as far as possible and invoke its click action.
+     */
     private fun scrolledClick(tag: String) {
         compose.waitForTag(tag)
-        compose.onNodeWithTag(tag).performScrollTo().performClick()
+        runCatching { compose.onNodeWithTag(tag).performScrollTo() }
+        compose.onNodeWithTag(tag).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
     }
 
     private fun scrolledInput(tag: String, text: String) {

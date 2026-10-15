@@ -28,7 +28,7 @@ class TransactionFilterFlowTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose).around(FailureScreenshot())
 
     private fun hasText(text: String): Boolean = compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 

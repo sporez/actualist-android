@@ -25,7 +25,7 @@ class SettingsAppearanceFlowTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(FreshAppState()).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(FreshAppState()).around(compose).around(FailureScreenshot())
 
     private fun openDemo() {
         compose.waitForTag("onboarding")

@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -26,7 +27,7 @@ class ReportExplorerFlowTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose).around(FailureScreenshot())
 
     private fun openDemo() {
         compose.waitForTag("onboarding")
@@ -45,8 +46,10 @@ class ReportExplorerFlowTest {
         }
     }
 
+    /** Chips sit in horizontally scrolling rows: bring each into view before tapping it. */
     private fun click(tag: String) {
-        compose.onNodeWithTag(tag).performClick()
+        runCatching { compose.onNodeWithTag(tag).performScrollTo() }
+        compose.onNodeWithTag(tag).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
     }
 
     @Test

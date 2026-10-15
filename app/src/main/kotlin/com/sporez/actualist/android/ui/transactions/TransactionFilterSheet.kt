@@ -324,6 +324,7 @@ private fun preservedSummary(condition: QueryCondition, options: Map<Transaction
 }
 
 /** Saved-filter management: rename, update with the current conditions, delete after a confirmation. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun SavedFiltersDialog(
     filters: List<SavedFilter>,
@@ -355,7 +356,8 @@ fun SavedFiltersDialog(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                            // Wraps rather than scrolls, so Delete is never pushed out of view.
+                            androidx.compose.foundation.layout.FlowRow {
                                 if (filter.isSupported) {
                                     TextButton(
                                         onClick = { renaming = filter; renameText = filter.name },

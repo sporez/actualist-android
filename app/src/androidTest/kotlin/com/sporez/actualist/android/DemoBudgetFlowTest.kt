@@ -35,7 +35,7 @@ class DemoBudgetFlowTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose).around(FailureScreenshot())
 
     private fun openDemo() {
         compose.waitForTag("onboarding")
@@ -323,7 +323,7 @@ class DemoBudgetFlowTest {
         compose.waitForTag("template-amount")
         compose.onNodeWithTag("template-amount").performTextInput("80.00")
         // A second entry: a balance goal next to the monthly amount (it assigns nothing itself).
-        compose.onNodeWithTag("template-add-entry").performClick()
+        compose.onNodeWithTag("template-add-entry").performScrollTo().performClick()
         compose.waitForTag("template-amount-1")
         compose.onNodeWithTag("template-amount-1").performTextInput("500.00")
         compose.screenshot("19-template-editor")
@@ -379,6 +379,7 @@ class DemoBudgetFlowTest {
         compose.waitOrCapture("two-selected") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
         compose.screenshot("29-selection")
         // Clear first, then unclear: whatever the rows' state, the second action changes both.
+        compose.onNodeWithTag("selection-bar").performScrollToNode(hasTestTag("batch-clear"))
         compose.onNodeWithTag("batch-clear").performClick()
         compose.waitForTag("batch-review-confirm")
         compose.onNodeWithTag("batch-review-confirm").performClick()
@@ -387,6 +388,7 @@ class DemoBudgetFlowTest {
         compose.waitForTag("selection-bar")
         compose.onAllNodes(rowMatcher)[1].performClick()
         compose.waitOrCapture("two-selected-again") { compose.onAllNodes(hasText("2 selected")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("selection-bar").performScrollToNode(hasTestTag("batch-unclear"))
         compose.onNodeWithTag("batch-unclear").performClick()
         compose.waitForTag("batch-review-confirm")
         compose.onNodeWithTag("batch-review-confirm").performClick()

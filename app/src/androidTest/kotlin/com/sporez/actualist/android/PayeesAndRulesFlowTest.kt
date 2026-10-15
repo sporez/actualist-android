@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -29,7 +30,7 @@ class PayeesAndRulesFlowTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(fresh).around(compose).around(FailureScreenshot())
 
     private fun openDemo() {
         compose.waitForTag("onboarding")
@@ -44,8 +45,10 @@ class PayeesAndRulesFlowTest {
         compose.waitForTag(readyTag)
     }
 
+    /** The node's text, or "" while it is not shown (the preview is briefly idle as conditions change). */
     private fun textOf(tag: String): String =
-        compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.Text].joinToString { it.text }
+        compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()
+            ?.config?.getOrNull(SemanticsProperties.Text)?.joinToString { it.text } ?: ""
 
     @Test
     fun payeesPageSearchesAddsAndDeletesAnUnusedPayee() {
@@ -127,7 +130,7 @@ class PayeesAndRulesFlowTest {
         compose.onNodeWithTag("pick-cafe").performClick()
         compose.waitForTag("rule-matches-count")
         compose.onNodeWithTag("rule-matches-count").performScrollTo()
-        compose.waitOrCapture("matches-counted") { textOf("rule-matches-count").first().isDigit() }
+        compose.waitOrCapture("matches-counted") { textOf("rule-matches-count").firstOrNull()?.isDigit() == true }
         assertTrue(textOf("rule-matches-count").endsWith("transactions"))
         compose.screenshot("32-rule-matches")
 

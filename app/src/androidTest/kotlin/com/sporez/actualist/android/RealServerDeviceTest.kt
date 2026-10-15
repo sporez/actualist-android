@@ -38,7 +38,7 @@ class RealServerDeviceTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(FreshAppState()).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(testTimeout()).around(FreshAppState()).around(compose).around(FailureScreenshot())
 
     private val arguments = InstrumentationRegistry.getArguments()
     private val url: String? = arguments.getString("actualServerUrl")
