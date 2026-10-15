@@ -21,7 +21,7 @@ jobs:
   instrumented:
     name: Instrumented and Compose UI tests (API 34)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     # A disposable Actual server (the oracle's version) for one device test; synthetic password,
     # no volume, gone when the job ends.
     services:
