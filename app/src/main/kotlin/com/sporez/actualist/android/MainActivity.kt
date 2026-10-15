@@ -113,7 +113,9 @@ fun ActualistApp(app: AppViewModel = viewModel()) {
                             }
                         }
                     }
-                    is AppState.Open -> MainScaffold(current.session, container, app)
+                    is AppState.Open -> com.sporez.actualist.android.ui.components.ProvideBudgetMoneyFormat(current.session) {
+                        MainScaffold(current.session, container, app)
+                    }
                 }
             }
         }

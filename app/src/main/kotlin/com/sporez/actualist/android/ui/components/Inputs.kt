@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.money.MoneyExpression
 
 /** A money input. With [expressions] the text may be a sum such as `120+35.5` (evaluate it with [MoneyExpression.evaluate]). */
@@ -37,20 +36,22 @@ fun AmountField(
     expressions: Boolean = false,
 ) {
     // Amounts may be sums like "120+35.5" (as Actualist's keypad); typing "=" replaces the sum with its result.
-    val value = if (expressions) MoneyExpression.evaluate(text) else Money.parse(text)
+    // The budget's format is the active one app-wide ([ProvideBudgetMoneyFormat]); reading it here recomposes on change.
+    val format = LocalMoneyFormat.current
+    val value = if (expressions) MoneyExpression.evaluate(text) else format.parse(text)
     val valid = text.isBlank() || value != null
     OutlinedTextField(
         value = text,
         onValueChange = { typed ->
             val result = if (expressions && typed.endsWith("=")) MoneyExpression.evaluate(typed) else null
-            onTextChange(if (result != null) Money.format(result, symbol = "", grouping = false) else typed)
+            onTextChange(if (result != null) format.editText(result) else typed)
         },
         label = { Text(label) },
         singleLine = true,
         isError = !valid,
         supportingText = {
-            if (!valid) Text("Enter an amount like 12.34")
-            else if (expressions && value != null && MoneyExpression.isExpression(text)) Text("= ${Money.format(value, symbol = "", grouping = false)}", modifier = Modifier.testTag("$tag-result"))
+            if (!valid) Text("Enter an amount like ${format.editText(1_234)}")
+            else if (expressions && value != null && MoneyExpression.isExpression(text)) Text("= ${format.editText(value)}", modifier = Modifier.testTag("$tag-result"))
         },
         keyboardOptions = KeyboardOptions(keyboardType = if (expressions) KeyboardType.Text else KeyboardType.Decimal),
         modifier = modifier.fillMaxWidth().testTag(tag),

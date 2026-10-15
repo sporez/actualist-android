@@ -27,6 +27,9 @@ import com.sporez.actualist.android.data.ThemeMode
 import com.sporez.actualist.android.ui.theme.namedPalette
 import com.sporez.actualist.android.widget.config.WidgetConfigStore
 import com.sporez.actualist.core.budget.Months
+import com.sporez.actualist.core.money.BudgetPreferences
+import com.sporez.actualist.core.money.MoneyFormat
+import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.transactions.TransactionQuery
 import com.sporez.actualist.core.widgets.AttentionSummary
 import com.sporez.actualist.core.widgets.WidgetChoices
@@ -113,6 +116,14 @@ data class WidgetPanels(
     val named: NamedTheme? = null,
 )
 
+/**
+ * Makes a widget's amounts follow [session]'s budget currency and number format: [MoneyFormat.current] is what
+ * `Money.format` defaults to, so call this once after acquiring a session, before shaping any text.
+ */
+fun applyBudgetMoneyFormat(session: BudgetSession) {
+    MoneyFormat.current = runCatching { BudgetPreferences(session.database).format() }.getOrDefault(MoneyFormat.current)
+}
+
 object WidgetPanelData {
     private val dateFormat = DateTimeFormatter.ofPattern("MMM d")
 
@@ -121,6 +132,7 @@ object WidgetPanelData {
         val id = settings.selectedBudgetId ?: return@withContext null
         val session = container.sessions.acquire(id) { container.library.open(id) ?: error("The selected budget is no longer on this device.") }
         try {
+            applyBudgetMoneyFormat(session)
             val month = Months.id(today.year, today.monthValue)
             session.read {
                 val allAccounts = ledger.accounts()

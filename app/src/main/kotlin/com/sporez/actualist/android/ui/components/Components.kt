@@ -18,7 +18,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -28,7 +34,9 @@ import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.ui.theme.LocalMoneyColors
 import com.sporez.actualist.android.ui.theme.MoneyTextStyle
 import com.sporez.actualist.android.ui.theme.spacing
-import com.sporez.actualist.core.money.Money
+import com.sporez.actualist.core.money.BudgetPreferences
+import com.sporez.actualist.core.money.MoneyFormat
+import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.privacy.SampleValues
 
 /** When true, amounts render as bullets (Actualist's privacy mode). */
@@ -60,11 +68,37 @@ fun sampleMinorUnits(minorUnits: Long): Long {
     return if (minorUnits < 0) -magnitude else magnitude
 }
 
+/** The open budget's currency and number format ([ProvideBudgetMoneyFormat]); [money] and the amount fields follow it. */
+val LocalMoneyFormat = compositionLocalOf { MoneyFormat.current }
+
+/**
+ * Shows [content] with the budget's synced currency preferences applied: [LocalMoneyFormat] is provided and
+ * [MoneyFormat.current] (what [com.sporez.actualist.core.money.Money] defaults to) follows it, so screens that call
+ * `Money.format`/`Money.parse` directly pick it up too. Reloaded after every change to the budget.
+ */
 @Composable
-fun money(minorUnits: Long): String = when {
-    LocalHideAmounts.current -> "•••••"
-    LocalSampleValues.current && !LocalValuesProjected.current -> Money.format(sampleMinorUnits(minorUnits))
-    else -> Money.format(minorUnits)
+fun ProvideBudgetMoneyFormat(session: BudgetSession, content: @Composable () -> Unit) {
+    var format by remember(session) {
+        mutableStateOf(runCatching { BudgetPreferences(session.database).format() }.getOrDefault(MoneyFormat.DEFAULT))
+    }
+    MoneyFormat.current = format
+    LaunchedEffect(session) {
+        session.revision.collect {
+            val loaded = runCatching { session.read { BudgetPreferences(database).format() } }.getOrNull()
+            if (loaded != null) format = loaded
+        }
+    }
+    CompositionLocalProvider(LocalMoneyFormat provides format) { content() }
+}
+
+@Composable
+fun money(minorUnits: Long): String {
+    val format = LocalMoneyFormat.current
+    return when {
+        LocalHideAmounts.current -> "•••••"
+        LocalSampleValues.current && !LocalValuesProjected.current -> format.format(sampleMinorUnits(minorUnits))
+        else -> format.format(minorUnits)
+    }
 }
 
 /** A plain amount, colored by sign when [colored]. */
