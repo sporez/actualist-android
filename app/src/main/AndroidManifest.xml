@@ -32,6 +32,19 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="${applicationId}" android:host="localhost" android:pathPrefix="/openid/" />
             </intent-filter>
+            <!-- actualist://open/<route> deep links (budget, spending, reports, account/<id>, ...). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="actualist" android:host="open" />
+            </intent-filter>
+            <!-- Share target: bank SMS or notification text becomes a prefilled new transaction. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
         <!-- Budget overview home-screen widget (Jetpack Glance). -->
         <receiver
@@ -77,6 +90,50 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/needs_attention_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.CategoryBalanceWidgetReceiver"
+            android:exported="true"
+            android:label="@string/category_balance_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/category_balance_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.MonthOverviewWidgetReceiver"
+            android:exported="true"
+            android:label="@string/month_overview_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/month_overview_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.NetWorthWidgetReceiver"
+            android:exported="true"
+            android:label="@string/net_worth_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/net_worth_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.QuickActionsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/quick_actions_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/quick_actions_widget_info" />
         </receiver>
     </application>
 

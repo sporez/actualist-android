@@ -41,6 +41,8 @@ class MainActivity : ComponentActivity() {
         setContent { ActualistApp() }
         handleOpenIdReturn(intent)
         handleShortcut(intent)
+        DeepLinks.handle(intent)
+        if (savedInstanceState == null) TextImportPrefill.handleShare(this, intent)
         AppShortcuts.publish(this)
         val settings = (application as ActualistApplication).container.settings
         lifecycleScope.launch {
@@ -52,6 +54,8 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         handleOpenIdReturn(intent)
         handleShortcut(intent)
+        DeepLinks.handle(intent)
+        TextImportPrefill.handleShare(this, intent)
     }
 
     /** "When backgrounded" blanks only the recents thumbnail (API 33+; older devices fall back to the secure flag). */

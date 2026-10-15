@@ -113,5 +113,9 @@ object Widgets {
         runCatching { AccountBalancesWidget().updateAll(context) }
         runCatching { RecentTransactionsWidget().updateAll(context) }
         runCatching { NeedsAttentionWidget().updateAll(context) }
+        runCatching { CategoryBalanceWidget().updateAll(context) }
+        runCatching { MonthOverviewWidget().updateAll(context) }
+        runCatching { NetWorthWidget().updateAll(context) }
+        runCatching { QuickActionsWidget().updateAll(context) }
     }
 }

@@ -87,7 +87,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
     // A launcher shortcut's screen, once the budget is open.
     val shortcutRoute by com.sporez.actualist.android.AppShortcuts.pending.collectAsState()
     androidx.compose.runtime.LaunchedEffect(shortcutRoute) {
-        val route = shortcutRoute?.takeIf { it in com.sporez.actualist.android.AppShortcuts.routes } ?: return@LaunchedEffect
+        val route = shortcutRoute?.takeIf { com.sporez.actualist.android.DeepLinks.accepts(it) } ?: return@LaunchedEffect
         com.sporez.actualist.android.AppShortcuts.pending.value = null
         navController.navigate(route) {
             if (route != "transaction-new") {
@@ -100,6 +100,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route ?: "budget"
     val isTab = tabs.any { it.route == route }
+    val wideShell = isWideShell()
     val syncStatus by session.syncStatus.collectAsState()
     val scope = rememberCoroutineScope()
     val key = "session-${System.identityHashCode(session)}"
@@ -198,7 +199,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
         },
         bottomBar = {
-            if (isTab) {
+            if (isTab && !wideShell) {
                 NavigationBar(Modifier.testTag("bottom-bar")) {
                     for (tab in tabs) {
                         NavigationBarItem(
@@ -219,7 +220,22 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
         },
     ) { padding ->
-        NavHost(navController, startDestination = "budget", modifier = Modifier.padding(padding)) {
+        Row(Modifier.padding(padding)) {
+        if (isTab && wideShell) {
+            AdaptiveNavigationRail(
+                destinations = tabs.map { ShellDestination(it.route, it.label, it.icon) },
+                currentRoute = route,
+                onSelect = { target ->
+                    navController.navigate(target) {
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onOpenSettings = { navController.navigate("settings") },
+            )
+        }
+        NavHost(navController, startDestination = "budget", modifier = Modifier.weight(1f)) {
             composable("budget") {
                 val vm = viewModel(key = "budget-$key") { BudgetViewModel(session, Months.current()) }
                 BudgetScreen(vm) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
@@ -320,6 +336,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 val vm = viewModel(key = "edit-$id-$key") { TransactionEditorViewModel(session, id, null) }
                 TransactionEditorScreen(vm) { navController.popBackStack() }
             }
+        }
         }
     }
 }

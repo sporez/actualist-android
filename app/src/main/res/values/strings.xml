@@ -8,4 +8,12 @@
     <string name="recent_transactions_widget_description">The latest transactions</string>
     <string name="account_balances_widget_name">Account balances</string>
     <string name="account_balances_widget_description">Balances of your on-budget accounts</string>
+    <string name="category_balance_widget_name">Category balance</string>
+    <string name="category_balance_widget_description">A category\'s available balance</string>
+    <string name="month_overview_widget_name">Month overview</string>
+    <string name="month_overview_widget_description">This month\'s income, budgeted and spent</string>
+    <string name="net_worth_widget_name">Net worth</string>
+    <string name="net_worth_widget_description">Net worth across your accounts</string>
+    <string name="quick_actions_widget_name">Quick actions</string>
+    <string name="quick_actions_widget_description">Shortcuts into Actualist</string>
 </resources>
