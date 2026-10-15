@@ -53,6 +53,7 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Budget ZIP export; import a ZIP as a new server budget (Actual's resetSync) | Done | JVM + real actual-server |
 | Custom request headers for servers behind an access proxy | Done | unit tests |
 | Home-screen widgets (Glance): budget overview, account balances, recent transactions, needs attention; follow the app theme | Done | device test (overview) |
+| Automation: `actualist://open/<route>` links with new-transaction prefill, launcher shortcuts, an Add expense Quick Settings tile, LOG_TRANSACTION / GET_BALANCES intents for Tasker or Routines (behind a permission and a setting), share text to create a transaction | Done | device tests |
 | Settings: named themes, display size, green income, hide amounts, sample values, app-switcher privacy, budget display options, reimport, default account, custom headers, diagnostics; launcher shortcuts | Done | device tests |
 | Category and account notes | Done (template directives preserved) | unit tests |
 | GoCardless (Actualist has none either), Actual dashboard widgets | Not ported | — |

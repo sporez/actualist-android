@@ -25,7 +25,7 @@ class SampleValuesFlowTest {
 
     private fun toBudgetText(): String? =
         runCatching {
-            compose.onNodeWithTag("to-budget-amount").fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }
+            compose.onNodeWithTag("to-budget-amount", useUnmergedTree = true).fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }
         }.getOrNull()
 
     @Test

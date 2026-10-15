@@ -1,5 +1,7 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -83,12 +85,13 @@ class CategoryMonthAndAccountsFlowTest {
         compose.screenshot("move-several-destinations")
         click("move-confirm")
         compose.waitForGone("move-money-sheet")
-        // One write, so one message about the whole move.
+        // One write, so one message about the whole move. It is the list's first item, inside a
+        // clickable surface (so only in the unmerged tree).
+        compose.onNodeWithTag("budget-list").performScrollToIndex(0)
         compose.waitOrCapture("moved-message") {
-            runCatching { compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("budget-message")) }.isSuccess
+            compose.onAllNodesWithTag("budget-message", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.waitForTag("budget-message")
-        compose.onNodeWithTag("budget-message").assertTextContains("Moved in 2 parts")
+        compose.onNodeWithTag("budget-message", useUnmergedTree = true).assertTextContains("Moved in 2 parts", substring = true)
     }
 
     @Test

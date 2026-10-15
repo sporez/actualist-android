@@ -59,10 +59,12 @@ class FeedAndEditorFlowTest {
         compose.waitOrCapture("dialog-gone") { !hasTag("delete-transaction-dialog") }
         assertEquals(before, compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size)
 
+        // The lazy list refills its viewport after a delete, so follow the swiped row itself.
+        val swipedTag = compose.onAllNodes(rowMatcher).fetchSemanticsNodes()[0].config[SemanticsProperties.TestTag]
         compose.onAllNodes(rowMatcher)[0].performTouchInput { swipeLeft() }
         compose.waitOrCapture("delete-dialog-again") { hasTag("delete-transaction-dialog") }
         compose.onNodeWithTag("delete-transaction-confirm").performClick()
-        compose.waitOrCapture("row-deleted") { compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size < before }
+        compose.waitOrCapture("row-deleted") { !hasTag(swipedTag) }
     }
 
     @Test

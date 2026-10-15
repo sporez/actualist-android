@@ -108,8 +108,11 @@ class PayeesAndRulesFlowTest {
         compose.waitForGone("rule-demo-rule-cafe")
         compose.waitForTag("rule-demo-rule-fuel")
         compose.onNodeWithTag("rule-duplicate-demo-rule-fuel").performScrollTo().performClick()
-        compose.onNodeWithTag("rules-screen").performScrollToNode(hasTestTag("rules-message"))
-        compose.waitOrCapture("rule-duplicated") { compose.onAllNodes(hasText("Rule duplicated")).fetchSemanticsNodes().isNotEmpty() }
+        // The message appears once the write lands.
+        compose.waitOrCapture("rule-duplicated") {
+            runCatching { compose.onNodeWithTag("rules-screen").performScrollToNode(hasTestTag("rules-message")) }.isSuccess &&
+                compose.onAllNodes(hasText("Rule duplicated")).fetchSemanticsNodes().isNotEmpty()
+        }
         compose.waitOrCapture("two-fuel-rules") {
             compose.onAllNodesWithTag("rules-screen").fetchSemanticsNodes().isNotEmpty() &&
                 compose.onAllNodes(hasText("payee is QuickFuel", substring = true)).fetchSemanticsNodes().size >= 2

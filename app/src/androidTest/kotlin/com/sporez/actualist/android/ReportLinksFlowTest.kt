@@ -66,7 +66,11 @@ class ReportLinksFlowTest {
             runCatching { compose.onNodeWithTag("explorer-screen").performScrollToNode(hasTestTag("explorer-load-more")) }.isSuccess
         ) {
             compose.onNodeWithTag("explorer-load-more").performSemanticsAction(SemanticsActions.OnClick)
-            compose.waitOrCapture("more-rows") { shownCount() > before }
+            // Loading more scrolls the count line away; bring it back before reading it.
+            compose.waitOrCapture("more-rows") {
+                runCatching { compose.onNodeWithTag("explorer-screen").performScrollToNode(hasTestTag("explorer-rows-count")) }
+                shownCount() > before
+            }
             assertTrue(shownCount() > before)
         }
 

@@ -210,7 +210,9 @@ class DemoBudgetFlowTest {
         compose.onNodeWithTag("schedule-edit-name").performTextClearance()
         compose.onNodeWithTag("schedule-edit-name").performTextInput("Synthetic Streaming")
         // Several days and a weekday of the month in one rule.
-        compose.onNodeWithTag("schedule-edit-pattern-days").performScrollTo().performClick()
+        // The chip sits in a horizontal row inside the dialog's scrolling column: invoke it directly.
+        runCatching { compose.onNodeWithTag("schedule-edit-pattern-days").performScrollTo() }
+        compose.onNodeWithTag("schedule-edit-pattern-days").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
         compose.onNodeWithTag("schedule-edit-days").performScrollTo().performTextInput("15, 3rd fri, 1")
         compose.onNodeWithTag("schedule-edit-save").performClick()
         compose.waitUntil(30_000) { compose.onAllNodes(hasText("Synthetic Streaming")).fetchSemanticsNodes().isNotEmpty() }

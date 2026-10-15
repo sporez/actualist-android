@@ -60,5 +60,7 @@ class ReportCardsFlowTest {
             androidx.compose.ui.test.SemanticsMatcher("tag starts with $prefix") { node ->
                 node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)?.startsWith(prefix) == true
             },
+            // Cards are tappable now, so tags inside a card exist only in the unmerged tree.
+            useUnmergedTree = true,
         ).fetchSemanticsNodes().size
 }

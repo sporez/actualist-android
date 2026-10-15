@@ -36,6 +36,7 @@ Details: `KNOWN_DIVERGENCES.md`.
   - Schedules: search, status sections, show completed, details, post with scheduled date or today, date picker.
   - Settings: named themes, display size, green income, sample values, app-switcher privacy, budget display options, rollover all overspending, reimport, default account, custom headers after sign-in, diagnostics, change budget; History with named rows and an undo review; Bank Sync screen with Sync All.
   - App: only the sign-in methods the server offers (header auth explained), re-authentication banner, new-transaction alerts with "new" markers, launcher shortcuts, `actualist://open/<route>` deep links, share text to create a transaction, a navigation rail on wide windows, and seven home-screen widgets.
+  - Second audit (re-read Actualist's views in full), two more waves: Sample Values as Actualist's data projection (totals add up, notes hidden, edits refused); display size scales spacing; demo-mode confirmation; the category month screen; move money to several categories at once; Include Rollover in Alerts; remembered group expansion; collapsible account sections and group menus; swipe to delete, discard-changes prompt, rule-delete review, feed states, pull to refresh, grouped category picker; schedule advancement and auto-post after every sync (it was never wired), Not Posted Automatically, background bank sync, schedule reviews and detail page, upcoming window; widget configuration, themes, sizes and row links; report cards open their Explorer preset with paged, tappable transactions and Actualist's range limits; fallback server, delete budgets, Disconnect & Erase, security and connection rows, Sign in again; deep-link prefill, an Add expense tile, Tasker/Routines intents behind an Allow automation setting, and background work only when alerts or bank sync need it; budget-open watchdog; reconcile and add-account messages.
   - Bugs the emulator found in this sweep: a filter option row whose name did not toggle it, Delete pushed out of view in the saved-filters list, and history naming every budget assignment "Deleted category" (budget row ids were sliced wrongly).
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
 - Rule editor: pre/default/post stages, "add before/after notes" actions, "is not" on text, "is between" on amounts, plain date conditions (a day, month or year), on/off-budget accounts, tags, and inflow/outflow amounts (stored as Actual stores them; JVM round trips; device test for stages, notes actions and "is between").
@@ -71,7 +72,6 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Next recommended work
 
-1. Sample values cover only amounts shown through `money()`; Actualist also randomises names and hides notes.
-2. Display size scales text only, not row density.
-3. Split actions in the rule editor (`set-split-amount`), beyond Actualist (it cannot author them either).
+1. Reports and widgets are not projected under Sample Values (Actualist projects reports; its widgets have none).
+2. Split actions in the rule editor (`set-split-amount`), beyond Actualist (it cannot author them either).
 

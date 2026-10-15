@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasTestTag
@@ -102,9 +103,13 @@ class BudgetExtrasFlowTest {
         compose.onNodeWithTag("assign-field-result", useUnmergedTree = true).assertTextContains("155.50", substring = true)
         click("assign-save")
         compose.waitForGone("category-sheet")
+        // The write and the reload are asynchronous: reopen once the row shows the new amount.
+        compose.waitOrCapture("vacation-155") {
+            compose.onAllNodes(hasTestTag("category-vacation") and hasText("155.50", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("category-vacation").performClick()
         compose.waitForTag("category-sheet")
-        compose.onNodeWithTag("assign-field").assertTextContains("155.50")
+        compose.onNodeWithTag("assign-field").assertTextContains("155.50", substring = true)
     }
 
     @Test

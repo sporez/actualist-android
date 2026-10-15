@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -77,8 +78,10 @@ class ScheduleAutomationFlowTest {
         compose.onNodeWithTag(edit).performClick()
         compose.waitForTag("schedule-edit-dialog")
         compose.waitForTag("schedule-edit-upcoming-14")
-        compose.onNodeWithTag("schedule-edit-upcoming-14").performScrollTo().performClick()
-        compose.onNodeWithTag("schedule-edit-save").performScrollTo().performClick()
+        // A chip in a horizontal row inside the dialog's scrolling column; Save is in the button row.
+        runCatching { compose.onNodeWithTag("schedule-edit-upcoming-14").performScrollTo() }
+        compose.onNodeWithTag("schedule-edit-upcoming-14").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        compose.onNodeWithTag("schedule-edit-save").performClick()
         compose.waitForGone("schedule-edit-dialog")
         compose.waitOrCapture("edit-saved") { hasVisibleText("Updated") }
 
