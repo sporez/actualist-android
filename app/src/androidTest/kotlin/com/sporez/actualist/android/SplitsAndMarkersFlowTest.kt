@@ -73,6 +73,9 @@ class SplitsAndMarkersFlowTest {
         compose.waitForTag("pick-groceries")
         compose.onNodeWithTag("pick-groceries").performClick()
         compose.onNodeWithTag("split-category-1").performScrollTo().performClick()
+        // The grouped picker is long; search so the row is composed.
+        compose.waitForTag("picker-search")
+        compose.onNodeWithTag("picker-search").performTextInput("Dining")
         compose.waitForTag("pick-dining")
         compose.onNodeWithTag("pick-dining").performClick()
 
