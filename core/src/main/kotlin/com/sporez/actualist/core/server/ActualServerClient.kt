@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 /** Failures talking to an Actual server, with user-facing messages that never contain secrets. */
 sealed class ServerException(message: String) : Exception(message) {
     class InvalidUrl : ServerException("The server URL is invalid.")
-    class InsecureUrl : ServerException("Use an https:// server URL. Plain http is only allowed for this device itself.")
+    class InsecureUrl : ServerException(ServerConnectionSecurity.REMOTE_HTTP_BLOCKED)
     class AuthenticationFailed : ServerException("Your Actual session is no longer valid. Sign in again to resume syncing.")
     class WrongPassword : ServerException("The server password is incorrect.")
     class RedirectRefused : ServerException("The server redirected the request. Enter the final server URL directly.")
@@ -71,7 +71,7 @@ fun interface SyncTransport {
  * Client for a normal Actual sync server (not the REST wrapper). Endpoints and headers
  * follow Actualist's `ActualServerSyncClient`: `X-ACTUAL-TOKEN`, `X-ACTUAL-FILE-ID`,
  * protobuf bodies as `application/actual-sync`. Redirects are refused, and plain http is
- * accepted only for loopback addresses.
+ * accepted only for local-network hosts ([ServerConnectionSecurity]).
  */
 class ActualServerClient(
     serverUrl: String,
@@ -323,12 +323,12 @@ class ActualServerClient(
             return out.toString()
         }
 
-        /** https anywhere; http only for loopback (this device, emulator host tests). */
+        /** https anywhere; http only for local-network hosts (Actualist's rule). */
         fun validatedUrl(serverUrl: String): HttpUrl {
             val trimmed = serverUrl.trim().trimEnd('/')
             val url = trimmed.toHttpUrlOrNull() ?: throw ServerException.InvalidUrl()
             if (url.username.isNotEmpty() || url.password.isNotEmpty()) throw ServerException.InvalidUrl()
-            if (!url.isHttps && url.host !in setOf("localhost", "127.0.0.1", "::1", "[::1]")) throw ServerException.InsecureUrl()
+            if (!url.isHttps && !ServerConnectionSecurity.isLocalNetworkHost(url.host)) throw ServerException.InsecureUrl()
             return url
         }
     }

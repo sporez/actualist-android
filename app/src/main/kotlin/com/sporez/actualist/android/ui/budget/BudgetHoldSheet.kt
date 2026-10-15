@@ -40,6 +40,7 @@ import com.sporez.actualist.core.money.MoneyExpression
 internal fun HoldDialog(screen: BudgetScreenState, initialText: String, viewModel: BudgetViewModel, onDone: () -> Unit, onDismiss: () -> Unit) {
     var review by remember { mutableStateOf<HoldReview?>(null) }
     var text by rememberSaveable { mutableStateOf(initialText) }
+    var confirmingRelease by remember { mutableStateOf(false) }
     LaunchedEffect(screen.month.month, screen.month.toBudget, screen.month.forNextMonth) { review = viewModel.holdReview() }
     val nextMonth = monthTitle(Months.shifted(screen.month.month, 1))
     val current = review
@@ -82,7 +83,7 @@ internal fun HoldDialog(screen: BudgetScreenState, initialText: String, viewMode
                     HoldRow("Held for $nextMonth", if (canHold) money(current.manualHeldAmount + holding) else "—", "hold-result-held")
                     if (current.heldAmount != 0L) {
                         TextButton(
-                            onClick = { viewModel.releaseHold(); onDone() },
+                            onClick = { confirmingRelease = true },
                             modifier = Modifier.testTag("release-hold"),
                         ) { Text(if (current.isAutomaticHold) "Disable current auto hold" else "Release ${money(current.heldAmount)} hold") }
                     }
@@ -98,6 +99,32 @@ internal fun HoldDialog(screen: BudgetScreenState, initialText: String, viewMode
         },
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("hold-close")) { Text("Close") } },
     )
+    val releasing = review
+    if (confirmingRelease && releasing != null) {
+        AlertDialog(
+            onDismissRequest = { confirmingRelease = false },
+            modifier = Modifier.testTag("release-hold-alert"),
+            title = { Text(releaseHoldTitle(releasing) + "?") },
+            text = {
+                Text(
+                    releaseHoldMessage(
+                        releasing,
+                        held = money(releasing.heldAmount),
+                        manual = money(releasing.manualHeldAmount),
+                        automatic = money(releasing.automaticHeldAmount),
+                        month = monthTitle(screen.month.month),
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirmingRelease = false; viewModel.releaseHold(); onDone() },
+                    modifier = Modifier.testTag("release-hold-confirm"),
+                ) { Text(if (releasing.automaticHeldAmount == 0L) "Release All" else releaseHoldTitle(releasing)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmingRelease = false }, modifier = Modifier.testTag("release-hold-cancel")) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable
@@ -106,4 +133,18 @@ private fun HoldRow(label: String, value: String, tag: String) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MoneyTextStyle.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.testTag(tag))
     }
+}
+
+/** Actualist's "Release …?" alert wording for a hold: manual-only, automatic-only, or both. */
+internal fun releaseHoldTitle(review: HoldReview): String = when {
+    review.manualHeldAmount != 0L && review.automaticHeldAmount != 0L -> "Reset Manual Hold"
+    review.isAutomaticHold -> "Disable Current Auto Hold"
+    else -> "Release Held Money"
+}
+
+internal fun releaseHoldMessage(review: HoldReview, held: String, manual: String, automatic: String, month: String): String = when {
+    review.manualHeldAmount != 0L && review.automaticHeldAmount != 0L ->
+        "Reset the manual hold of $manual? The automatic hold of $automatic will take its place. You can then disable that current auto hold separately."
+    review.isAutomaticHold -> "Release $held back to $month? Automatic holds for future months stay enabled."
+    else -> "Release the full $held held for next month back to $month?"
 }

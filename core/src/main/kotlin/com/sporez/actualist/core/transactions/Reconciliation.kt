@@ -32,6 +32,15 @@ class Reconciliation(
 ) {
     private val sql get() = database.sql
 
+    /**
+     * The balance the bank last reported for a SimpleFIN-linked account (`accounts.balance_current`,
+     * written by sync), or null when the account has none. Actualist's `lastSyncedBalance`.
+     */
+    fun bankBalance(accountId: String): Long? {
+        if ("balance_current" !in database.columnSet("accounts")) return null
+        return sql.queryLong("SELECT balance_current FROM accounts WHERE id = ?", accountId)
+    }
+
     fun snapshot(accountId: String): ReconciliationSnapshot {
         requireAccount(accountId)
         val cleared = sql.queryLong(

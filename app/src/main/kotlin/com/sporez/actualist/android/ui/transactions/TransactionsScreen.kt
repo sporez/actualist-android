@@ -500,8 +500,9 @@ class TransactionsViewModel(
         val id = _query.value.accountId ?: return null
         return session.read {
             val account = ledger.accounts(includeClosed = true).firstOrNull { it.id == id } ?: return@read null
-            val snapshot = com.sporez.actualist.core.transactions.Reconciliation(database, clock).snapshot(id)
-            ReconcileInfo(account.name, account.balance, snapshot.clearedBalance, snapshot.unclearedCount, snapshot.lastReconciled)
+            val reconciliation = com.sporez.actualist.core.transactions.Reconciliation(database, clock)
+            val snapshot = reconciliation.snapshot(id)
+            ReconcileInfo(account.name, account.balance, snapshot.clearedBalance, snapshot.unclearedCount, snapshot.lastReconciled, reconciliation.bankBalance(id))
         }
     }
 
@@ -976,59 +977,6 @@ private fun TransactionList(
             }
         }
         if (hasMore) item(key = "load-older") { LoadOlderRow(onLoadOlder) } else item(key = "feed-end") { FeedEndMarker() }
-    }
-}
-
-@Composable
-private fun TransactionItem(
-    row: TransactionRow,
-    showAccount: Boolean,
-    isSelected: Boolean,
-    isNew: Boolean,
-    onOpen: (TransactionRow) -> Unit,
-    onLongPress: (TransactionRow) -> Unit,
-    menu: (@Composable () -> Unit)? = null,
-) {
-    val background = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent
-    Column(
-        Modifier.fillMaxWidth()
-            .background(background)
-            .combinedClickable(onClick = { onOpen(row) }, onLongClick = { onLongPress(row) })
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .testTag("transaction-${row.id}"),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (!row.cleared) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.outline, modifier = Modifier.size(7.dp)) {}
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(row.displayPayee.ifBlank { "No payee" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-            if (isNew) {
-                Text("New", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp).testTag("new-marker-${row.id}"))
-            }
-            MoneyText(row.amount, colored = true)
-            menu?.invoke()
-        }
-        val detail = buildList {
-            when {
-                row.isParent -> add("Split · ${row.children.size} categories")
-                row.isTransfer && row.categoryName == null -> add("Transfer")
-                row.categoryName != null -> add(row.categoryName!!)
-                row.startingBalance -> add("Starting balance")
-                else -> add("Uncategorized")
-            }
-            if (showAccount) add(row.accountName)
-            row.notes?.takeIf { it.isNotBlank() }?.let(::add)
-        }.joinToString(" · ")
-        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (row.isParent) {
-            for (child in row.children) {
-                Row(Modifier.padding(start = 12.dp, top = 2.dp)) {
-                    Text("↳ ${child.categoryName ?: "Uncategorized"}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    MoneyText(child.amount, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
     }
 }
 

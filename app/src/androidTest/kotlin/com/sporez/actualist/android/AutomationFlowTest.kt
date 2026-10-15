@@ -69,7 +69,7 @@ class AutomationFlowTest {
 
     @Test
     fun routesCarryMonthsAndTheUncategorizedFeed() {
-        assertEquals("spending", DeepLinks.routeForSegments(listOf("uncategorized")))
+        assertEquals("spending-uncategorized", DeepLinks.routeForSegments(listOf("uncategorized")))
         val route = DeepLinks.routeForSegments(listOf("category", "abc")) { if (it == "month") "2026-03" else null }
         assertEquals("category-month/abc?name=Category&month=2026-03", route)
         assertTrue(DeepLinks.accepts(route!!))

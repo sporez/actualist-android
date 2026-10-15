@@ -98,6 +98,8 @@ fun ReportsScreen(
     onExplore: () -> Unit = {},
     /** A card was tapped: its [ReportCardOrder] id, so the Explorer can open preset for that report. */
     onOpenCard: (String) -> Unit = { onExplore() },
+    /** Pull-to-refresh: runs the budget sync while the indicator shows. Stays before the trailing [onOpenCategory] lambda. */
+    onRefresh: suspend () -> Unit = {},
     onOpenCategory: (String, String) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.dashboard.collectAsState()
@@ -122,6 +124,7 @@ fun ReportsScreen(
             onDismiss = { editingOrder = false },
         )
     }
+    com.sporez.actualist.android.ui.components.ScreenPullToRefresh("reports-refresh", onRefresh) {
     Box(Modifier.fillMaxSize().testTag("reports-screen")) {
         when (val current = state) {
             Loadable.Loading -> LoadingBox()
@@ -164,6 +167,7 @@ fun ReportsScreen(
                 }
             }
         }
+    }
     }
 }
 

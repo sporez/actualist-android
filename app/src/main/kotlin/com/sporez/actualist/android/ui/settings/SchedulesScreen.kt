@@ -39,6 +39,11 @@ import com.sporez.actualist.android.ui.components.MoneyText
 import com.sporez.actualist.android.ui.components.SectionCard
 import com.sporez.actualist.android.ui.components.money
 import com.sporez.actualist.android.ui.reloading
+import com.sporez.actualist.android.ui.transactions.FeedPullToRefresh
+import com.sporez.actualist.core.schedules.ScheduleAmount
+import com.sporez.actualist.core.schedules.ScheduleAmountDraft
+import com.sporez.actualist.core.schedules.ScheduleAmountInput
+import com.sporez.actualist.core.schedules.ScheduleAmountMode
 import com.sporez.actualist.core.schedules.ScheduleListItem
 import com.sporez.actualist.core.schedules.ScheduleListPresentation
 import com.sporez.actualist.core.schedules.ScheduleReviewPresentation
@@ -134,11 +139,15 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
         frequency: com.sporez.actualist.core.rules.ScheduleFrequency?,
         posts: Boolean,
         repeat: RepeatOptions = RepeatOptions(),
+        /** When set, replaces [amount] and [approximate] (an exact, about or range amount). */
+        amountDraft: ScheduleAmountDraft? = null,
+        /** One-time schedules: "is" (on the date) or "isapprox" (about it); null follows [approximate]. */
+        oneTimeOperation: String? = null,
     ) =
         write("Added ${name.ifBlank { "schedule" }}") {
             val operation = if (approximate) "isapprox" else "is"
             val rule = if (frequency == null) {
-                com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), operation)
+                com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), oneTimeOperation ?: operation)
             } else {
                 com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(repeat.recurrence(start, frequency) ?: error("Check the repeat options."), operation)
             }
@@ -149,7 +158,7 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
                     definition = com.sporez.actualist.core.schedules.ScheduleDefinitionDraft(
                         accountId = accountId,
                         payeeMappingId = payeeId,
-                        amount = if (approximate) com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(amount)
+                        amount = amountDraft ?: if (approximate) com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(amount)
                         else com.sporez.actualist.core.schedules.ScheduleAmountDraft.Exact(amount),
                         dateRule = rule,
                     ),
@@ -173,18 +182,24 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
         posts: Boolean,
         dateRule: com.sporez.actualist.core.schedules.ScheduleDateRule? = null,
         upcomingChange: com.sporez.actualist.core.schedules.ScheduleOptionalChange<String> = com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
+        /** When set, replaces [amount] and [approximate] (an exact, about or range amount). */
+        amountDraft: ScheduleAmountDraft? = null,
     ) =
         write("Updated ${name.ifBlank { item.name }}") {
             val trimmed = name.trim()
-            val amountChanged = amount != null && (amount != item.amountMinorUnits || approximate != item.isApproximate)
+            val edit: ScheduleAmountDraft? = amountDraft ?: amount?.let { if (approximate) ScheduleAmountDraft.Approximate(it) else ScheduleAmountDraft.Exact(it) }
+            val current = item.amount
+            val amountChanged = when (edit) {
+                null -> false
+                is ScheduleAmountDraft.Range -> !(current is ScheduleAmount.Range && current.lower == edit.lower && current.upper == edit.upper)
+                is ScheduleAmountDraft.Exact -> current is ScheduleAmount.Range || edit.amount != item.amountMinorUnits || item.isApproximate
+                is ScheduleAmountDraft.Approximate -> current is ScheduleAmount.Range || edit.amount != item.amountMinorUnits || !item.isApproximate
+            }
             val fields = com.sporez.actualist.core.schedules.ScheduleEditFields(
                 name = if (trimmed != item.name) com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(trimmed.ifEmpty { null })
                 else com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
-                amount = if (amountChanged) {
-                    com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(
-                        if (approximate) com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(amount!!)
-                        else com.sporez.actualist.core.schedules.ScheduleAmountDraft.Exact(amount!!),
-                    )
+                amount = if (amountChanged && edit != null) {
+                    com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(edit)
                 } else {
                     com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged
                 },
@@ -211,7 +226,7 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
 }
 
 @Composable
-fun SchedulesScreen(viewModel: SchedulesViewModel) {
+fun SchedulesScreen(viewModel: SchedulesViewModel, onRefresh: suspend () -> Unit = {}) {
     val state by viewModel.schedules.collectAsState()
     val message by viewModel.messages.message.collectAsState()
     var adding by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
@@ -225,6 +240,7 @@ fun SchedulesScreen(viewModel: SchedulesViewModel) {
             val groups = ScheduleListPresentation.groups(all, query, showCompleted)
             val completedCount = ScheduleListPresentation.completedCount(all)
             val refusals = ScheduleAutoPostRefusals.rows(ScheduleAdvancer.refusals(viewModel.budgetId), all)
+            FeedPullToRefresh(onRefresh = onRefresh) {
             LazyColumn(Modifier.fillMaxSize().testTag("schedules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item {
                     androidx.compose.material3.OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().testTag("schedule-add")) { Text("Add schedule") }
@@ -289,6 +305,7 @@ fun SchedulesScreen(viewModel: SchedulesViewModel) {
                     }
                 }
             }
+            }
         }
     }
     if (adding) AddScheduleDialog(viewModel) { adding = false }
@@ -299,7 +316,10 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
     var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var amountText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var outflow by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
-    var approximate by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
+    var amountMode by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(ScheduleAmountMode.ABOUT.name) }
+    var upperText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    // "" follows the amount (about amounts match about the date); otherwise "is" or "isapprox".
+    var dateMatch by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var posts by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var startText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(LocalDate.now().plusDays(1).toString()) }
     var frequency by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("MONTHLY") }
@@ -309,7 +329,9 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
     var choices by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Pair<List<com.sporez.actualist.android.ui.components.PickerOption>, List<com.sporez.actualist.android.ui.components.PickerOption>>?>(null) }
     var picking by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(Unit) { choices = viewModel.choices() }
-    val magnitude = com.sporez.actualist.core.money.Money.parse(amountText)
+    val mode = ScheduleAmountMode.valueOf(amountMode)
+    val amountDraft = ScheduleAmountInput.draft(mode, outflow, amountText, upperText)
+    val oneTimeOperation = dateMatch.ifEmpty { if (mode == ScheduleAmountMode.ABOUT) "isapprox" else "is" }
     val start = runCatching { LocalDate.parse(startText.trim()) }.getOrNull()
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
@@ -323,21 +345,24 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
                 TextButton(onClick = { picking = "payee" }, modifier = Modifier.testTag("schedule-payee")) {
                     Text(choices?.second?.firstOrNull { it.id == payeeId }?.title ?: "Choose a payee (optional)")
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.FilterChip(selected = outflow, onClick = { outflow = true }, label = { Text("Outflow") })
-                    androidx.compose.material3.FilterChip(selected = !outflow, onClick = { outflow = false }, label = { Text("Inflow") }, modifier = Modifier.padding(start = 6.dp))
-                }
-                com.sporez.actualist.android.ui.components.AmountField(amountText, { amountText = it }, label = "Amount", tag = "schedule-amount")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.Checkbox(checked = approximate, onCheckedChange = { approximate = it })
-                    Text("Approximate amount")
-                }
+                ScheduleAmountFields(
+                    mode = mode,
+                    onMode = { amountMode = it.name },
+                    outflow = outflow,
+                    onOutflow = { outflow = it },
+                    firstText = amountText,
+                    onFirst = { amountText = it },
+                    secondText = upperText,
+                    onSecond = { upperText = it },
+                    tag = "schedule",
+                )
                 ScheduleDateField(startText, { startText = it }, "schedule-start")
                 Row {
                     for ((key, label) in listOf("ONCE" to "Once", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly", "YEARLY" to "Yearly")) {
                         androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-frequency-$key"))
                     }
                 }
+                if (frequency == "ONCE") ScheduleDateMatchChips(oneTimeOperation, { dateMatch = it }, "schedule")
                 if (frequency != "ONCE") RepeatFields(repeat, frequency, "schedule") { repeat = it }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
@@ -347,12 +372,20 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
         },
         confirmButton = {
             TextButton(
-                enabled = accountId != null && magnitude != null && magnitude != 0L && start != null &&
+                enabled = accountId != null && amountDraft != null && start != null &&
                     (frequency == "ONCE" || repeat.recurrence(start, com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)) != null),
                 onClick = {
-                    val signed = kotlin.math.abs(magnitude!!).let { if (outflow) -it else it }
+                    val first = when (val draft = amountDraft!!) {
+                        is ScheduleAmountDraft.Exact -> draft.amount
+                        is ScheduleAmountDraft.Approximate -> draft.amount
+                        is ScheduleAmountDraft.Range -> draft.lower
+                    }
                     val freq = if (frequency == "ONCE") null else com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)
-                    viewModel.create(name, accountId!!, payeeId, signed, approximate, start!!, freq, posts, repeat)
+                    viewModel.create(
+                        name, accountId!!, payeeId, first, mode == ScheduleAmountMode.ABOUT, start!!, freq, posts, repeat,
+                        amountDraft = amountDraft,
+                        oneTimeOperation = if (freq == null) oneTimeOperation else null,
+                    )
                     onDismiss()
                 },
                 modifier = Modifier.testTag("schedule-save"),
@@ -487,15 +520,20 @@ private fun statusLabel(status: ScheduleStatus) = when (status) {
 
 @Composable
 private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewModel, onDismiss: () -> Unit) {
-    val isRange = item.amountLower != null && item.amountUpper != null && item.amountLower != item.amountUpper
+    // A range that crosses zero has no single sign, so it stays as written; every other amount is editable here.
+    val locked = item.amount is ScheduleAmount.Range && !ScheduleAmountInput.isEditable(item.amount)
+    val initialTexts = ScheduleAmountInput.texts(item.amount)
     var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.name) }
-    var amountText by androidx.compose.runtime.saveable.rememberSaveable {
-        androidx.compose.runtime.mutableStateOf(item.amountMinorUnits?.let { com.sporez.actualist.core.money.Money.format(kotlin.math.abs(it), symbol = "", grouping = false) } ?: "")
+    var amountMode by androidx.compose.runtime.saveable.rememberSaveable {
+        androidx.compose.runtime.mutableStateOf((ScheduleAmountInput.mode(item.amount) ?: ScheduleAmountMode.EXACT).name)
     }
-    var outflow by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf((item.amountMinorUnits ?: -1L) < 0) }
-    var approximate by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.isApproximate) }
+    var amountText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialTexts.first) }
+    var upperText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialTexts.second) }
+    var outflow by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(ScheduleAmountInput.isOutflow(item.amount)) }
+    var dateMatch by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var posts by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(item.postsTransaction) }
-    val magnitude = com.sporez.actualist.core.money.Money.parse(amountText)
+    val mode = ScheduleAmountMode.valueOf(amountMode)
+    val amountDraft = ScheduleAmountInput.draft(mode, outflow, amountText, upperText)
     var rule by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.sporez.actualist.core.schedules.ScheduleDateRule?>(null) }
     var startText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var frequency by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
@@ -508,7 +546,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
         val loaded = viewModel.dateRule(item)
         rule = loaded
         when (val current = loaded) {
-            is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> { startText = current.dayId; frequency = "ONCE" }
+            is com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime -> { startText = current.dayId; frequency = "ONCE"; dateMatch = current.operation }
             is com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring -> {
                 startText = current.recurrenceValue.startDayId
                 frequency = current.recurrenceValue.frequency.name
@@ -535,7 +573,7 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
             else -> return null
         }
         val next = if (frequency == "ONCE") {
-            com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), operation)
+            com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime(start.toString(), dateMatch.ifEmpty { operation })
         } else {
             com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(
                 repeat.recurrence(start, com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)) ?: return null,
@@ -550,18 +588,20 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()).testTag("schedule-edit-dialog")) {
                 androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("schedule-edit-name"))
-                if (isRange) {
-                    Text("This schedule matches an amount range; edit the range in Actual.", style = MaterialTheme.typography.bodySmall)
+                if (locked) {
+                    Text("This schedule matches an amount range that crosses zero; edit the range in Actual.", style = MaterialTheme.typography.bodySmall)
                 } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.FilterChip(selected = outflow, onClick = { outflow = true }, label = { Text("Outflow") })
-                        androidx.compose.material3.FilterChip(selected = !outflow, onClick = { outflow = false }, label = { Text("Inflow") }, modifier = Modifier.padding(start = 6.dp))
-                    }
-                    com.sporez.actualist.android.ui.components.AmountField(amountText, { amountText = it }, label = "Amount", tag = "schedule-edit-amount")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.Checkbox(checked = approximate, onCheckedChange = { approximate = it })
-                        Text("Approximate amount")
-                    }
+                    ScheduleAmountFields(
+                        mode = mode,
+                        onMode = { amountMode = it.name },
+                        outflow = outflow,
+                        onOutflow = { outflow = it },
+                        firstText = amountText,
+                        onFirst = { amountText = it },
+                        secondText = upperText,
+                        onSecond = { upperText = it },
+                        tag = "schedule-edit",
+                    )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
@@ -585,6 +625,11 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                             androidx.compose.material3.FilterChip(selected = frequency == key, onClick = { frequency = key }, label = { Text(label) }, modifier = Modifier.padding(end = 4.dp).testTag("schedule-edit-frequency-$key"))
                         }
                     }
+                    if (frequency == "ONCE") {
+                        val currentOperation = (rule as? com.sporez.actualist.core.schedules.ScheduleDateRule.OneTime)?.operation
+                            ?: (rule as? com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring)?.operation ?: "is"
+                        ScheduleDateMatchChips(dateMatch.ifEmpty { currentOperation }, { dateMatch = it }, "schedule-edit")
+                    }
                     if (frequency != "ONCE") RepeatFields(repeat, frequency, "schedule-edit") { repeat = it }
                 } else {
                     Text("Repeats: ${item.recurrenceDescription} (edit this rule in Actual)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -593,18 +638,18 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
         },
         confirmButton = {
             TextButton(
-                enabled = (isRange || (magnitude != null && magnitude != 0L)) && (!simpleRule || start != null),
+                enabled = (locked || amountDraft != null) && (!simpleRule || start != null),
                 onClick = {
-                    val signed = if (isRange) null else kotlin.math.abs(magnitude!!).let { if (outflow) -it else it }
                     viewModel.update(
                         item,
                         name,
-                        signed,
-                        approximate,
+                        null,
+                        mode == ScheduleAmountMode.ABOUT,
                         posts,
                         editedRule(),
                         if (upcoming != originalUpcoming) com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(upcoming)
                         else com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
+                        amountDraft = if (locked) null else amountDraft,
                     )
                     onDismiss()
                 },

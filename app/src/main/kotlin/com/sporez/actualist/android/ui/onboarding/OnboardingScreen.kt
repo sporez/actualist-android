@@ -42,8 +42,12 @@ import com.sporez.actualist.android.data.LocalBudget
 import com.sporez.actualist.android.sync.ServerConnection
 import com.sporez.actualist.android.ui.components.ErrorBanner
 import com.sporez.actualist.android.ui.components.SectionCard
+import com.sporez.actualist.android.ui.settings.HeaderDraft
+import com.sporez.actualist.android.ui.settings.HeaderRowsEditor
+import com.sporez.actualist.android.ui.settings.LocalHttpWarning
 import com.sporez.actualist.android.ui.settings.localDataLossMessage
 import com.sporez.actualist.core.server.RemoteFile
+import com.sporez.actualist.core.server.ServerFailover
 import kotlinx.coroutines.launch
 
 @Composable
@@ -142,7 +146,8 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
     var files by remember { mutableStateOf<List<RemoteFile>?>(null) }
     var encrypted by remember { mutableStateOf<RemoteFile?>(null) }
     var budgetPassword by remember { mutableStateOf("") }
-    var headersText by remember { mutableStateOf(server.savedCustomHeaders()?.second.orEmpty()) }
+    var headerRows by remember { mutableStateOf(HeaderDraft.fromText(server.savedCustomHeaders()?.second.orEmpty())) }
+    val headersText = HeaderDraft.toText(headerRows)
     // As Actualist: offer only the sign-in methods the server advertises. Null until known (or if the
     // lookup fails), when both are offered.
     var loginMethods by remember { mutableStateOf<List<String>?>(null) }
@@ -211,18 +216,17 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
         error?.let { ErrorBanner(it, Modifier.testTag("server-error")) }
         if (!server.isSignedIn) {
             OutlinedTextField(url, { url = it }, label = { Text("Server URL") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth().testTag("server-url-field"))
-            OutlinedTextField(
-                headersText,
-                { headersText = it },
-                label = { Text("Custom headers (optional), Name: value per line") },
-                minLines = 1,
-                maxLines = 4,
-                modifier = Modifier.fillMaxWidth().testTag("server-custom-headers"),
-            )
+            LocalHttpWarning(url)
+            val urlProblem = if (url.trim().length > 8) ServerFailover.rejection(url) else null
+            urlProblem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("server-url-error")) }
+            Column(Modifier.fillMaxWidth().testTag("server-custom-headers"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Custom headers (optional)", style = MaterialTheme.typography.labelLarge)
+                HeaderRowsEditor(headerRows) { headerRows = it }
+            }
             unsupportedLoginMessage(loginMethods)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("server-login-unsupported")) }
             if (offersPassword) OutlinedTextField(password, { password = it }, label = { Text("Server password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth().testTag("server-password-field"))
             if (offersPassword) Button(
-                enabled = !busy && url.length > 8 && password.isNotEmpty(),
+                enabled = !busy && url.length > 8 && password.isNotEmpty() && ServerFailover.rejection(url) == null,
                 onClick = {
                     scope.launch {
                         busy = true

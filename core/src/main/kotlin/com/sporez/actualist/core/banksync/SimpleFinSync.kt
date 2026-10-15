@@ -41,6 +41,10 @@ data class SimpleFinAccountResult(
     val insertedTransactionIds: List<String> = emptyList(),
     /** The provider error code of a failed account download (`ACCOUNT_MISSING`, `TIMED_OUT`, ...). */
     val errorCode: String? = null,
+    /** Matched rows that were already identical or reconciled (locked), so nothing was written to them. */
+    val unchangedCount: Int = 0,
+    /** The matched rows that were updated, with the fields each update fills, for the expandable result list. */
+    val matchDetails: List<BankSyncMatchDetail> = emptyList(),
 ) {
     val skipped: Boolean get() = status != BankSyncStatus.OK
 }
@@ -295,6 +299,8 @@ class SimpleFinSync(
                     updatedCount = applied.updatedCount,
                     openingBalanceAdded = applied.openingBalanceAdded,
                     insertedTransactionIds = applied.insertedIdsByAccount[account.id].orEmpty(),
+                    unchangedCount = applied.plan.unchangedCount,
+                    matchDetails = BankSyncMatchDetails.from(applied.plan),
                 ),
             )
         }

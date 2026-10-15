@@ -17,9 +17,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import com.sporez.actualist.android.ui.components.AmountField
+import com.sporez.actualist.android.ui.components.LocalHideAmounts
+import com.sporez.actualist.android.ui.components.MoneyText
 import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.transactions.Reconciliation
 import kotlinx.coroutines.launch
@@ -32,6 +35,8 @@ data class ReconcileInfo(
     val clearedBalance: Long,
     val unclearedCount: Int,
     val lastReconciled: Long?,
+    /** The balance the bank last reported (SimpleFIN `balance_current`), when the account has one. */
+    val bankBalance: Long? = null,
 )
 
 private enum class ReconcileStep { ENTER, REVIEW, PREVIEW }
@@ -119,6 +124,22 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
                     ReconcileStep.ENTER -> {
                         Text(BALANCE_PROMPT, style = MaterialTheme.typography.bodySmall)
                         Text(clearedText, modifier = Modifier.testTag("reconcile-cleared"))
+                        loaded?.bankBalance?.let { synced ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Last Balance from Bank",
+                                    Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                MoneyText(synced, modifier = Modifier.testTag("reconcile-bank-balance"))
+                            }
+                            TextButton(
+                                enabled = !LocalHideAmounts.current,
+                                onClick = { balanceText = Money.format(synced, symbol = "", grouping = false) },
+                                modifier = Modifier.testTag("reconcile-use-bank-balance"),
+                            ) { Text("Use bank balance") }
+                        }
                         loaded?.let {
                             Text(
                                 it.lastReconciled?.let { millis -> "Last reconciled ${java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault()).toLocalDate()}" } ?: "Not yet reconciled",

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,10 +98,14 @@ object TransactionAlertNotifier {
 fun NewTransactionAlertsSetting() {
     val context = LocalContext.current
     var enabled by remember { mutableStateOf(TransactionAlertPrefs.isEnabled(context) && TransactionAlertNotifier.hasPermission(context)) }
+    // Actualist explains a missing notification permission instead of silently flipping the switch back.
+    var blocked by remember { mutableStateOf(TransactionAlertPrefs.isEnabled(context) && !TransactionAlertNotifier.hasPermission(context)) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         TransactionAlertPrefs.setEnabled(context, granted)
         enabled = granted
+        blocked = !granted
     }
+    Column {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -119,14 +125,36 @@ fun NewTransactionAlertsSetting() {
                 if (!wanted) {
                     TransactionAlertPrefs.setEnabled(context, false)
                     enabled = false
+                    blocked = false
                 } else if (TransactionAlertNotifier.hasPermission(context)) {
                     TransactionAlertPrefs.setEnabled(context, true)
                     enabled = true
+                    blocked = false
                 } else {
                     permission.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             },
             modifier = Modifier.testTag("new-transaction-alerts"),
         )
+    }
+    if (blocked) {
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "Notification permission is not granted, so alerts can't be shown. Allow notifications for Actualist in Android settings, then turn this on again.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag("notification-permission-message"),
+            )
+            TextButton(
+                onClick = {
+                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { context.startActivity(intent) }
+                },
+                modifier = Modifier.testTag("open-notification-settings"),
+            ) { Text("Open Android Settings") }
+        }
+    }
     }
 }

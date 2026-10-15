@@ -96,10 +96,14 @@ fun BudgetScreen(
     onOpenSettings: () -> Unit = {},
     /** When set, "Show transactions" opens the category's month screen (category id, name, shown month id) instead of [onShowCategoryTransactions]. */
     onShowCategoryMonth: ((String, String, String) -> Unit)? = null,
+    /** Pull-to-refresh: runs the budget sync while the indicator shows. */
+    onRefresh: suspend () -> Unit = {},
 ) {
     // The month shown is projected to sample values as a whole (totals add up), so money() must not hash it again.
     androidx.compose.runtime.CompositionLocalProvider(LocalValuesProjected provides LocalSampleValues.current) {
-        BudgetScreenContent(viewModel, onShowCategoryTransactions, onOpenHistory, onOpenSchedules, onOpenSettings, onShowCategoryMonth)
+        com.sporez.actualist.android.ui.components.ScreenPullToRefresh("budget-refresh", onRefresh) {
+            BudgetScreenContent(viewModel, onShowCategoryTransactions, onOpenHistory, onOpenSchedules, onOpenSettings, onShowCategoryMonth)
+        }
     }
 }
 

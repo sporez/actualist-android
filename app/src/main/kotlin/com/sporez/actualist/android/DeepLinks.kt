@@ -12,7 +12,9 @@ import com.sporez.actualist.core.textimport.TextImportParse
  * through [AppShortcuts.pending].
  *
  * Routes: budget, spending, accounts, reports, new-transaction, add-expense, add-income, history,
- * settings, payees, rules, bank-sync, schedules, uncategorized, account/<id>,
+ * settings, payees, rules, bank-sync, schedules, uncategorized (Spending with the Uncategorized filter on),
+ * templates (Budget), report-order (Reports), appearance, privacy, connection, budget-data, advanced,
+ * support (Settings), account/<id>,
  * category/<id>[?month=yyyy-mm&name=<title>].
  *
  * new-transaction (and add-expense / add-income) also take prefill parameters like Actualist's
@@ -23,16 +25,29 @@ object DeepLinks {
     const val SCHEME = "actualist"
     const val HOST = "open"
 
+    /** The Spending feed opened with its Uncategorized filter already on (Actualist's AppRoute.uncategorized). */
+    const val UNCATEGORIZED_ROUTE = "spending-uncategorized"
+
     /** Scaffold routes without an argument that a link may open. */
-    val fixedRoutes = listOf("budget", "spending", "accounts", "reports", "transaction-new", "history", "settings", "payees", "rules", "bank-sync", "schedules")
+    val fixedRoutes = listOf("budget", "spending", "accounts", "reports", "transaction-new", "history", "settings", "payees", "rules", "bank-sync", "schedules", UNCATEGORIZED_ROUTE)
 
     private val aliases = mapOf(
         "new-transaction" to "transaction-new",
         "transaction-new" to "transaction-new",
         "add-expense" to "transaction-new",
         "add-income" to "transaction-new",
-        // The Spending feed has an Uncategorized filter; there is no separate screen for it.
-        "uncategorized" to "spending",
+        "uncategorized" to UNCATEGORIZED_ROUTE,
+        // Budget templates are applied and edited from the Budget screen.
+        "templates" to "budget",
+        // The report card order is edited from Reports.
+        "report-order" to "reports",
+        // Actualist's settings pages are sections of the one Android Settings screen.
+        "appearance" to "settings",
+        "privacy" to "settings",
+        "connection" to "settings",
+        "budget-data" to "settings",
+        "advanced" to "settings",
+        "support" to "settings",
     )
 
     private val monthPattern = Regex("""\d{4}-(0[1-9]|1[0-2])""")
@@ -107,7 +122,9 @@ object DeepLinks {
         else -> null
     }
 
-    fun uriFor(route: String): Uri = Uri.parse("$SCHEME://$HOST/${if (route == "transaction-new") "new-transaction" else route}")
+    fun uriFor(route: String): Uri = Uri.parse(
+        "$SCHEME://$HOST/${when (route) { "transaction-new" -> "new-transaction"; UNCATEGORIZED_ROUTE -> "uncategorized"; else -> route }}",
+    )
 
     /** The link behind the widget's "Add income" action: a new transaction with the inflow direction preselected. */
     fun incomeUri(): Uri = Uri.parse("$SCHEME://$HOST/add-income")

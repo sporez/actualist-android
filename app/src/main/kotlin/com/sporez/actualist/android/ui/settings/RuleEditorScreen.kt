@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -57,12 +58,26 @@ data class RuleLine(val field: String, val op: String, val value: String)
 
 /** The fields and operators this editor offers (a subset of what the engine evaluates). */
 object RuleEditorFields {
-    val conditionFields = listOf("payee", "imported_payee", "notes", "account", "category", "amount", "amount-inflow", "amount-outflow", "date")
-    val actionFields = listOf("category", "payee", "notes", "cleared")
+    val conditionFields = listOf(
+        "payee", "payee_name", "imported_payee", "notes", "account", "category", "category_group",
+        "amount", "amount-inflow", "amount-outflow", "date", "cleared", "reconciled",
+    )
+    val actionFields = listOf("category", "payee", "notes", "cleared", "account", "amount", "date")
+
+    /** The "field" of a "Delete transaction" action line: that action sets nothing, so it has no real field. */
+    const val DELETE_FIELD = "transaction"
+    const val DELETE_OP = "delete-transaction"
+
+    /** The fields the action picker offers, ending with the delete action. */
+    val actionPickerFields = actionFields + DELETE_FIELD
 
     fun conditionOps(field: String): List<String> = when (RuleFields.valueKind(field)) {
         com.sporez.actualist.core.rules.RuleValueKind.ID -> listOf("is", "isNot", "oneOf", "notOneOf") + if (field == "account") listOf("onBudget", "offBudget") else emptyList()
-        com.sporez.actualist.core.rules.RuleValueKind.STRING -> listOf("is", "isNot", "contains", "doesNotContain", "matches") + if (field == "notes") listOf("hasTags", "hasAnyTag") else emptyList()
+        // Actual allows "one of" on imported payee and payee name, not on notes.
+        com.sporez.actualist.core.rules.RuleValueKind.STRING ->
+            listOf("is", "isNot") + (if (field == "notes") emptyList() else listOf("oneOf", "notOneOf")) +
+                listOf("contains", "doesNotContain", "matches") + if (field == "notes") listOf("hasTags", "hasAnyTag") else emptyList()
+        com.sporez.actualist.core.rules.RuleValueKind.BOOLEAN -> listOf("is")
         com.sporez.actualist.core.rules.RuleValueKind.NUMBER ->
             if (RuleFields.isDirectionalAmountField(field)) listOf("is", "isapprox", "gt", "gte", "lt", "lte") else listOf("is", "isapprox", "isbetween", "gt", "gte", "lt", "lte")
         // Plain dates only; Actual's recurring date values stay view-only.
@@ -89,11 +104,44 @@ object RuleEditorFields {
         "imported_payee" -> "Imported payee"
         "amount-inflow" -> "Amount (inflow)"
         "amount-outflow" -> "Amount (outflow)"
+        "payee_name" -> "Payee name"
+        "category_group" -> "Category group"
+        DELETE_FIELD -> "Delete transaction"
         else -> field.replaceFirstChar { it.uppercase() }
     }
 
     /** Operators whose value is a list of ids (stored as a JSON array, edited as a set of picks). */
     fun isMulti(op: String) = op == "oneOf" || op == "notOneOf"
+
+    /** Ids are joined with commas in a line's text; free text values one per line, as they may contain commas. */
+    fun multiSeparator(field: String): String = if (RuleFields.valueKind(field) == com.sporez.actualist.core.rules.RuleValueKind.STRING) "\n" else ","
+
+    fun multiValues(field: String, text: String): List<String> {
+        val parts = text.split(multiSeparator(field))
+        return (if (multiSeparator(field) == "\n") parts.map { it.trim() } else parts).filter { it.isNotBlank() }
+    }
+
+    fun isBoolean(field: String) = RuleFields.valueKind(field) == com.sporez.actualist.core.rules.RuleValueKind.BOOLEAN
+
+    /** The value a new line of [field] starts with. */
+    fun defaultValue(field: String) = if (isBoolean(field)) "true" else ""
+
+    fun booleanLabel(field: String, value: String): String = when {
+        field == "reconciled" -> if (value == "true") "Reconciled" else "Not reconciled"
+        else -> if (value == "true") "Cleared" else "Not cleared"
+    }
+
+    fun booleanOptions(field: String) = listOf("true", "false").map { PickerOption(it, booleanLabel(field, it)) }
+
+    /** Whether an action line is complete: a delete action needs nothing, an amount or date must parse. */
+    fun actionValid(line: RuleLine): Boolean = when {
+        line.op == DELETE_OP -> true
+        line.op != "set" -> line.value.isNotBlank()
+        RuleFields.valueKind(line.field) == com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> Money.parse(line.value) != null
+        RuleFields.valueKind(line.field) == com.sporez.actualist.core.rules.RuleValueKind.DATE ->
+            runCatching { java.time.LocalDate.parse(line.value.trim()) }.isSuccess
+        else -> line.value.isNotBlank()
+    }
 
     /** Operators that take no value (Actual stores null). */
     fun isValueless(op: String) = op == "onBudget" || op == "offBudget"
@@ -105,6 +153,8 @@ object RuleEditorFields {
     fun conditionValid(line: RuleLine): Boolean = when {
         isValueless(line.op) -> true
         line.value.isBlank() -> false
+        isMulti(line.op) -> multiValues(line.field, line.value).isNotEmpty()
+        isBoolean(line.field) -> line.value == "true" || line.value == "false"
         RuleFields.valueKind(line.field) == com.sporez.actualist.core.rules.RuleValueKind.DATE ->
             com.sporez.actualist.core.rules.RuleCondition(line.field, line.op, RuleValue.Text(line.value.trim()), "date").canRoundTripAndEvaluate
         RuleFields.valueKind(line.field) != com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> true
@@ -144,6 +194,7 @@ data class RuleEditorData(
     val payees: List<PickerOption>,
     val categories: List<PickerOption>,
     val accounts: List<PickerOption>,
+    val categoryGroups: List<PickerOption> = emptyList(),
     /** Null for a new rule; a rule this editor cannot represent is shown read-only. */
     val existing: RuleDraft?,
     val editable: Boolean,
@@ -177,11 +228,13 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
                     val accounts = ledger.accounts().map { PickerOption(it.id, it.name) }
                     val existing = ruleId?.let { id -> RuleEngine(database).fetchRules().firstOrNull { it.id == id } }
                     val draft = existing?.draft
+                    val groups = RuleEngine(database).metadata().categoryGroupNames.map { (id, name) -> PickerOption(id, name) }.sortedBy { it.title.lowercase() }
                     RuleEditorData(
-                        names = (payees + categories + accounts).associate { (it.id ?: "") to it.title },
+                        names = (payees + categories + accounts + groups).associate { (it.id ?: "") to it.title },
                         payees = payees,
                         categories = categories,
                         accounts = accounts,
+                        categoryGroups = groups,
                         existing = draft ?: existing?.executionDraft(),
                         editable = ruleId == null || (draft != null && representable(draft)),
                     )
@@ -199,8 +252,9 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
         } &&
             draft.actions.all { action ->
                 action.options.isNullOrEmpty() && when (action.op) {
-                    "set" -> action.fieldName in RuleEditorFields.actionFields
+                    "set" -> action.editorField in RuleEditorFields.actionFields && action.canRoundTripAndEvaluate
                     "prepend-notes", "append-notes" -> action.fieldName == null && action.value.isStringLike
+                    RuleEditorFields.DELETE_OP -> action.canRoundTripAndEvaluate
                     else -> false
                 }
             }
@@ -235,8 +289,11 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
                 RuleCondition(if (direction != null) "amount" else it.field, it.op, value(it.field, it.value, it.op), RuleFields.valueKind(it.field)?.raw, direction)
             },
             actions = actions.map {
-                if (it.op == "set") RuleAction("set", it.field, value(it.field, it.value), RuleFields.valueKind(it.field)?.raw)
-                else RuleAction(it.op, null, RuleValue.Text(it.value))
+                when (it.op) {
+                    "set" -> RuleAction("set", it.field, value(it.field, it.value), RuleFields.valueKind(it.field)?.raw)
+                    RuleEditorFields.DELETE_OP -> RuleAction(RuleEditorFields.DELETE_OP)
+                    else -> RuleAction(it.op, null, RuleValue.Text(it.value))
+                }
             },
         )
 
@@ -248,7 +305,7 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
     fun delete() = launch { session.write { RuleWrites(database).delete(ruleId!!) } }
 
     private fun value(field: String, text: String, op: String = "set"): RuleValue = if (RuleEditorFields.isMulti(op)) {
-        RuleValue.Arr(text.split(',').filter { it.isNotBlank() }.map { RuleValue.Text(it) })
+        RuleValue.Arr(RuleEditorFields.multiValues(field, text).map { RuleValue.Text(it) })
     } else if (RuleEditorFields.isValueless(op)) {
         RuleValue.Null
     } else if (op == "isbetween") {
@@ -276,7 +333,7 @@ class RuleEditorViewModel(private val session: BudgetSession, private val ruleId
     companion object {
         /** The form's text for a stored value: amounts are minor units shown as decimals. */
         fun text(field: String, value: RuleValue): String = when {
-            value is RuleValue.Arr -> value.values.mapNotNull { it.string }.joinToString(",")
+            value is RuleValue.Arr -> value.values.mapNotNull { it.string }.joinToString(RuleEditorFields.multiSeparator(field))
             value is RuleValue.Obj -> listOf("num1", "num2").joinToString("|") { key -> value.values[key]?.integer?.let { Money.format(it, symbol = "", grouping = false) } ?: "" }
             RuleFields.valueKind(field) == com.sporez.actualist.core.rules.RuleValueKind.NUMBER ->
                 value.integer?.let { Money.format(it, symbol = "", grouping = false) } ?: ""
@@ -303,13 +360,19 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
         mutableStateOf(existing?.conditions?.map { RuleLine(it.editorField, it.op, RuleEditorViewModel.text(it.editorField, it.value)) } ?: listOf(RuleLine("payee", "is", viewModel.initialPayeeId ?: "")))
     }
     var actions by remember {
-        mutableStateOf(existing?.actions?.map { RuleLine(it.fieldName ?: "notes", it.op, RuleEditorViewModel.text(it.fieldName ?: "notes", it.value)) } ?: listOf(RuleLine("category", "set", "")))
+        mutableStateOf(
+            existing?.actions?.map {
+                if (it.op == RuleEditorFields.DELETE_OP) RuleLine(RuleEditorFields.DELETE_FIELD, it.op, "")
+                else RuleLine(it.editorField ?: "notes", it.op, RuleEditorViewModel.text(it.editorField ?: "notes", it.value))
+            } ?: listOf(RuleLine("category", "set", "")),
+        )
     }
     var stage by remember { mutableStateOf(existing?.stage ?: RuleStage.NORMAL) }
     var picking by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
+    var confirmingDelete by remember { mutableStateOf(false) }
     val valid = conditions.isNotEmpty() && actions.isNotEmpty() &&
         conditions.all { RuleEditorFields.conditionValid(it) } &&
-        actions.all { it.value.isNotBlank() }
+        actions.all { RuleEditorFields.actionValid(it) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("rule-editor"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         error?.let { ErrorBanner(it, Modifier.testTag("rule-error")) }
@@ -372,10 +435,24 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                 Button(onClick = { viewModel.save(stage, join, conditions, actions) }, enabled = valid, modifier = Modifier.testTag("rule-save")) { Text("Save rule") }
             }
             if (existing != null) {
-                TextButton(onClick = { viewModel.delete() }, modifier = Modifier.testTag("rule-delete")) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = { confirmingDelete = true }, modifier = Modifier.testTag("rule-delete")) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             }
             TextButton(onClick = onDone) { Text("Cancel") }
         }
+    }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete Rule?") },
+            text = { Text("Future transactions will no longer be processed by this rule.") },
+            confirmButton = {
+                TextButton(onClick = { confirmingDelete = false; viewModel.delete() }, modifier = Modifier.testTag("rule-delete-confirm")) {
+                    Text("Delete Rule", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }, modifier = Modifier.testTag("rule-delete-cancel")) { Text("Cancel") } },
+        )
     }
 
     picking?.let { (kind, index, what) ->
@@ -388,10 +465,14 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
         when (what) {
             "field" -> PickerDialog(
                 title = "Field",
-                options = (if (kind == "condition") RuleEditorFields.conditionFields else RuleEditorFields.actionFields).map { PickerOption(it, RuleEditorFields.label(it)) },
+                options = (if (kind == "condition") RuleEditorFields.conditionFields else RuleEditorFields.actionPickerFields).map { PickerOption(it, RuleEditorFields.label(it)) },
                 onPick = { option ->
                     val field = option.id!!
-                    set(RuleLine(field, if (kind == "condition") RuleEditorFields.conditionOps(field).first() else "set", if (field == "cleared") "true" else ""))
+                    when {
+                        kind == "condition" -> set(RuleLine(field, RuleEditorFields.conditionOps(field).first(), RuleEditorFields.defaultValue(field)))
+                        field == RuleEditorFields.DELETE_FIELD -> set(RuleLine(field, RuleEditorFields.DELETE_OP, ""))
+                        else -> set(RuleLine(field, "set", RuleEditorFields.defaultValue(field)))
+                    }
                 },
                 onDismiss = { picking = null },
             )
@@ -407,7 +488,11 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                     val op = option.id!!
                     // Switching between a single value and a list or range clears the value.
                     val reshaped = RuleEditorFields.isMulti(op) != RuleEditorFields.isMulti(line.op) || (op == "isbetween") != (line.op == "isbetween") ||
-                        RuleEditorFields.isValueless(op) != RuleEditorFields.isValueless(line.op)
+                        RuleEditorFields.isValueless(op) != RuleEditorFields.isValueless(line.op) ||
+                        // A year or month only works with "is"; other date operators need a full day.
+                        (RuleFields.valueKind(line.field) == com.sporez.actualist.core.rules.RuleValueKind.DATE && !RuleEditorFields.isValueless(op) &&
+                            !com.sporez.actualist.core.rules.RuleDateValues.allowsPartial(op) &&
+                            com.sporez.actualist.core.rules.RuleDateValues.precision(line.value) != com.sporez.actualist.core.rules.RuleDatePrecision.DAY)
                     set(line.copy(op = op, value = if (reshaped) "" else line.value))
                 },
                 onDismiss = { picking = null },
@@ -417,8 +502,9 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                 options = when (line.field) {
                     "payee" -> loaded.payees
                     "category" -> loaded.categories
+                    "category_group" -> loaded.categoryGroups
                     "account" -> loaded.accounts
-                    "cleared" -> listOf(PickerOption("true", "Cleared"), PickerOption("false", "Not cleared"))
+                    "cleared", "reconciled" -> RuleEditorFields.booleanOptions(line.field)
                     else -> emptyList()
                 },
                 searchable = true,
@@ -426,7 +512,7 @@ fun RuleEditorScreen(viewModel: RuleEditorViewModel, onDone: () -> Unit) {
                     val id = option.id ?: ""
                     if (RuleEditorFields.isMulti(line.op)) {
                         // Each pick adds or removes one id from the list.
-                        val ids = line.value.split(',').filter { it.isNotBlank() }
+                        val ids = RuleEditorFields.multiValues(line.field, line.value)
                         set(line.copy(value = (if (id in ids) ids - id else ids + id).joinToString(",")))
                     } else {
                         set(line.copy(value = id))
@@ -457,6 +543,8 @@ private fun LineCard(
                 OutlinedButton(onClick = { onPick("field") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-field")) { Text(RuleEditorFields.label(line.field)) }
                 if (kind == "condition") {
                     TextButton(onClick = { onPick("op") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-op")) { Text(RuleEditorFields.opLabel(line.op, line.field)) }
+                } else if (line.op == RuleEditorFields.DELETE_OP) {
+                    // The field button above already says "Delete transaction".
                 } else if (line.field == "notes") {
                     TextButton(onClick = { onPick("op") }, enabled = enabled, modifier = Modifier.testTag("rule-$kind-$index-op")) { Text(RuleEditorFields.actionOpLabel(line.op)) }
                 } else {
@@ -466,15 +554,30 @@ private fun LineCard(
             }
             if (RuleEditorFields.isValueless(line.op)) {
                 // Nothing to choose: the operator is the whole condition.
+            } else if (line.op == RuleEditorFields.DELETE_OP) {
+                Text("The transaction is removed when this rule matches.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("rule-$kind-$index-delete-note"))
             } else if (picked) {
                 OutlinedButton(onClick = { onPick("value") }, enabled = enabled, modifier = Modifier.fillMaxWidth().testTag("rule-$kind-$index-value")) {
                     Text(when {
                         line.value.isBlank() -> "Choose…"
-                        line.field == "cleared" -> if (line.value == "true") "Cleared" else "Not cleared"
-                        RuleEditorFields.isMulti(line.op) -> line.value.split(',').filter { it.isNotBlank() }.joinToString(", ") { names[it] ?: it } + "  (tap to add or remove)"
+                        RuleEditorFields.isBoolean(line.field) -> RuleEditorFields.booleanLabel(line.field, line.value)
+                        RuleEditorFields.isMulti(line.op) -> RuleEditorFields.multiValues(line.field, line.value).joinToString(", ") { names[it] ?: it } + "  (tap to add or remove)"
                         else -> names[line.value] ?: line.value
                     })
                 }
+            } else if (valueKind == com.sporez.actualist.core.rules.RuleValueKind.DATE && kind == "condition") {
+                RuleDateValueField(line.value, line.op, { onChange(line.copy(value = it)) }, "rule-$kind-$index-text", enabled)
+            } else if (valueKind == com.sporez.actualist.core.rules.RuleValueKind.DATE) {
+                ScheduleDateField(line.value, { onChange(line.copy(value = it)) }, "rule-$kind-$index-text", label = "Date (YYYY-MM-DD)")
+            } else if (RuleEditorFields.isMulti(line.op)) {
+                OutlinedTextField(
+                    value = line.value,
+                    onValueChange = { onChange(line.copy(value = it)) },
+                    enabled = enabled,
+                    minLines = 2,
+                    label = { Text("Values (one per line)") },
+                    modifier = Modifier.fillMaxWidth().testTag("rule-$kind-$index-text"),
+                )
             } else if (line.op == "isbetween") {
                 val (low, high) = RuleEditorFields.rangeParts(line.value)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -490,7 +593,6 @@ private fun LineCard(
                     label = {
                         Text(when (valueKind) {
                             com.sporez.actualist.core.rules.RuleValueKind.NUMBER -> if (RuleFields.isDirectionalAmountField(line.field)) "Amount (positive)" else "Amount (negative for outflow)"
-                            com.sporez.actualist.core.rules.RuleValueKind.DATE -> "Date (YYYY-MM-DD, YYYY-MM or YYYY)"
                             else -> if (line.op == "hasTags" || line.op == "hasAnyTag") "Tags (e.g. #food #weekly)" else "Text"
                         })
                     },

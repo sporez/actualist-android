@@ -88,6 +88,7 @@ fun SettingsScreen(
                 Text("Server", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (server.isSignedIn) {
                     Text(current.serverUrl ?: "", modifier = Modifier.testTag("server-url"))
+                    SettingsConnectionEditor(server, current.serverUrl ?: "")
                     if (!session.isDemo) SettingsConnectionStatus(server, session)
                     SettingsCustomHeaders(server, current.serverUrl ?: "")
                     SettingsFallbackServer(server, current.serverUrl ?: "")

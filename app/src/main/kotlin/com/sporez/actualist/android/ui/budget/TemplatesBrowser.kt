@@ -89,9 +89,32 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                         }
                         if (changed.size > 12) Text("…and ${changed.size - 12} more", style = MaterialTheme.typography.bodySmall)
                         HorizontalDivider()
+                        if (p.fundingRequired != 0L) TemplateSummaryLine("Funding required", p.fundingRequired)
                         TemplateSummaryLine("Assigned", p.assigned)
                         if (p.released != 0L) TemplateSummaryLine("Released", p.released)
+                        if (p.stillNeeded > 0L) TemplateSummaryLine("Still needed", p.stillNeeded)
                         TemplateSummaryLine(if (p.isTracking) "Saved after" else "To Budget after", p.leftover)
+                        Row(Modifier.testTag("templates-leftover-change")) {
+                            Text(if (p.isTracking) "Total Saved" else "To Budget", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${money(p.availableBefore)} → ${money(p.availableAfter)}", style = MoneyTextStyle)
+                        }
+                        Row {
+                            Text("Categories", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                when (changed.size) {
+                                    0 -> "None"
+                                    1 -> "1 category"
+                                    else -> "${changed.size} categories"
+                                },
+                                modifier = Modifier.testTag("templates-change-count"),
+                            )
+                        }
+                        if (p.availableAfter < 0L) {
+                            Text("Over budget after Apply.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("templates-over-budget"))
+                        }
+                        if (p.hasNonMoneyUpdates) {
+                            Text("Goal targets will also be updated.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("templates-goal-note"))
+                        }
                     }
                 }
             }

@@ -2,6 +2,7 @@ package com.sporez.actualist.android.ui.settings
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -117,14 +118,7 @@ fun SettingsAboutCard(session: BudgetSession, settings: AppSettings, hasServer: 
             ) { Text("Diagnostic report") }
         }
     }
-    if (showLicences) {
-        AlertDialog(
-            onDismissRequest = { showLicences = false },
-            title = { Text("Licences and notices") },
-            text = { Text(LICENCES_TEXT, style = MaterialTheme.typography.bodySmall, modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()).testTag("licences-text")) },
-            confirmButton = { TextButton(onClick = { showLicences = false }) { Text("Close") } },
-        )
-    }
+    if (showLicences) LicencesDialog(onDismiss = { showLicences = false })
     report?.let { text ->
         AlertDialog(
             onDismissRequest = { report = null },
@@ -146,4 +140,59 @@ fun SettingsAboutCard(session: BudgetSession, settings: AppSettings, hasServer: 
             dismissButton = { TextButton(onClick = { report = null }) { Text("Close") } },
         )
     }
+}
+
+private const val SOURCE_URL = "https://github.com/sporez/actualist"
+
+private const val GPL_SUMMARY = """Actualist is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full text is in the LICENSE file of the source repository and at https://www.gnu.org/licenses/gpl-3.0.html."""
+
+/** One titled block that opens and closes, as the iOS licences screen's disclosure groups. */
+@Composable
+private fun LicenceSection(title: String, tag: String, startsOpen: Boolean, body: String, bodyTag: String) {
+    var open by remember { mutableStateOf(startsOpen) }
+    Column(Modifier.fillMaxWidth()) {
+        TextButton(onClick = { open = !open }, modifier = Modifier.testTag(tag)) { Text((if (open) "▾ " else "▸ ") + title) }
+        if (open) Text(body, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag(bodyTag))
+    }
+}
+
+/** Open-source licences: Actualist's own licence with the source link, then the third-party notices. */
+@Composable
+private fun LicencesDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Open Source Licenses") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()).testTag("licences-screen"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Actualist", style = MaterialTheme.typography.titleSmall)
+                Text("Copyright © 2026 Neil DeLillo", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Actualist source code is licensed under GNU GPL version 3.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(
+                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) },
+                    modifier = Modifier.testTag("licences-source"),
+                ) { Text("View Source Code") }
+                LicenceSection("GNU GPLv3 License", "licences-gpl-toggle", startsOpen = false, body = GPL_SUMMARY, bodyTag = "licences-gpl-text")
+                Text("Third-Party Software", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "Actualist includes software distributed under compatible open-source licenses.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LicenceSection("Notices and Licenses", "licences-notices-toggle", startsOpen = true, body = LICENCES_TEXT, bodyTag = "licences-text")
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("licences-close")) { Text("Close") } },
+    )
 }

@@ -14,6 +14,7 @@ import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
+import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
@@ -46,14 +47,23 @@ enum class WidgetQuickAction(val id: String, val title: String, val route: Strin
     ADD_EXPENSE("add-expense", "Add expense", "transaction-new"),
     ADD_INCOME("add-income", "Add income", "transaction-new"),
     SPENDING("spending", "Spending", "spending"),
+    UNCATEGORIZED("uncategorized", "Uncategorized", DeepLinks.UNCATEGORIZED_ROUTE),
     BUDGET("budget", "Budget", "budget"),
+    TEMPLATES("templates", "Templates", "budget"),
     HISTORY("history", "History", "history"),
     ACCOUNTS("accounts", "Accounts", "accounts"),
     PAYEES("payees", "Payees", "payees"),
     RULES("rules", "Rules", "rules"),
     BANK_SYNC("bank-sync", "Bank sync", "bank-sync"),
     REPORTS("reports", "Reports", "reports"),
+    REPORT_ORDER("report-order", "Report order", "reports"),
     SETTINGS("settings", "Settings", "settings"),
+    APPEARANCE("appearance", "Appearance", "settings"),
+    PRIVACY("privacy", "Privacy", "settings"),
+    CONNECTION("connection", "Connection", "settings"),
+    BUDGET_DATA("budget-data", "Budget & data", "settings"),
+    ADVANCED("advanced", "Advanced", "settings"),
+    SUPPORT("support", "Support", "settings"),
     ;
 
     companion object {
@@ -80,6 +90,11 @@ data class MonthOverviewData(
     val spent: Long,
     val toBudget: Long,
     val overspentCount: Int,
+    /** The headline of the budget type: To Budget (envelope), or Projected Savings / Saved / Overspent (tracking). */
+    val summaryTitle: String = "To Budget",
+    val summaryAmount: Long = toBudget,
+    /** Total available across categories; it includes money carried over from earlier months. */
+    val available: Long = 0L,
 )
 
 /** [trend] is the last months' net worth, oldest first. */
@@ -109,6 +124,7 @@ object MoreWidgetLoader {
             val monthId = Months.id(today.year, today.monthValue)
             session.read {
                 val month = budget.fetchBudgetMonth(monthId)
+                val tracking = month.trackingSummary
                 val expense = month.categories.filter { !it.isIncome && !it.hidden }
                 val pick = WidgetShaping.overspent(month.categories, settings.includeRolloverInAlerts).firstOrNull() ?: expense.minByOrNull { it.spent }
                 val chosen = WidgetChoices.pick(categoryIds, expense, WidgetChoices.CATEGORY_LIMIT, listOfNotNull(pick)) { it.id }
@@ -124,6 +140,10 @@ object MoreWidgetLoader {
                         spent = month.totalSpent,
                         toBudget = month.toBudget,
                         overspentCount = WidgetShaping.overspent(month.categories, settings.includeRolloverInAlerts).size,
+                        // The widget always shows the current month, which a tracking budget reports as Projected Savings.
+                        summaryTitle = if (tracking != null) "Projected Savings" else "To Budget",
+                        summaryAmount = tracking?.plannedSavings ?: month.toBudget,
+                        available = month.totalBalance,
                     ),
                     netWorth = NetWorthData(
                         budgetName = name,
@@ -161,6 +181,20 @@ private fun StatRow(palette: WidgetPalette, label: String, value: String) {
     Row(GlanceModifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(label, style = TextStyle(color = palette.muted, fontSize = 13.sp), maxLines = 1, modifier = GlanceModifier.defaultWeight())
         Text(value, style = TextStyle(color = palette.text, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+    }
+}
+
+/** The width in dp of a bar for [value] against [top], never less than a sliver for a non-zero value. */
+internal fun barWidthDp(value: Long, top: Long, fullDp: Int = 140): Int {
+    if (value <= 0L || top <= 0L) return 0
+    return maxOf(2, (fullDp.toDouble() * value / top).toInt()).coerceAtMost(fullDp)
+}
+
+@Composable
+private fun BarRow(palette: WidgetPalette, label: String, value: Long, top: Long) {
+    Row(GlanceModifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(label, style = TextStyle(color = palette.muted, fontSize = 12.sp), maxLines = 1, modifier = GlanceModifier.width(64.dp))
+        Box(GlanceModifier.width(barWidthDp(value, top).dp).height(8.dp).background(palette.accent)) {}
     }
 }
 
@@ -227,17 +261,27 @@ class MonthOverviewWidget : GlanceAppWidget() {
                     Caption(palette, month.title)
                     Spacer(GlanceModifier.height(4.dp))
                     if (family == WidgetSizeClass.SMALL) {
-                        Caption(palette, "To Budget")
+                        Caption(palette, month.summaryTitle)
                         Text(
-                            amount(data, month.toBudget),
-                            style = TextStyle(color = if (month.toBudget < 0) palette.danger else palette.text, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                            amount(data, month.summaryAmount),
+                            style = TextStyle(color = if (month.summaryAmount < 0) palette.danger else palette.text, fontSize = 22.sp, fontWeight = FontWeight.Bold),
                             maxLines = 1,
                         )
                     } else {
-                        StatRow(palette, "To Budget", amount(data, month.toBudget))
+                        StatRow(palette, month.summaryTitle, amount(data, month.summaryAmount))
                         StatRow(palette, "Income", amount(data, month.income))
                         StatRow(palette, "Budgeted", amount(data, month.budgeted))
                         StatRow(palette, "Spent", amount(data, month.spent))
+                    }
+                    if (family == WidgetSizeClass.LARGE && !data.hideAmounts) {
+                        Spacer(GlanceModifier.height(8.dp))
+                        val top = maxOf(month.income, month.budgeted, month.spent, 1L)
+                        BarRow(palette, "Income", month.income, top)
+                        BarRow(palette, "Budgeted", month.budgeted, top)
+                        BarRow(palette, "Spent", month.spent, top)
+                        Spacer(GlanceModifier.height(6.dp))
+                        StatRow(palette, "Available", amount(data, month.available))
+                        Caption(palette, "Available includes money carried over")
                     }
                     if (month.overspentCount > 0) {
                         Spacer(GlanceModifier.height(4.dp))

@@ -180,7 +180,12 @@ private fun LocalDate.toPickerMillis(): Long = atStartOfDay(ZoneOffset.UTC).toIn
 private fun Long.toPickerDate(): LocalDate = Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
 
 @Composable
-fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.now(), onOpenTransaction: (String) -> Unit = {}) {
+fun ExplorerScreen(
+    viewModel: ExplorerViewModel,
+    today: LocalDate = LocalDate.now(),
+    onViewTransactions: (String) -> Unit = {},
+    onOpenTransaction: (String) -> Unit = {},
+) {
     val state by viewModel.state.collectAsState()
     val query by viewModel.query.collectAsState()
     val preset by viewModel.preset.collectAsState()
@@ -279,6 +284,12 @@ fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.no
                             TotalRow("Net", explorer.result.net)
                         }
                     }
+                }
+                item {
+                    // As Actualist: the transactions behind these totals, grouped and labelled.
+                    ViewContributingTransactionsButton(onClick = {
+                        onViewTransactions(drilldownRoute(query.start, query.end, query.filters.accounts, query.filters.categories, "Transactions"))
+                    })
                 }
                 item {
                     SectionCard {

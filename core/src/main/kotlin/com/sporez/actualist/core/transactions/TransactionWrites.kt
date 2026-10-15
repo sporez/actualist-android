@@ -33,10 +33,28 @@ data class TransactionDraft(
     val splits: List<SplitDraft> = emptyList(),
 )
 
-data class SplitDraft(val categoryId: String?, val amount: Long, val notes: String? = null)
+/**
+ * One split line. A null [payeeId] with a blank [payeeName] leaves the line on the parent's payee;
+ * a [payeeName] with no [payeeId] finds or creates that payee, and a transfer payee makes the line a transfer.
+ */
+data class SplitDraft(
+    val categoryId: String?,
+    val amount: Long,
+    val notes: String? = null,
+    val payeeId: String? = null,
+    val payeeName: String = "",
+)
 
 /** One child of an edited split; a null [id] adds a new child. */
-data class SplitEdit(val id: String?, val categoryId: String?, val amount: Long, val notes: String? = null)
+data class SplitEdit(
+    val id: String?,
+    val categoryId: String?,
+    val amount: Long,
+    val notes: String? = null,
+    /** Null keeps an existing child's payee (a new child inherits the parent's). */
+    val payeeId: String? = null,
+    val payeeName: String = "",
+)
 
 /** The whole family after an edit; children not listed are removed. */
 data class SplitFamilyEdit(
@@ -260,7 +278,18 @@ class TransactionWrites(
             throw LocalFirstException.InvalidLocalWrite("split amounts (${total}) do not add up to the transaction (${draft.amount})")
         }
         draft.splits.forEach { split -> split.categoryId?.let(::validateCategory) }
-        return SplitFamilies(database, clock, newId).createDrafts(
+        val payeeDrafts = mutableListOf<CellDraft>()
+        val resolvedPayees = HashMap<String, String>()
+        val children = draft.splits.map { split ->
+            val childPayee = resolveSplitPayee(split.payeeId, split.payeeName, payeeDrafts, resolvedPayees)
+            SplitChildDraft(
+                categoryId = split.categoryId,
+                amount = split.amount,
+                payeeId = if (childPayee != null) SplitOptionalField.Value(childPayee) else SplitOptionalField.Omitted,
+                notes = optional(split.notes),
+            )
+        }
+        return payeeDrafts + SplitFamilies(database, clock, newId).createDrafts(
             SplitFamilyDraft(
                 accountId = draft.accountId,
                 date = draft.date,
@@ -271,10 +300,33 @@ class TransactionWrites(
                 sortOrder = draft.sortOrder ?: newRowSortOrder(),
                 importedPayee = draft.importedPayee,
                 importedId = draft.importedId,
-                splits = draft.splits.map { SplitChildDraft(categoryId = it.categoryId, amount = it.amount, notes = optional(it.notes)) },
+                splits = children,
             ),
             parentId,
         ).drafts
+    }
+
+    /** A split line's payee: a live selected id, a found or planned new payee by name, or null to inherit. */
+    private fun resolveSplitPayee(
+        selected: String?,
+        name: String,
+        sink: MutableList<CellDraft>,
+        resolvedByName: MutableMap<String, String>,
+    ): String? {
+        if (!selected.isNullOrEmpty()) {
+            if (database.tableExists("payees") && !database.liveRowExists("payees", selected)) {
+                throw LocalFirstException.InvalidLocalWrite("missing payee")
+            }
+            return selected
+        }
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return null
+        val key = trimmed.lowercase()
+        resolvedByName[key]?.let { return it }
+        val (payeeId, drafts) = resolveOrCreatePayeeDrafts(null, trimmed)
+        sink += drafts
+        resolvedByName[key] = payeeId
+        return payeeId
     }
 
     private fun optional(text: String?): SplitOptionalField<String> = if (text == null) SplitOptionalField.Omitted else SplitOptionalField.Value(text)
@@ -497,6 +549,17 @@ class TransactionWrites(
             payee = payeeId
         }
         val date = edit.date ?: parent.date?.let(Months::dateFromPacked) ?: throw LocalFirstException.InvalidLocalWrite("missing date")
+        val childPayees = HashMap<String, String>()
+        val children = edit.splits.map { split ->
+            val childPayee = resolveSplitPayee(split.payeeId, split.payeeName, drafts, childPayees)
+            SplitChildDraft(
+                id = split.id,
+                categoryId = split.categoryId,
+                amount = split.amount,
+                payeeId = if (childPayee != null) SplitOptionalField.Value(childPayee) else SplitOptionalField.Omitted,
+                notes = optional(split.notes),
+            )
+        }
         drafts += SplitFamilies(database, clock, newId).updateDrafts(
             transactionId,
             SplitFamilyDraft(
@@ -507,7 +570,7 @@ class TransactionWrites(
                 notes = edit.notes?.ifEmpty { null } ?: if (edit.notes == null) parent.notes else null,
                 cleared = edit.cleared ?: parent.cleared,
                 reconciled = parent.reconciled,
-                splits = edit.splits.map { SplitChildDraft(id = it.id, categoryId = it.categoryId, amount = it.amount, notes = optional(it.notes)) },
+                splits = children,
             ),
         ).drafts
         return drafts

@@ -122,6 +122,57 @@ class ServerConnection(
         secrets.putString(CUSTOM_HEADERS, url + "\u0000" + text.trim())
     }
 
+    /**
+     * Actualist's connection test: asks the server at [urlInput] for its sign-in methods with
+     * [headers] attached, so a proxy that rejects the headers fails here. Returns the methods.
+     */
+    suspend fun testConnection(urlInput: String, headers: List<com.sporez.actualist.core.server.CustomHeader>): List<String> =
+        withContext(Dispatchers.IO) {
+            val url = ActualServerClient(checkedAddress(urlInput)).url
+            val endpoint = if (headers.isEmpty()) null else com.sporez.actualist.core.server.EndpointHeaders(url, headers)
+            try {
+                com.sporez.actualist.core.server.ServerClients.actual(url, endpoint).loginMethods()
+            } catch (error: ServerException.HttpStatus) {
+                throw IllegalArgumentException("The server rejected the connection test (HTTP ${error.status}). Check the address and headers.")
+            }
+        }
+
+    private fun checkedAddress(input: String): String {
+        val normalized = com.sporez.actualist.core.server.ServerFailover.normalize(input)
+        if (normalized.isEmpty()) throw IllegalArgumentException("Enter a server address.")
+        com.sporez.actualist.core.server.ServerFailover.rejection(normalized)?.let { throw IllegalArgumentException(it) }
+        return normalized
+    }
+
+    /** Tests then stores custom headers for [serverUrl] (an empty list removes them). Throws a readable reason and changes nothing on failure. */
+    suspend fun saveCustomHeadersTested(serverUrl: String, headers: List<com.sporez.actualist.core.server.CustomHeader>) {
+        if (headers.isNotEmpty()) testConnection(serverUrl, headers)
+        withContext(Dispatchers.IO) { saveCustomHeaders(serverUrl, com.sporez.actualist.core.server.EndpointHeaders.format(headers)) }
+    }
+
+    /**
+     * Actualist's Save Connection: tests the address (with [headers]), signs in when a [password] is given
+     * (required when the address changed, because the saved token belongs to the old server), then stores
+     * the address and headers. Nothing is changed when the test or sign-in fails.
+     */
+    suspend fun saveConnection(urlInput: String, password: String, headers: List<com.sporez.actualist.core.server.CustomHeader>) =
+        withContext(Dispatchers.IO) {
+            val methods = testConnection(urlInput, headers)
+            val url = ActualServerClient(checkedAddress(urlInput)).url
+            val changed = !url.equals(settings.settings.value.serverUrl, ignoreCase = true)
+            val endpoint = if (headers.isEmpty()) null else com.sporez.actualist.core.server.EndpointHeaders(url, headers)
+            if (password.isNotEmpty()) {
+                if ("password" !in methods) throw ServerException.HttpStatus(501)
+                secrets.putString(SecretStore.SERVER_TOKEN, com.sporez.actualist.core.server.ServerClients.actual(url, endpoint).login(password))
+                _needsReauthentication.value = false
+            } else if (changed) {
+                throw IllegalArgumentException("Enter the server password to connect to a different server.")
+            }
+            saveCustomHeaders(url, com.sporez.actualist.core.server.EndpointHeaders.format(headers))
+            settings.update { it.copy(serverUrl = url) }
+            failover.clear()
+        }
+
     private val _needsReauthentication = kotlinx.coroutines.flow.MutableStateFlow(false)
     /** True after the server rejected the saved session, until a sign-in succeeds (Actualist's re-authentication banner). */
     val needsReauthentication: kotlinx.coroutines.flow.StateFlow<Boolean> = _needsReauthentication

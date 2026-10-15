@@ -53,6 +53,7 @@ import com.sporez.actualist.android.ui.components.LoadingBox
 import com.sporez.actualist.android.ui.components.PickerDialog
 import com.sporez.actualist.android.ui.components.PickerOption
 import com.sporez.actualist.android.ui.components.LocalHideAmounts
+import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.transactions.Account
@@ -126,6 +127,17 @@ class TransactionEditorViewModel(
         } finally {
             if (locked.isNotEmpty()) mutations.relock(locked)
         }
+    }
+
+    /** Each category's available balance in the month of [date], for the category picker; null when it cannot be read. */
+    suspend fun categoryBalances(date: LocalDate): Map<String, Long>? = try {
+        session.read {
+            budget.fetchBudgetMonth(Months.id(date.year, date.monthValue)).categoryGroups
+                .flatMap { it.categories }
+                .associate { it.id to it.balance }
+        }
+    } catch (error: Exception) {
+        null
     }
 
     /** Which of this transaction's rows (and its transfer's other side) are reconciled. */
@@ -250,7 +262,19 @@ class TransactionEditorViewModel(
 
 private val dateLabel = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
 
-private class SplitLine(val categoryId: String?, val amountText: String, val id: String? = null)
+/**
+ * One split line as the form holds it. A null [payeeId] with no [payeeName] stays on the transaction's
+ * payee; a null [outflow] follows the transaction's direction (a line can go the other way).
+ */
+private data class SplitLine(
+    val categoryId: String?,
+    val amountText: String,
+    val id: String? = null,
+    val payeeId: String? = null,
+    val payeeName: String = "",
+    val notes: String = "",
+    val outflow: Boolean? = null,
+)
 
 @Composable
 fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () -> Unit) {
@@ -290,11 +314,27 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
         }
     }
     var picking by remember { mutableStateOf<String?>(null) }
+    var categoryBalances by remember { mutableStateOf<Map<String, Long>?>(null) }
+    val pickingCategory = picking == "category" || picking?.startsWith("split-") == true
+    LaunchedEffect(pickingCategory, dateEpochDay) {
+        if (pickingCategory) categoryBalances = viewModel.categoryBalances(LocalDate.ofEpochDay(dateEpochDay))
+    }
     var splitting by rememberSaveable { mutableStateOf(existing?.isParent == true) }
     var splits by remember {
         mutableStateOf(
-            existing?.takeIf { it.isParent }?.children?.map { SplitLine(it.categoryId, Money.format(kotlin.math.abs(it.amount), symbol = "", grouping = false), it.id) }
-                ?: listOf(SplitLine(null, ""), SplitLine(null, "")),
+            existing?.takeIf { it.isParent }?.let { parent ->
+                val parentOutflow = parent.amount <= 0
+                parent.children.map { child ->
+                    SplitLine(
+                        categoryId = child.categoryId,
+                        amountText = Money.format(kotlin.math.abs(child.amount), symbol = "", grouping = false),
+                        id = child.id,
+                        payeeId = child.payeeId.takeIf { it != parent.payeeId },
+                        notes = child.notes ?: "",
+                        outflow = (child.amount <= 0).takeIf { it != parentOutflow },
+                    )
+                }
+            } ?: listOf(SplitLine(null, ""), SplitLine(null, "")),
         )
     }
 
@@ -306,7 +346,10 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     val showCategory = !offBudget && (!isTransfer || transferToOffBudget) && !splitting
     val magnitude = Money.parse(amountText)
     val signed = magnitude?.let { if (outflow) -kotlin.math.abs(it) else kotlin.math.abs(it) }
-    val splitAmounts = splits.map { line -> Money.parse(line.amountText)?.let { if (outflow) -kotlin.math.abs(it) else kotlin.math.abs(it) } }
+    val splitAmounts = splits.map { line -> Money.parse(line.amountText)?.let { if (line.outflow ?: outflow) -kotlin.math.abs(it) else kotlin.math.abs(it) } }
+    fun splitPayee(line: SplitLine): Payee? = loaded.payees.firstOrNull { it.id == line.payeeId }
+    fun splitPayeeLabel(line: SplitLine): String =
+        splitPayee(line)?.let { if (it.isTransfer) "Transfer: ${it.name}" else it.name } ?: line.payeeName.ifBlank { "Same as transaction" }
     val splitRemaining = (signed ?: 0) - splitAmounts.sumOf { it ?: 0 }
     val canSave = signed != null && account != null && (!splitting || (splitAmounts.all { it != null } && splitRemaining == 0L))
     val editingSplit = existing?.isChild == true
@@ -360,7 +403,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     // Unsaved edits: what the form holds now against what it held once it had loaded (and any shared text was applied).
     fun formSnapshot(): List<Any?> = listOf(
         outflow, amountText, accountId, payeeId, newPayeeName, categoryId, notes, cleared, dateEpochDay, splitting,
-        splits.map { Triple(it.categoryId, it.amountText, it.id) },
+        splits.toList(),
     )
     var baseline by remember { mutableStateOf<List<Any?>?>(null) }
     LaunchedEffect(Unit) { baseline = formSnapshot() }
@@ -376,7 +419,16 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                         viewModel.saveSplit(
                             com.sporez.actualist.core.transactions.SplitFamilyEdit(
                                 amount = signed!!,
-                                splits = splits.mapIndexed { i, line -> com.sporez.actualist.core.transactions.SplitEdit(line.id, line.categoryId, splitAmounts[i]!!) },
+                                splits = splits.mapIndexed { i, line ->
+                                    com.sporez.actualist.core.transactions.SplitEdit(
+                                        id = line.id,
+                                        categoryId = if (splitPayee(line)?.isTransfer == true) null else line.categoryId,
+                                        amount = splitAmounts[i]!!,
+                                        notes = if (line.id == null) line.notes.ifBlank { null } else line.notes,
+                                        payeeId = line.payeeId,
+                                        payeeName = if (line.payeeId == null) line.payeeName else "",
+                                    )
+                                },
                                 date = LocalDate.ofEpochDay(dateEpochDay),
                                 payeeId = payeeId.takeIf { it != existing.payeeId },
                                 payeeName = newPayeeName.takeIf { payeeId == null && it.isNotBlank() },
@@ -396,7 +448,19 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                         notes = notes.ifBlank { null },
                         cleared = cleared,
                         isTransfer = isTransfer,
-                        splits = if (splitting) splits.mapIndexed { i, line -> SplitDraft(line.categoryId, splitAmounts[i]!!) } else emptyList(),
+                        splits = if (splitting) {
+                            splits.mapIndexed { i, line ->
+                                SplitDraft(
+                                    categoryId = if (splitPayee(line)?.isTransfer == true) null else line.categoryId,
+                                    amount = splitAmounts[i]!!,
+                                    notes = line.notes.ifBlank { null },
+                                    payeeId = line.payeeId,
+                                    payeeName = if (line.payeeId == null) line.payeeName else "",
+                                )
+                            }
+                        } else {
+                            emptyList()
+                        },
                     )
                     viewModel.save(draft, unlock)
                     }
@@ -464,8 +528,33 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 splits.forEachIndexed { index, line ->
                     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FieldButton("Split ${index + 1} category", loaded.categories.firstOrNull { it.id == line.categoryId }?.name ?: "Uncategorized", "split-category-$index") { picking = "split-$index" }
-                            AmountField(line.amountText, { text -> splits = splits.toMutableList().also { it[index] = SplitLine(line.categoryId, text, line.id) } }, label = "Amount", tag = "split-amount-$index")
+                            val lineOutflow = line.outflow ?: outflow
+                            val lineIsTransfer = splitPayee(line)?.isTransfer == true
+                            FieldButton("Split ${index + 1} payee", splitPayeeLabel(line), "split-payee-$index") { picking = "splitpayee-$index" }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { splits = splits.toMutableList().also { it[index] = line.copy(outflow = !lineOutflow) } },
+                                    modifier = Modifier.testTag("split-sign-$index"),
+                                ) { Text(if (lineOutflow) "− Outflow" else "+ Inflow") }
+                                AmountField(
+                                    line.amountText,
+                                    { text -> splits = splits.toMutableList().also { it[index] = line.copy(amountText = text) } },
+                                    label = "Amount",
+                                    modifier = Modifier.weight(1f),
+                                    tag = "split-amount-$index",
+                                )
+                            }
+                            if (lineIsTransfer) {
+                                FieldButton("Split ${index + 1} category", "Account Transfer", "split-category-$index") {}
+                            } else {
+                                FieldButton("Split ${index + 1} category", loaded.categories.firstOrNull { it.id == line.categoryId }?.name ?: "Uncategorized", "split-category-$index") { picking = "split-$index" }
+                            }
+                            androidx.compose.material3.OutlinedTextField(
+                                line.notes,
+                                { text -> splits = splits.toMutableList().also { it[index] = line.copy(notes = text) } },
+                                label = { Text("Split ${index + 1} notes") },
+                                modifier = Modifier.fillMaxWidth().testTag("split-notes-$index"),
+                            )
                             if (splits.size > 2) {
                                 TextButton(onClick = { splits = splits.toMutableList().also { it.removeAt(index) } }, modifier = Modifier.testTag("split-delete-$index")) {
                                     Text("Remove split ${index + 1}", color = MaterialTheme.colorScheme.error)
@@ -488,12 +577,14 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                     // The first empty entry takes the remainder; with none empty, the last entry grows or shrinks by it.
                     val target = splits.indexOfFirst { it.amountText.isBlank() }.takeIf { it >= 0 } ?: splits.lastIndex
                     val filled = (splitAmounts[target] ?: 0L) + splitRemaining
-                    val sameDirection = if (outflow) filled <= 0 else filled >= 0
+                    val targetOutflow = splits[target].outflow ?: outflow
+                    // A line keeps its direction; one that would have to flip to close the gap does not offer the fill.
+                    val sameDirection = if (targetOutflow) filled <= 0 else filled >= 0
                     OutlinedButton(
                         enabled = sameDirection,
                         onClick = {
                             splits = splits.toMutableList().also {
-                                it[target] = SplitLine(it[target].categoryId, Money.format(kotlin.math.abs(filled), symbol = "", grouping = false), it[target].id)
+                                it[target] = it[target].copy(amountText = Money.format(kotlin.math.abs(filled), symbol = "", grouping = false))
                             }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("split-fill-remaining"),
@@ -617,6 +708,8 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 picking = null
             },
             onDismiss = { picking = null },
+            balances = categoryBalances,
+            selectedId = categoryId,
         )
         "date" -> {
             val state = rememberDatePickerState(initialSelectedDateMillis = LocalDate.ofEpochDay(dateEpochDay).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
@@ -681,16 +774,34 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             }
         }
         null -> {}
-        else -> if (target.startsWith("split-")) {
+        else -> if (target.startsWith("splitpayee-")) {
+            val index = target.removePrefix("splitpayee-").toInt()
+            PayeePickerDialog(
+                payees = loaded.payees,
+                recentIds = loaded.recentPayeeIds,
+                currentAccountId = accountId,
+                onPick = { id ->
+                    splits = splits.toMutableList().also { it[index] = it[index].copy(payeeId = id, payeeName = "") }
+                    picking = null
+                },
+                onCreate = { name ->
+                    splits = splits.toMutableList().also { it[index] = it[index].copy(payeeId = null, payeeName = name) }
+                    picking = null
+                },
+                onDismiss = { picking = null },
+            )
+        } else if (target.startsWith("split-")) {
             val index = target.removePrefix("split-").toInt()
             CategoryPickerDialog(
                 title = "Split category",
                 categories = loaded.categories,
                 onPick = { id ->
-                    splits = splits.toMutableList().also { it[index] = SplitLine(id, it[index].amountText, it[index].id) }
+                    splits = splits.toMutableList().also { it[index] = it[index].copy(categoryId = id) }
                     picking = null
                 },
                 onDismiss = { picking = null },
+                balances = categoryBalances,
+                selectedId = splits.getOrNull(index)?.categoryId,
             )
         }
     }

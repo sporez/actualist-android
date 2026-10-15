@@ -45,7 +45,7 @@ private class PendingStep(val undo: Boolean, val review: HistoryReview)
  * Redo. The core refuses a step whose rows were edited since.
  */
 @Composable
-fun HistoryScreen(session: BudgetSession) {
+fun HistoryScreen(session: BudgetSession, onRefresh: suspend () -> Unit = {}) {
     val revision by session.revision.collectAsState()
     val undoState by session.undoState.collectAsState()
     var items by remember { mutableStateOf<List<HistoryEntryModel>>(emptyList()) }
@@ -86,6 +86,7 @@ fun HistoryScreen(session: BudgetSession) {
             }
         }
     }
+    com.sporez.actualist.android.ui.components.ScreenPullToRefresh("history-refresh", onRefresh) {
     LazyColumn(Modifier.fillMaxSize().testTag("history-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -124,6 +125,7 @@ fun HistoryScreen(session: BudgetSession) {
                 }
             }
         }
+    }
     }
     pending?.let { step -> HistoryUndoReview(step, onConfirm = { confirm(step) }, onCancel = { pending = null }) }
 }

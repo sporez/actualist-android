@@ -190,10 +190,12 @@ class AccountsViewModel(private val session: BudgetSession) : ViewModel() {
 }
 
 @Composable
-fun AccountsScreen(viewModel: AccountsViewModel, onOpenAccount: (Account) -> Unit) {
+fun AccountsScreen(viewModel: AccountsViewModel, onRefresh: suspend () -> Unit = {}, onOpenAccount: (Account) -> Unit) {
     // Balances are projected to sample values together (the net worth adds up), so money() must not hash them again.
     androidx.compose.runtime.CompositionLocalProvider(com.sporez.actualist.android.ui.components.LocalValuesProjected provides com.sporez.actualist.android.ui.components.LocalSampleValues.current) {
-        AccountsScreenContent(viewModel, onOpenAccount)
+        com.sporez.actualist.android.ui.components.ScreenPullToRefresh("accounts-refresh", onRefresh) {
+            AccountsScreenContent(viewModel, onOpenAccount)
+        }
     }
 }
 
