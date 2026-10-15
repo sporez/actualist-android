@@ -305,8 +305,8 @@ private fun BudgetScreenContent(
                     if (screen.month.categoryGroups.none { group -> (showHidden || !group.hidden) && group.categories.any { showHidden || !it.hidden } }) {
                         item(key = "empty") {
                             Column(Modifier.fillMaxWidth().padding(vertical = 24.dp).testTag("budget-empty"), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("This budget has no visible categories", style = MaterialTheme.typography.titleMedium)
-                                Text("Add a category, or show hidden categories.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("No categories", style = MaterialTheme.typography.titleMedium)
+                                Text("This budget has no visible categories.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }

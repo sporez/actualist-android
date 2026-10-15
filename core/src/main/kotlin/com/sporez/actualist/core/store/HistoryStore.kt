@@ -28,6 +28,7 @@ class StoredHistoryEntry(
     val undone: Boolean,
     val batches: List<UndoBatch>,
     val rows: HistoryRows,
+    val automatic: Boolean = false,
 )
 
 /**
@@ -45,16 +46,27 @@ class HistoryStore(private val database: BudgetDatabase) {
     private fun ensureTable() {
         sql.execute(
             "CREATE TABLE IF NOT EXISTS $TABLE (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, " +
-                "undone INTEGER NOT NULL DEFAULT 0, batches TEXT NOT NULL, rows TEXT NOT NULL)",
+                "undone INTEGER NOT NULL DEFAULT 0, batches TEXT NOT NULL, rows TEXT NOT NULL, " +
+                "automatic INTEGER NOT NULL DEFAULT 0)",
         )
+        addAutomaticColumn()
+    }
+
+    /** Additive: a table written before the flag existed gains the column. */
+    private fun addAutomaticColumn() {
+        val has = sql.query("PRAGMA table_info($TABLE)").any { it.string("name") == "automatic" }
+        if (!has) sql.execute("ALTER TABLE $TABLE ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0")
     }
 
     /** Entries oldest first, after dropping those older than [maxAgeMillis] and beyond [limit]. */
     fun load(limit: Int, maxAgeMillis: Long, nowMillis: Long): List<StoredHistoryEntry> {
         if (!tableExists()) return emptyList()
-        sql.transaction { prune(limit, maxAgeMillis, nowMillis) }
+        sql.transaction {
+            addAutomaticColumn()
+            prune(limit, maxAgeMillis, nowMillis)
+        }
         val loaded = ArrayList<StoredHistoryEntry>()
-        for (row in sql.query("SELECT id, created_at, undone, batches, rows FROM $TABLE ORDER BY id")) {
+        for (row in sql.query("SELECT id, created_at, undone, batches, rows, automatic FROM $TABLE ORDER BY id")) {
             val entry = try {
                 StoredHistoryEntry(
                     id = row.longOr0("id"),
@@ -62,6 +74,7 @@ class HistoryStore(private val database: BudgetDatabase) {
                     undone = row.longOr0("undone") != 0L,
                     batches = decodeBatches(row.string("batches") ?: ""),
                     rows = decodeRows(row.string("rows") ?: ""),
+                    automatic = row.longOr0("automatic") != 0L,
                 )
             } catch (error: Exception) {
                 null
@@ -72,14 +85,15 @@ class HistoryStore(private val database: BudgetDatabase) {
     }
 
     /** Stores a new gesture, dropping the redo tail it replaces, and returns its id. Call inside a transaction. */
-    fun append(batches: List<UndoBatch>, rows: HistoryRows, limit: Int, maxAgeMillis: Long, nowMillis: Long): Long {
+    fun append(batches: List<UndoBatch>, rows: HistoryRows, limit: Int, maxAgeMillis: Long, nowMillis: Long, automatic: Boolean = false): Long {
         ensureTable()
         sql.execute("DELETE FROM $TABLE WHERE undone = 1")
         sql.execute(
-            "INSERT INTO $TABLE (created_at, undone, batches, rows) VALUES (?, 0, ?, ?)",
+            "INSERT INTO $TABLE (created_at, undone, batches, rows, automatic) VALUES (?, 0, ?, ?, ?)",
             nowMillis,
             encodeBatches(batches),
             encodeRows(rows),
+            if (automatic) 1 else 0,
         )
         val id = sql.queryLong("SELECT MAX(id) FROM $TABLE") ?: 0L
         prune(limit, maxAgeMillis, nowMillis)

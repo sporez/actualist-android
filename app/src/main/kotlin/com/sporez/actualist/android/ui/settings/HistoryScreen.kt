@@ -58,7 +58,7 @@ fun HistoryScreen(session: BudgetSession, onRefresh: suspend () -> Unit = {}) {
             val presenter = HistoryPresenter(database)
             val details = history.details()
             val summaries = history.items()
-            val nextUndo = details.indexOfFirst { !it.undone }
+            val nextUndo = details.indexOfFirst { !it.undone }.let { if (it >= 0 && details[it].automatic) -1 else it }
             val nextRedo = details.indexOfLast { it.undone }
             details.mapIndexed { index, detail ->
                 val review = when (index) {
@@ -68,7 +68,7 @@ fun HistoryScreen(session: BudgetSession, onRefresh: suspend () -> Unit = {}) {
                 }
                 HistoryEntryModel(
                     presenter.row(detail.batches), detail.undone, summaries[index].summary, review,
-                    HistoryExplanations.undoBlockedReason(index, detail.undone, nextUndo),
+                    HistoryExplanations.undoBlockedReason(index, detail.undone, nextUndo, detail.automatic),
                 )
             }
         }

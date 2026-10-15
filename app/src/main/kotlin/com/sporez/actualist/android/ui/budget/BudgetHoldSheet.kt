@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,9 +40,16 @@ import com.sporez.actualist.core.money.MoneyExpression
 @Composable
 internal fun HoldDialog(screen: BudgetScreenState, initialText: String, viewModel: BudgetViewModel, onDone: () -> Unit, onDismiss: () -> Unit) {
     var review by remember { mutableStateOf<HoldReview?>(null) }
+    var reviewLoaded by remember { mutableStateOf(false) }
+    var reviewRetry by remember { mutableStateOf(0) }
+    val appSettings = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.sporez.actualist.android.ActualistApplication).container.settings
+    val sampleValues by appSettings.settings.collectAsState()
     var text by rememberSaveable { mutableStateOf(initialText) }
     var confirmingRelease by remember { mutableStateOf(false) }
-    LaunchedEffect(screen.month.month, screen.month.toBudget, screen.month.forNextMonth) { review = viewModel.holdReview() }
+    LaunchedEffect(screen.month.month, screen.month.toBudget, screen.month.forNextMonth, reviewRetry) {
+        review = viewModel.holdReview()
+        reviewLoaded = true
+    }
     val nextMonth = monthTitle(Months.shifted(screen.month.month, 1))
     val current = review
     val amount = MoneyExpression.evaluate(text)
@@ -53,8 +61,18 @@ internal fun HoldDialog(screen: BudgetScreenState, initialText: String, viewMode
         onDismissRequest = onDismiss,
         title = { Text("Hold for Next Month") },
         text = {
-            if (current == null) {
+            if (sampleValues.sampleValues) {
+                Column(Modifier.testTag("hold-sample-values"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Sample Values", style = MaterialTheme.typography.titleMedium)
+                    Text(SAMPLE_VALUES_HOLD_MESSAGE, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else if (current == null && !reviewLoaded) {
                 CircularProgressIndicator()
+            } else if (current == null) {
+                Column(Modifier.testTag("hold-not-loaded"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("The review is not loaded.")
+                    TextButton(onClick = { reviewLoaded = false; reviewRetry += 1 }, modifier = Modifier.testTag("hold-try-again")) { Text("Try Again") }
+                }
             } else {
                 Column(Modifier.verticalScroll(rememberScrollState()).testTag("hold-sheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(monthTitle(screen.month.month), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -93,7 +111,7 @@ internal fun HoldDialog(screen: BudgetScreenState, initialText: String, viewMode
         confirmButton = {
             TextButton(
                 onClick = { viewModel.hold(holding); onDone() },
-                enabled = canHold,
+                enabled = canHold && !sampleValues.sampleValues,
                 modifier = Modifier.testTag("hold-confirm"),
             ) { Text("Hold ${if (canHold) money(holding) else ""}".trim()) }
         },
@@ -126,6 +144,8 @@ internal fun HoldDialog(screen: BudgetScreenState, initialText: String, viewMode
         )
     }
 }
+
+internal const val SAMPLE_VALUES_HOLD_MESSAGE = "Turn off Sample Values to hold or release money."
 
 @Composable
 private fun HoldRow(label: String, value: String, tag: String) {

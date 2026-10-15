@@ -54,9 +54,9 @@ object BackgroundBankSync {
         if (session.isDemo || !BackgroundBankSyncPrefs.isEnabled(context)) return 0
         return try {
             val pending = PendingNewTransactions(session.database)
-            session.syncing {
-                val sync = serverOnlySimpleFin(session, serverUrl, server, secrets) ?: return@syncing 0
-                if (sync.serverSupport() != SimpleFinServerSupport.CONFIGURED) return@syncing 0
+            session.automatically {
+                val sync = serverOnlySimpleFin(session, serverUrl, server, secrets) ?: return@automatically 0
+                if (sync.serverSupport() != SimpleFinServerSupport.CONFIGURED) return@automatically 0
                 val before = pending.liveTransactionAccounts()
                 sync.syncAll()
                 val fresh = pending.newSince(before)

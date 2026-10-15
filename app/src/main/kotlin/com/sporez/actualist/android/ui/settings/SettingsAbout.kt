@@ -73,7 +73,7 @@ suspend fun buildDiagnosticReport(context: Context, session: BudgetSession, sett
     val lastError = (session.syncStatus.value as? SyncStatus.Failed)?.message
     val runs = BackgroundSyncRecord.history(context)
     val backgroundLines = if (runs.isEmpty()) {
-        listOf("No retained background runs")
+        listOf("No background wakes yet", "No retained background runs")
     } else {
         runs.mapIndexed { index, run ->
             "${index + 1}. started ${Instant.ofEpochMilli(run.startedAt)} | completed ${Instant.ofEpochMilli(run.completedAt)} | result ${run.outcome} | ${redactor.redact(run.message)}"
@@ -105,6 +105,10 @@ suspend fun buildDiagnosticReport(context: Context, session: BudgetSession, sett
         "[Local Store]",
         "Budget open: yes",
         "Pending local messages: ${pending ?: "unknown"}",
+        "",
+        "[Local-First Sync Events]",
+        "Total recorded events: 0",
+        "No local-first sync events recorded yet",
         "",
         "[Background Sync]",
         "Total background runs: ${BackgroundSyncRecord.total(context)}",

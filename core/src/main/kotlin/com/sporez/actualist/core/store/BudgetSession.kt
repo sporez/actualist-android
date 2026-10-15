@@ -114,6 +114,16 @@ class BudgetSession(
         }
     }
 
+    /**
+     * As [syncing], but what the block commits is recorded in History as an automatic gesture
+     * (a schedule or bank sync posting itself): listed, explained, never undoable.
+     */
+    suspend fun <T> automatically(block: BudgetSession.() -> T): T = finishing {
+        writeLock.withLock {
+            withContext(io) { history.record(true) { block() } }.also { changed() }
+        }
+    }
+
     fun publishSyncStatus(status: SyncStatus) {
         _syncStatus.value = status
     }

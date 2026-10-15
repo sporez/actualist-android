@@ -86,7 +86,18 @@ fun TransactionFilterSheet(viewModel: TransactionsViewModel, onDismiss: () -> Un
     var error by remember { mutableStateOf<String?>(null) }
     var saveName by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { options = viewModel.filterOptions() }
+    var optionsFailed by remember { mutableStateOf(false) }
+    var optionsRetry by remember { mutableStateOf(0) }
+    LaunchedEffect(optionsRetry) {
+        try {
+            options = viewModel.filterOptions()
+            optionsFailed = false
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            optionsFailed = true
+        }
+    }
 
     /** The draft with the date fields folded in; throws when the date text is not a day. */
     fun built(): TransactionFilterDraft {
@@ -111,6 +122,12 @@ fun TransactionFilterSheet(viewModel: TransactionsViewModel, onDismiss: () -> Un
                 modifier = Modifier.testTag("filter-sheet-reset"),
             ) { Text("Reset Filters") }
 
+            if (optionsFailed) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("filter-options-failed")) {
+                    Text("Some filter options could not be loaded.", style = MaterialTheme.typography.titleSmall)
+                    OutlinedButton(onClick = { optionsRetry += 1 }, modifier = Modifier.testTag("filter-options-retry")) { Text("Retry") }
+                }
+            }
             Text("Match conditions", style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
@@ -126,6 +143,7 @@ fun TransactionFilterSheet(viewModel: TransactionsViewModel, onDismiss: () -> Un
                     modifier = Modifier.testTag("filter-join-any"),
                 )
             }
+            Text("Status and search filters still apply.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             Text("Date", style = MaterialTheme.typography.titleSmall)
             FilterChip(

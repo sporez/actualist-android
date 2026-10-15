@@ -25,7 +25,7 @@ class UndoHistory(
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
     persist: Boolean = true,
 ) {
-    private class Entry(val batches: List<UndoBatch>, rows: HistoryRows? = null) {
+    private class Entry(val batches: List<UndoBatch>, rows: HistoryRows? = null, val automatic: Boolean = false) {
         var id: Long = 0L
 
         /** The touched rows as they must still be for the next undo or redo. */
@@ -47,14 +47,15 @@ class UndoHistory(
                 emptyList()
             }
             for (stored in loaded) {
-                entries += Entry(stored.batches, stored.rows).also { it.id = stored.id }
+                entries += Entry(stored.batches, stored.rows, stored.automatic).also { it.id = stored.id }
             }
             // Undone gestures are always the newest ones: the cursor sits before the first.
             cursor = loaded.indexOfFirst { it.undone }.let { if (it < 0) loaded.size else it }
         }
     }
 
-    val canUndo: Boolean @Synchronized get() = cursor > 0
+    /** An automatic gesture (a schedule or bank sync posting itself) is listed but never undoable. */
+    val canUndo: Boolean @Synchronized get() = cursor > 0 && !entries[cursor - 1].automatic
     val canRedo: Boolean @Synchronized get() = cursor < entries.size
 
     data class Item(val summary: String, val undone: Boolean)
@@ -64,15 +65,19 @@ class UndoHistory(
     fun items(): List<Item> = entries.mapIndexed { index, entry -> Item(describe(entry.batches), index >= cursor) }.reversed()
 
     /** A recorded gesture with its batches, for [HistoryPresenter]. */
-    class Detail(val batches: List<UndoBatch>, val undone: Boolean)
+    class Detail(val batches: List<UndoBatch>, val undone: Boolean, val automatic: Boolean = false)
 
     /** Recorded gestures, newest first, with their batches. */
     @Synchronized
-    fun details(): List<Detail> = entries.mapIndexed { index, entry -> Detail(entry.batches, index >= cursor) }.reversed()
+    fun details(): List<Detail> = entries.mapIndexed { index, entry -> Detail(entry.batches, index >= cursor, entry.automatic) }.reversed()
 
     /** Runs [block], recording everything it commits as one gesture. Nested calls join the outer one. */
     @Synchronized
-    fun <T> record(block: () -> T): T {
+    fun <T> record(block: () -> T): T = record(false, block)
+
+    /** As [record]; [automatic] marks a gesture the app made on its own, which History shows but never offers to undo. */
+    @Synchronized
+    fun <T> record(automatic: Boolean, block: () -> T): T {
         if (recording != null) return block()
         val batches = mutableListOf<UndoBatch>()
         recording = batches
@@ -83,14 +88,14 @@ class UndoHistory(
         }
         if (batches.isNotEmpty()) {
             while (entries.size > cursor) entries.removeAt(entries.size - 1)
-            val entry = Entry(batches)
+            val entry = Entry(batches, null, automatic)
             entries += entry
             if (entries.size > limit) entries.removeAt(0)
             cursor = entries.size
             if (store != null) {
                 // A failed save leaves the in-memory history working; it only will not survive a restart.
                 try {
-                    database.sql.transaction { entry.id = store.append(batches, entry.rows, limit, maxAgeMillis, nowMillis()) }
+                    database.sql.transaction { entry.id = store.append(batches, entry.rows, limit, maxAgeMillis, nowMillis(), automatic) }
                 } catch (error: Exception) {
                     entry.id = 0L
                 }

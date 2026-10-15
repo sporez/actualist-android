@@ -292,6 +292,31 @@ private data class SplitLine(
     val outflow: Boolean? = null,
 )
 
+/** Keeps the category picker balances through rotation. */
+private val CategoryBalancesSaver = listSaver<Map<String, Long>?, Any>(
+    save = { balances -> balances?.entries?.flatMap { listOf<Any>(it.key, it.value) } ?: emptyList() },
+    restore = { saved ->
+        if (saved.isEmpty()) {
+            null
+        } else {
+            saved.chunked(2).associate { (id, amount) -> (id as String) to (amount as Long) }
+        }
+    },
+)
+
+/** Keeps the reconciled-rows scope through rotation. */
+private val ReconciledScopeSaver = listSaver<com.sporez.actualist.core.transactions.ReconciledScope?, Any>(
+    save = { scope -> if (scope == null) emptyList() else listOf<Any>(ArrayList(scope.targetIds), ArrayList(scope.pairedIds)) },
+    restore = { saved ->
+        if (saved.size != 2) {
+            null
+        } else {
+            @Suppress("UNCHECKED_CAST")
+            com.sporez.actualist.core.transactions.ReconciledScope(saved[0] as List<String>, saved[1] as List<String>)
+        }
+    },
+)
+
 /** Keeps the split rows through rotation and resizing (a flat list of seven fields per row). */
 private val SplitLinesSaver = listSaver<List<SplitLine>, String?>(
     save = { lines ->
@@ -354,7 +379,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
         }
     }
     var picking by rememberSaveable { mutableStateOf<String?>(null) }
-    var categoryBalances by remember { mutableStateOf<Map<String, Long>?>(null) }
+    var categoryBalances by rememberSaveable(stateSaver = CategoryBalancesSaver) { mutableStateOf<Map<String, Long>?>(null) }
     val pickingCategory = picking == "category" || picking?.startsWith("split-") == true
     LaunchedEffect(pickingCategory, dateEpochDay) {
         if (pickingCategory) categoryBalances = viewModel.categoryBalances(LocalDate.ofEpochDay(dateEpochDay))
@@ -457,7 +482,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     val dirty = baseline.let { it != null && it != formSnapshot() }
     BackHandler(enabled = dirty) { discardPrompt = true }
 
-    var reconciledScope by remember { mutableStateOf<com.sporez.actualist.core.transactions.ReconciledScope?>(null) }
+    var reconciledScope by rememberSaveable(stateSaver = ReconciledScopeSaver) { mutableStateOf<com.sporez.actualist.core.transactions.ReconciledScope?>(null) }
     var reconcileGuard by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(existing?.id) { reconciledScope = viewModel.reconciledScope() }
     val reconciledNow = reconciledScope?.isEmpty == false
@@ -814,7 +839,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
         }
         "merge" -> {
             var candidates by remember { mutableStateOf<List<TransactionRow>?>(null) }
-            var confirmFor by remember { mutableStateOf<String?>(null) }
+            var confirmFor by rememberSaveable { mutableStateOf<String?>(null) }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
             LaunchedEffect(Unit) { candidates = viewModel.mergeCandidates() }
             val list = candidates

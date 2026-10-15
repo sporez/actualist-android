@@ -49,6 +49,14 @@ private fun TemplateSummaryLine(label: String, amount: Long) {
 }
 
 @Composable
+private fun TemplateModeChips(overwrite: Boolean, onChange: (Boolean) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FilterChip(selected = !overwrite, onClick = { onChange(false) }, label = { Text("Fill Empty") }, modifier = Modifier.testTag("templates-fill-empty"))
+        FilterChip(selected = overwrite, onClick = { onChange(true) }, label = { Text("Overwrite") }, modifier = Modifier.testTag("templates-overwrite"))
+    }
+}
+
+@Composable
 private fun goalDetail(category: TemplateCategoryPreview): String {
     val after = category.goalAfter ?: return "Goal target removed"
     val before = category.goalBefore ?: return "Goal target ${money(after)}"
@@ -65,10 +73,14 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
     var preview by remember { mutableStateOf<TemplatePreview?>(null) }
     var loaded by remember { mutableStateOf(false) }
     var overwriteFailed by remember { mutableStateOf(false) }
+    var kindTitles by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     LaunchedEffect(overwrite) {
         preview = viewModel.templatePreview(overwrite)
+        val definitions = viewModel.templateDefinitions()
+        val today = LocalDate.now()
+        kindTitles = definitions.mapValues { (_, json) -> TemplateDefinition.drafts(json, today)?.map { it.kind.title } ?: emptyList() }
         // A null preview with a template present means this mode could not be read.
-        overwriteFailed = preview == null && viewModel.templateDefinitions().isNotEmpty()
+        overwriteFailed = preview == null && definitions.isNotEmpty()
         loaded = true
     }
     AlertDialog(
@@ -79,13 +91,13 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                 val p = preview
                 when {
                     !loaded -> Text("Reading templates…")
-                    p == null && overwriteFailed -> Text(TemplatePreviewCopy.modeUnavailable(if (overwrite) com.sporez.actualist.core.templates.TemplateApplyMode.OVERWRITE else com.sporez.actualist.core.templates.TemplateApplyMode.FILL_EMPTY), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("templates-mode-unavailable"))
+                    p == null && overwriteFailed -> {
+                        TemplateModeChips(overwrite) { overwrite = it }
+                        Text(TemplatePreviewCopy.modeUnavailable(if (overwrite) com.sporez.actualist.core.templates.TemplateApplyMode.OVERWRITE else com.sporez.actualist.core.templates.TemplateApplyMode.FILL_EMPTY), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("templates-mode-unavailable"))
+                    }
                     p == null -> Text("No category in this budget has a template. Add one from a category's Template button or the template browser.")
                     else -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            FilterChip(selected = !overwrite, onClick = { overwrite = false }, label = { Text("Fill Empty") }, modifier = Modifier.testTag("templates-fill-empty"))
-                            FilterChip(selected = overwrite, onClick = { overwrite = true }, label = { Text("Overwrite") }, modifier = Modifier.testTag("templates-overwrite"))
-                        }
+                        TemplateModeChips(overwrite) { overwrite = it }
                         Text(
                             if (overwrite) "Replaces amounts already assigned this month." else "Only fills categories with nothing assigned yet.",
                             style = MaterialTheme.typography.bodySmall,
@@ -117,7 +129,7 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                                 if (category.perTemplate.size > 1) {
                                     category.perTemplate.forEachIndexed { index, amount ->
                                         Row {
-                                            Text("Template ${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(TemplatePreviewCopy.contributionTitle(index, kindTitles[category.categoryId].orEmpty(), category.perTemplate.size), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             Text(money(amount), style = MoneyTextStyle)
                                         }
                                     }

@@ -41,7 +41,7 @@ object ScheduleAdvancer {
         if (session.isDemo) return null
         val marker = PrefsMarker(context.applicationContext, session.budgetId)
         val result = try {
-            session.syncing { Schedules(database, clock).advance(today, marker) }
+            session.automatically { Schedules(database, clock).advance(today, marker) }
         } catch (error: Exception) {
             return null
         }

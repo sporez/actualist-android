@@ -294,11 +294,21 @@ class TransactionsViewModel(
     /** Rows selected for a batch action (long-press starts a selection). */
     val selection: StateFlow<Set<String>> = _selection.asStateFlow()
 
+    private val _selecting = MutableStateFlow(false)
+    /** True after "Select Transactions" (or a first long-press), until the selection is cleared or acted on. */
+    val selecting: StateFlow<Boolean> = _selecting.asStateFlow()
+
+    fun startSelecting() {
+        _selecting.value = true
+    }
+
     fun toggleSelected(id: String) {
+        _selecting.value = true
         _selection.value = _selection.value.let { if (id in it) it - id else it + id }
     }
 
     fun clearSelection() {
+        _selecting.value = false
         _selection.value = emptySet()
     }
 
@@ -325,7 +335,7 @@ class TransactionsViewModel(
                         if (locked.isNotEmpty()) mutations.relock(locked)
                     }
                 }
-                _selection.value = emptySet()
+                clearSelection()
                 messages.show(describe(result) + if (result.skipped > 0) " (${result.skipped} skipped: locked or not applicable)" else "")
             } catch (error: Exception) {
                 messages.show(error.message ?: "The selected transactions could not be changed.")
@@ -471,7 +481,7 @@ class TransactionsViewModel(
         viewModelScope.launch {
             try {
                 session.write { com.sporez.actualist.core.commands.TransactionCommands(database, clock).merge(ids[0], ids[1], allowReconciled) }
-                _selection.value = emptySet()
+                clearSelection()
                 messages.show("Merged 2 transactions")
             } catch (error: Exception) {
                 messages.show(failure(error, "The transactions could not be merged."))
@@ -830,6 +840,7 @@ fun TransactionsScreen(
             onDismiss = { converting = null },
         )
     }
+    val selectingNow by viewModel.selecting.collectAsState()
     Box(Modifier.fillMaxSize().testTag("transactions-screen")) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -840,6 +851,9 @@ fun TransactionsScreen(
                     TextButton(onClick = { importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }, modifier = Modifier.testTag("import-csv")) { Text("Import CSV") }
                 }
                 message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).testTag("transactions-message")) }
+            }
+            if (!selectingNow) {
+                TextButton(onClick = viewModel::startSelecting, modifier = Modifier.padding(horizontal = 8.dp).testTag("select-transactions")) { Text("Select Transactions") }
             }
             OutlinedTextField(
                 value = query.search.orEmpty(),
@@ -908,14 +922,15 @@ fun TransactionsScreen(
                         MessageBox(emptyFeedTitle(query.status), if (query.search.isNullOrBlank()) "Add one with the + button." else "Nothing matches that search.")
                     } else {
                         val selected by viewModel.selection.collectAsState()
-                        if (selected.isNotEmpty()) SelectionBar(selected.size, viewModel)
+                        val selecting = selectingNow
+                        if (selected.isNotEmpty() || selecting) SelectionBar(selected.size, viewModel)
                         androidx.compose.runtime.CompositionLocalProvider(com.sporez.actualist.android.ui.components.LocalValuesProjected provides sample) {
                         TransactionList(
                             list.rows,
                             showAccount = query.accountId == null,
                             selected = selected,
                             pendingNew = list.pendingNewIds,
-                            onOpen = { row -> if (selected.isNotEmpty()) viewModel.toggleSelected(row.id) else onOpen(real.rows.firstOrNull { it.id == row.id } ?: row) },
+                            onOpen = { row -> if (selected.isNotEmpty() || selecting) viewModel.toggleSelected(row.id) else onOpen(real.rows.firstOrNull { it.id == row.id } ?: row) },
                             onLongPress = { row -> viewModel.toggleSelected(row.id) },
                             hasMore = list.hasMore,
                             onLoadOlder = viewModel::loadOlder,
@@ -1270,7 +1285,17 @@ private fun SelectionBar(count: Int, viewModel: TransactionsViewModel) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        item { Text("$count selected", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 6.dp)) }
+        item {
+            Text(
+                if (count == 0) "Select Transactions" else "$count selected",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(end = 6.dp).testTag("selection-count"),
+            )
+        }
+        if (count == 0) {
+            item { TextButton(onClick = viewModel::clearSelection, modifier = Modifier.testTag("batch-cancel")) { Text("Cancel") } }
+            return@LazyRow
+        }
         item { TextButton(onClick = { open(BatchIntent.CLEAR) }, modifier = Modifier.testTag("batch-clear")) { Text("Clear") } }
         item { TextButton(onClick = { open(BatchIntent.UNCLEAR) }, modifier = Modifier.testTag("batch-unclear")) { Text("Unclear") } }
         item {
