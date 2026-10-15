@@ -368,6 +368,17 @@ private fun AddScheduleDialog(viewModel: SchedulesViewModel, onDismiss: () -> Un
                     androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
                     Text("Post the transaction automatically")
                 }
+                val problem = ScheduleValidation.message(
+                    needsAccount = accountId == null,
+                    amountValid = amountDraft != null,
+                    range = mode == ScheduleAmountMode.RANGE,
+                    recurring = frequency != "ONCE",
+                    repeat = repeat,
+                    dateValid = start != null,
+                    recurrenceValid = start != null && frequency != "ONCE" &&
+                        repeat.recurrence(start, com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)) != null,
+                )
+                if (problem != null) Text(problem, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("schedule-validation"))
             }
         },
         confirmButton = {
@@ -634,6 +645,23 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                 } else {
                     Text("Repeats: ${item.recurrenceDescription} (edit this rule in Actual)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                val problem = if (simpleRule) {
+                    ScheduleValidation.message(
+                        needsAccount = false,
+                        amountValid = locked || amountDraft != null,
+                        range = mode == ScheduleAmountMode.RANGE,
+                        recurring = frequency.isNotEmpty() && frequency != "ONCE",
+                        repeat = repeat,
+                        dateValid = start != null,
+                        recurrenceValid = start != null && frequency.isNotEmpty() && frequency != "ONCE" &&
+                            repeat.recurrence(start, com.sporez.actualist.core.rules.ScheduleFrequency.valueOf(frequency)) != null,
+                    )
+                } else if (!locked && amountDraft == null) {
+                    if (mode == ScheduleAmountMode.RANGE) "Enter a valid amount range." else "Enter a valid amount."
+                } else {
+                    null
+                }
+                if (problem != null) Text(problem, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("schedule-edit-validation"))
             }
         },
         confirmButton = {
@@ -660,6 +688,34 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
     )
 }
 
+
+/** Actualist's schedule editor validation wording (ScheduleEditorDraft). */
+internal object ScheduleValidation {
+    const val COUNT = "Enter a number of occurrences greater than zero."
+    const val ACCOUNT = "Choose an open account."
+    const val DATE = "Choose a valid schedule date and recurrence."
+
+    /** True when the "after N times" ending holds anything but a count of 1 or more. */
+    fun hasInvalidCount(options: RepeatOptions): Boolean =
+        options.end == "count" && options.endValue.trim().toLongOrNull()?.takeIf { it in 1..999 } == null
+
+    /** The reason the schedule cannot be saved, or null when the inputs are valid. */
+    fun message(
+        needsAccount: Boolean,
+        amountValid: Boolean,
+        range: Boolean,
+        recurring: Boolean,
+        repeat: RepeatOptions,
+        dateValid: Boolean,
+        recurrenceValid: Boolean,
+    ): String? {
+        if (needsAccount) return ACCOUNT
+        if (!amountValid) return if (range) "Enter a valid amount range." else "Enter a valid amount."
+        if (recurring && hasInvalidCount(repeat)) return COUNT
+        if (!dateValid || (recurring && !recurrenceValid)) return DATE
+        return null
+    }
+}
 
 /** "Every N" and an end rule for a recurring schedule; patterns and weekend handling stay in Actual. */
 data class RepeatOptions(

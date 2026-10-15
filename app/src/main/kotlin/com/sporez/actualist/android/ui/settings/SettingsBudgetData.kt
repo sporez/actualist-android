@@ -98,11 +98,7 @@ fun SettingsBudgetDataCard(session: BudgetSession, settings: AppSettings, server
             if (!session.isDemo && server.isSignedIn && app != null) {
                 Text("Reimport budget", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    if (pendingChanges > 0) {
-                        "Deletes the local copy of this budget and downloads a fresh one from the server. $pendingChanges unsynced change(s) would be lost."
-                    } else {
-                        "Deletes the local copy of this budget and downloads a fresh one from the server."
-                    },
+                    localDataLossMessage("Deletes the local copy of this budget and downloads a fresh one from the server.", pendingChanges),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

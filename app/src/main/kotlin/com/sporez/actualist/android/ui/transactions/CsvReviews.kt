@@ -54,6 +54,19 @@ fun csvImportSummary(review: CsvImportReview, included: Set<Int>): String {
     ).joinToString(" · ")
 }
 
+/** Actualist's count lines, in its order; the last two show only when something was skipped. */
+fun csvImportCountLines(review: CsvImportReview): List<Pair<String, Int>> {
+    fun count(kind: ImportDecisionKind) = review.rows.count { it.kind == kind }
+    val lines = mutableListOf(
+        "New rows" to count(ImportDecisionKind.ADDED),
+        "Existing rows updated" to count(ImportDecisionKind.UPDATED),
+        "Duplicates left unchanged" to count(ImportDecisionKind.UNCHANGED),
+    )
+    if (count(ImportDecisionKind.SKIPPED_DELETED) > 0) lines += "Matches reconciled rows" to count(ImportDecisionKind.SKIPPED_DELETED)
+    if (count(ImportDecisionKind.SKIPPED_BY_RULE) > 0) lines += "Skipped by a rule" to count(ImportDecisionKind.SKIPPED_BY_RULE)
+    return lines
+}
+
 /** Actualist's "Import CSV" review: columns as read, each row as new, updated or a duplicate, then Import. */
 @Composable
 fun CsvImportReviewDialog(
@@ -93,6 +106,14 @@ fun CsvImportReviewDialog(
                     Column(Modifier.testTag("csv-import-review"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Review the rows before anything is added to this account.", style = MaterialTheme.typography.bodySmall)
                         Text(csvImportSummary(review, state.included), style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("csv-import-summary"))
+                        Column(Modifier.testTag("csv-import-counts")) {
+                            csvImportCountLines(review).forEachIndexed { i, (label, n) ->
+                                Row(Modifier.fillMaxWidth().testTag("csv-import-count-$i")) {
+                                    Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                                    Text(n.toString(), style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
                         Text(
                             review.columns.joinToString(" · ") { column ->
                                 val where = column.header ?: column.position?.let { "column ${it + 1}" } ?: "not in file"

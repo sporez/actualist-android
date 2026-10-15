@@ -21,16 +21,62 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
+ * The last few background passes (start, finish, outcome and a short category), kept in
+ * SharedPreferences for the diagnostic report. Messages are fixed categories, never server text.
+ */
+object BackgroundSyncRecord {
+    private const val PREFS = "actualist_background_sync_record"
+    private const val MAX = 5
+
+    class Entry(val raw: String, val startedAt: Long, val completedAt: Long, val outcome: String, val message: String)
+
+    fun record(context: Context, startedAt: Long, outcome: String, message: String) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val line = "$startedAt|${System.currentTimeMillis()}|$outcome|${message.replace("|", "/").replace("\n", " ")}"
+        val kept = (listOf(line) + history(context).map { it.raw }).take(MAX)
+        prefs.edit().putString("runs", kept.joinToString("\n")).putInt("total", prefs.getInt("total", 0) + 1).apply()
+    }
+
+    fun history(context: Context): List<Entry> {
+        val text = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("runs", null) ?: return emptyList()
+        return text.lines().mapNotNull { raw ->
+            val parts = raw.split("|", limit = 4)
+            if (parts.size < 4) return@mapNotNull null
+            val started = parts[0].toLongOrNull() ?: return@mapNotNull null
+            val completed = parts[1].toLongOrNull() ?: return@mapNotNull null
+            Entry(raw, started, completed, parts[2], parts[3])
+        }
+    }
+
+    fun total(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("total", 0)
+}
+
+/**
  * Syncs the selected server budget while the app is in the background. It shares the UI's open
  * session through [SessionHub] (or opens the budget itself when the app is not on screen), so
  * there is only ever one connection to the file. Demo budgets and signed-out servers are skipped.
  */
 class BackgroundSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
+        val startedAt = System.currentTimeMillis()
+        return try {
+            runPass(startedAt)
+        } catch (error: Exception) {
+            BackgroundSyncRecord.record(applicationContext, startedAt, "failed", error.javaClass.simpleName)
+            throw error
+        }
+    }
+
+    private suspend fun runPass(startedAt: Long): Result {
         val container = (applicationContext as ActualistApplication).container
-        val id = container.settings.settings.value.selectedBudgetId ?: return Result.success()
-        val metadata = container.library.metadata(id) ?: return Result.success()
-        if (metadata.isDemo || metadata.cloudFileId == null || !container.server.isSignedIn) return Result.success()
+        fun skipped(reason: String): Result {
+            BackgroundSyncRecord.record(applicationContext, startedAt, "skipped", reason)
+            return Result.success()
+        }
+        val id = container.settings.settings.value.selectedBudgetId ?: return skipped("no budget selected")
+        val metadata = container.library.metadata(id) ?: return skipped("budget not on this device")
+        if (metadata.isDemo || metadata.cloudFileId == null) return skipped("budget is not a server budget")
+        if (!container.server.isSignedIn) return skipped("credentials unavailable on this device")
         val session = withContext(Dispatchers.IO) {
             container.sessions.acquire(id) { container.library.open(id) ?: error("The selected budget is no longer on this device.") }
         }
@@ -57,7 +103,9 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
                 if (ScheduleAdvancer.changedData(advanced) || banked > 0) container.server.sync(session)
             }
             com.sporez.actualist.android.widget.WidgetData.refresh(applicationContext)
-            if (status is SyncStatus.Failed) Result.retry() else Result.success()
+            val failed = status is SyncStatus.Failed
+            BackgroundSyncRecord.record(applicationContext, startedAt, if (failed) "failed" else "completed", if (failed) "sync failed" else "ok")
+            if (failed) Result.retry() else Result.success()
         } finally {
             withContext(Dispatchers.IO) { container.sessions.release(session) }
         }

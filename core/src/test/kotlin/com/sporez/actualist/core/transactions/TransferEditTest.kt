@@ -81,4 +81,14 @@ class TransferEditTest {
         assertEquals("credit", db.row(id).string("acct"))
         assertEquals("dining", db.row(id).string("category"))
     }
+
+    @Test
+    fun anOffBudgetSourceCarriesTheCategoryOnThePairedOnBudgetRow() = demo { db, writes ->
+        val id = writes.create(TransactionDraft(accountId = "carloan", date = day, amount = 5_000, payeeId = "xfer-checking", isTransfer = true)).transactionId
+        val pairedId = db.row(id).string("transferred_id")!!
+        assertNull(db.row(pairedId).string("category"))
+        writes.update(id, TransactionEdit(categoryId = "dining"))
+        assertEquals("dining", db.row(pairedId).string("category"))
+        assertNull(db.row(id).string("category"))
+    }
 }

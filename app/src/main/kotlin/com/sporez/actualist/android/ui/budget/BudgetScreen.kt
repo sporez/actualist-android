@@ -98,11 +98,21 @@ fun BudgetScreen(
     onShowCategoryMonth: ((String, String, String) -> Unit)? = null,
     /** Pull-to-refresh: runs the budget sync while the indicator shows. */
     onRefresh: suspend () -> Unit = {},
+    /** The floating add-transaction button (Actualist's bottom "Transaction" button). */
+    onAddTransaction: () -> Unit = {},
 ) {
     // The month shown is projected to sample values as a whole (totals add up), so money() must not hash it again.
     androidx.compose.runtime.CompositionLocalProvider(LocalValuesProjected provides LocalSampleValues.current) {
-        com.sporez.actualist.android.ui.components.ScreenPullToRefresh("budget-refresh", onRefresh) {
-            BudgetScreenContent(viewModel, onShowCategoryTransactions, onOpenHistory, onOpenSchedules, onOpenSettings, onShowCategoryMonth)
+        Box(Modifier.fillMaxSize()) {
+            com.sporez.actualist.android.ui.components.ScreenPullToRefresh("budget-refresh", onRefresh) {
+                BudgetScreenContent(viewModel, onShowCategoryTransactions, onOpenHistory, onOpenSchedules, onOpenSettings, onShowCategoryMonth)
+            }
+            androidx.compose.material3.FloatingActionButton(
+                onClick = onAddTransaction,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp).testTag("budget-add-transaction"),
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Filled.Add, contentDescription = "Add transaction")
+            }
         }
     }
 }

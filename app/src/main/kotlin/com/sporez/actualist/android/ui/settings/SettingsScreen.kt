@@ -99,7 +99,11 @@ fun SettingsScreen(
                     SettingsSignOut(server, session)
                 } else {
                     Text("Not connected. Connect to your own Actual server to sync a real budget.", style = MaterialTheme.typography.bodyMedium)
-                    if (current.serverUrl != null) SettingsSignInAgain(server, session)
+                    if (current.serverUrl != null) {
+                        val secrets = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.sporez.actualist.android.ActualistApplication).container.secrets
+                        SettingsCredentialsUnavailable(secrets) { settings.update { it.copy() } }
+                        SettingsSignInAgain(server, session)
+                    }
                     OutlinedButton(onClick = onConnectServer, modifier = Modifier.testTag("connect-server")) { Text("Connect to a server") }
                 }
             }

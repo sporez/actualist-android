@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,6 +46,7 @@ import com.sporez.actualist.android.ui.components.SectionCard
 import com.sporez.actualist.android.ui.settings.HeaderDraft
 import com.sporez.actualist.android.ui.settings.HeaderRowsEditor
 import com.sporez.actualist.android.ui.settings.LocalHttpWarning
+import com.sporez.actualist.android.ui.settings.ServerHeaderScope
 import com.sporez.actualist.android.ui.settings.localDataLossMessage
 import com.sporez.actualist.core.server.RemoteFile
 import com.sporez.actualist.core.server.ServerFailover
@@ -147,6 +149,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
     var encrypted by remember { mutableStateOf<RemoteFile?>(null) }
     var budgetPassword by remember { mutableStateOf("") }
     var headerRows by remember { mutableStateOf(HeaderDraft.fromText(server.savedCustomHeaders()?.second.orEmpty())) }
+    var useSavedHeaders by remember { mutableStateOf(true) }
     val headersText = HeaderDraft.toText(headerRows)
     // As Actualist: offer only the sign-in methods the server advertises. Null until known (or if the
     // lookup fails), when both are offered.
@@ -221,6 +224,23 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
             urlProblem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("server-url-error")) }
             Column(Modifier.fillMaxWidth().testTag("server-custom-headers"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Custom headers (optional)", style = MaterialTheme.typography.labelLarge)
+                // Headers are scoped to the server they were saved for; offer them for a different address (Actualist).
+                val savedHeaders = remember { server.savedCustomHeaders() }
+                val savedForOtherServer = savedHeaders != null && savedHeaders.second.isNotBlank() && url.trim().length > 8 &&
+                    !ServerHeaderScope.sameOrigin(savedHeaders.first, url.trim())
+                if (savedHeaders != null && savedForOtherServer) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Use Saved Headers for This Server", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Switch(
+                            checked = useSavedHeaders,
+                            onCheckedChange = {
+                                useSavedHeaders = it
+                                headerRows = HeaderDraft.fromText(if (it) savedHeaders.second else "")
+                            },
+                            modifier = Modifier.testTag("server-use-saved-headers"),
+                        )
+                    }
+                }
                 HeaderRowsEditor(headerRows) { headerRows = it }
             }
             unsupportedLoginMessage(loginMethods)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("server-login-unsupported")) }

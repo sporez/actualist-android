@@ -81,6 +81,8 @@ data class EditorData(
     val existing: TransactionRow?,
     /** Payees of the newest transactions, most recent first (the picker's "Recent" section). */
     val recentPayeeIds: List<String> = emptyList(),
+    /** The category on a transfer's paired row (an off-budget source keeps it there). */
+    val pairedCategoryId: String? = null,
 )
 
 class TransactionEditorViewModel(
@@ -104,6 +106,7 @@ class TransactionEditorViewModel(
                         payees = ledger.payees(),
                         categories = ledger.categories(),
                         existing = transactionId?.let { ledger.transaction(it) },
+                        pairedCategoryId = transactionId?.let { ledger.transaction(it) }?.transferId?.let { ledger.transaction(it) }?.categoryId,
                         recentPayeeIds = com.sporez.actualist.core.transactions.PayeeRecents.ids(
                             ledger.transactions(com.sporez.actualist.core.transactions.TransactionQuery(limit = 200)),
                         ),
@@ -151,7 +154,7 @@ class TransactionEditorViewModel(
             session.write {
                 val created = transactionWrites.create(draft)
                 // Actual learns categories from the user's edits (transactions-batch-update with learnCategories).
-                if (draft.categoryId != null) com.sporez.actualist.core.rules.CategoryLearning(database).learn(listOf(created.transactionId), java.time.LocalDate.now())
+                if (draft.categoryId != null && data.value?.accounts?.firstOrNull { it.id == draft.accountId }?.offBudget != true) com.sporez.actualist.core.rules.CategoryLearning(database).learn(listOf(created.transactionId), java.time.LocalDate.now())
             }
         } else {
             val existing = data.value?.existing
@@ -171,7 +174,8 @@ class TransactionEditorViewModel(
                         cleared = draft.cleared,
                     ),
                 )
-                if (draft.categoryId != null && draft.categoryId != existing?.categoryId) {
+                val sourceOffBudget = data.value?.accounts?.firstOrNull { it.id == draft.accountId }?.offBudget == true
+                if (!sourceOffBudget && draft.categoryId != null && draft.categoryId != existing?.categoryId) {
                     com.sporez.actualist.core.rules.CategoryLearning(database).learn(listOf(transactionId), java.time.LocalDate.now())
                 }
                 }
@@ -187,6 +191,11 @@ class TransactionEditorViewModel(
         session.read { com.sporez.actualist.core.rules.RuleEngine(database).run(input, LocalDate.now()) }
     } catch (error: Exception) {
         null
+    }
+
+    /** Removing split rows down to one: the family becomes a normal transaction with the survivor's category. */
+    fun collapseSplit(categoryId: String?, edit: TransactionEdit, unlockReconciled: Boolean = false) = launchWrite {
+        session.write { withUnlock(unlockReconciled) { transactionWrites.collapseSplit(transactionId!!, categoryId, edit) } }
     }
 
     fun saveSplit(edit: com.sporez.actualist.core.transactions.SplitFamilyEdit, unlockReconciled: Boolean = false) = launchWrite {
@@ -293,7 +302,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     var accountId by rememberSaveable { mutableStateOf(existing?.accountId ?: viewModel.defaultAccountId ?: loaded.accounts.firstOrNull { !it.offBudget }?.id ?: loaded.accounts.firstOrNull()?.id) }
     var payeeId by rememberSaveable { mutableStateOf(existing?.payeeId) }
     var newPayeeName by rememberSaveable { mutableStateOf("") }
-    var categoryId by rememberSaveable { mutableStateOf(existing?.categoryId) }
+    var categoryId by rememberSaveable { mutableStateOf(existing?.categoryId ?: loaded.pairedCategoryId) }
     var notes by rememberSaveable { mutableStateOf(existing?.notes ?: "") }
     var cleared by rememberSaveable { mutableStateOf(existing?.cleared ?: false) }
     var dateEpochDay by rememberSaveable { mutableStateOf((existing?.date ?: LocalDate.now()).toEpochDay()) }
@@ -342,8 +351,10 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     val payee = loaded.payees.firstOrNull { it.id == payeeId }
     val isTransfer = payee?.isTransfer == true
     val offBudget = account?.offBudget == true
-    val transferToOffBudget = isTransfer && loaded.accounts.firstOrNull { it.id == payee?.transferAccountId }?.offBudget == true
-    val showCategory = !offBudget && (!isTransfer || transferToOffBudget) && !splitting
+    val transferDestination = if (isTransfer) loaded.accounts.firstOrNull { it.id == payee?.transferAccountId } else null
+    // Across the budget boundary only the on-budget leg carries a category (Actual); the same side takes none.
+    val crossBudgetTransfer = transferDestination != null && transferDestination.offBudget != offBudget
+    val showCategory = (if (isTransfer) crossBudgetTransfer else !offBudget) && !splitting
     val magnitude = Money.parse(amountText)
     val signed = magnitude?.let { if (outflow) -kotlin.math.abs(it) else kotlin.math.abs(it) }
     val splitAmounts = splits.map { line -> Money.parse(line.amountText)?.let { if (line.outflow ?: outflow) -kotlin.math.abs(it) else kotlin.math.abs(it) } }
@@ -415,7 +426,19 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     LaunchedEffect(existing?.id) { reconciledScope = viewModel.reconciledScope() }
     val reconciledNow = reconciledScope?.isEmpty == false
     val performSave: (Boolean) -> Unit = { unlock ->
-                    if (existing != null && splitting) {
+                    if (existing != null && existing.isParent && !splitting) {
+                        viewModel.collapseSplit(
+                            categoryId,
+                            TransactionEdit(
+                                date = LocalDate.ofEpochDay(dateEpochDay),
+                                amount = signed!!,
+                                payeeId = payeeId.takeIf { it != existing.payeeId },
+                                notes = notes,
+                                cleared = cleared,
+                            ),
+                            unlock,
+                        )
+                    } else if (existing != null && splitting) {
                         viewModel.saveSplit(
                             com.sporez.actualist.core.transactions.SplitFamilyEdit(
                                 amount = signed!!,
@@ -555,8 +578,22 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                                 label = { Text("Split ${index + 1} notes") },
                                 modifier = Modifier.fillMaxWidth().testTag("split-notes-$index"),
                             )
-                            if (splits.size > 2) {
-                                TextButton(onClick = { splits = splits.toMutableList().also { it.removeAt(index) } }, modifier = Modifier.testTag("split-delete-$index")) {
+                            if (splits.size > 1) {
+                                TextButton(
+                                    onClick = {
+                                        if (splits.size == 2) {
+                                            // Removing from a pair collapses to a normal transaction with the survivor's category.
+                                            val survivor = splits[1 - index]
+                                            categoryId = survivor.categoryId
+                                            if (payeeId == null && newPayeeName.isBlank()) survivor.payeeId?.let { payeeId = it }
+                                            splitting = false
+                                            splits = listOf(SplitLine(null, ""), SplitLine(null, ""))
+                                        } else {
+                                            splits = splits.toMutableList().also { it.removeAt(index) }
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("split-delete-$index"),
+                                ) {
                                     Text("Remove split ${index + 1}", color = MaterialTheme.colorScheme.error)
                                 }
                             }

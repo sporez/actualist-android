@@ -26,6 +26,7 @@ import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.transactions.Account
 import com.sporez.actualist.core.transactions.AccountCloseAction
 import com.sporez.actualist.core.transactions.AccountCloseBlocker
+import com.sporez.actualist.core.transactions.AccountCloseConsequences
 import com.sporez.actualist.core.transactions.AccountCloseReview
 import com.sporez.actualist.core.transactions.CategoryOption
 
@@ -93,6 +94,8 @@ internal fun AccountCloseDialog(account: Account, viewModel: AccountsViewModel, 
     var picking by remember { mutableStateOf<String?>(null) }
     var review by remember { mutableStateOf<AccountCloseReview?>(null) }
     var choices by remember { mutableStateOf<Pair<List<Account>, List<CategoryOption>>?>(null) }
+    var scheduleNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(account.id) { scheduleNames = viewModel.closeScheduleNames(account.id) }
     LaunchedEffect(destinationId, categoryId) {
         review = viewModel.closeReview(account.id, destinationId, categoryId)
         if (choices == null) choices = viewModel.closeChoices()
@@ -120,6 +123,20 @@ internal fun AccountCloseDialog(account: Account, viewModel: AccountsViewModel, 
                         }
                     }
                 }
+                if (r != null) {
+                    val consequences = AccountCloseConsequences.rows(
+                        r,
+                        Money.format(r.balance),
+                        accountChoices.firstOrNull { it.id == destinationId }?.name,
+                        categoryChoices.firstOrNull { it.id == categoryId }?.name,
+                        scheduleNames,
+                    )
+                    Column(Modifier.testTag("close-consequences"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        consequences.forEach { row ->
+                            Text("${row.label}: ${row.value}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("close-consequence-${row.id}"))
+                        }
+                    }
+                }
                 r?.blockers?.firstOrNull { it != AccountCloseBlocker.DESTINATION_REQUIRED }?.let {
                     Text(it.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
@@ -130,7 +147,7 @@ internal fun AccountCloseDialog(account: Account, viewModel: AccountsViewModel, 
                 onClick = { viewModel.closeAccount(account.id, destinationId, categoryId); onDismiss() },
                 enabled = r?.action != null,
                 modifier = Modifier.testTag("close-account"),
-            ) { Text(if (r?.action == AccountCloseAction.DeleteEmpty) "Delete account" else "Close account", color = MaterialTheme.colorScheme.error) }
+            ) { Text(AccountCloseConsequences.actionTitle(r?.action) ?: "Close Account", color = MaterialTheme.colorScheme.error) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

@@ -33,7 +33,9 @@ import com.sporez.actualist.android.ui.components.PickerOption
 import com.sporez.actualist.android.ui.components.money
 import com.sporez.actualist.android.ui.theme.MoneyTextStyle
 import com.sporez.actualist.core.budget.BudgetMonthCategory
+import com.sporez.actualist.core.templates.TemplateCategoryPreview
 import com.sporez.actualist.core.templates.TemplatePreview
+import com.sporez.actualist.core.templates.TemplatePreviewCopy
 import com.sporez.actualist.core.templates.editor.TemplateDefinition
 import kotlinx.coroutines.delay
 import java.time.LocalDate
@@ -44,6 +46,13 @@ private fun TemplateSummaryLine(label: String, amount: Long) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         MoneyText(amount)
     }
+}
+
+@Composable
+private fun goalDetail(category: TemplateCategoryPreview): String {
+    val after = category.goalAfter ?: return "Goal target removed"
+    val before = category.goalBefore ?: return "Goal target ${money(after)}"
+    return "Goal target ${money(before)} → ${money(after)}"
 }
 
 /**
@@ -80,18 +89,41 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                         )
                         p.errors.firstOrNull()?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                         val changed = p.categories.filter { it.proposed != it.current }
-                        if (changed.isEmpty()) Text("Nothing to change.", style = MaterialTheme.typography.bodySmall)
-                        for (category in changed.take(12)) {
-                            Row {
-                                Text(category.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${money(category.current)} → ${money(category.proposed)}", style = MoneyTextStyle)
+                        val explanation = TemplatePreviewCopy.noOpExplanation(p)
+                        if (changed.isEmpty()) {
+                            Text(
+                                explanation ?: "Nothing to change.",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.testTag("templates-no-op"),
+                            )
+                        }
+                        for (category in changed) {
+                            Column(Modifier.testTag("templates-preview-row-${category.categoryId}")) {
+                                Row {
+                                    Text(category.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${money(category.current)} → ${money(category.proposed)}", style = MoneyTextStyle)
+                                }
+                                val detail = listOfNotNull(
+                                    TemplatePreviewCopy.priorityText(category.priorityLevels),
+                                    TemplatePreviewCopy.status(category),
+                                    if (category.shortfall > 0L) "Needs ${money(category.shortfall)} more" else null,
+                                    if (category.isGoalOnlyUpdate) goalDetail(category) else null,
+                                ).joinToString(" • ")
+                                Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (category.perTemplate.size > 1) {
+                                    category.perTemplate.forEachIndexed { index, amount ->
+                                        Row {
+                                            Text("Template ${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(money(amount), style = MoneyTextStyle)
+                                        }
+                                    }
+                                }
                             }
                         }
-                        if (changed.size > 12) Text("…and ${changed.size - 12} more", style = MaterialTheme.typography.bodySmall)
                         HorizontalDivider()
                         if (p.fundingRequired != 0L) TemplateSummaryLine("Funding required", p.fundingRequired)
                         TemplateSummaryLine("Assigned", p.assigned)
-                        if (p.released != 0L) TemplateSummaryLine("Released", p.released)
+                        if (p.released != 0L) TemplateSummaryLine(TemplatePreviewCopy.releasedTitle(p.isTracking), p.released)
                         if (p.stillNeeded > 0L) TemplateSummaryLine("Still needed", p.stillNeeded)
                         TemplateSummaryLine(if (p.isTracking) "Saved after" else "To Budget after", p.leftover)
                         Row(Modifier.testTag("templates-leftover-change")) {
@@ -111,6 +143,9 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                         }
                         if (p.availableAfter < 0L) {
                             Text("Over budget after Apply.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("templates-over-budget"))
+                        }
+                        if (explanation != null && changed.isNotEmpty()) {
+                            Text(explanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (p.hasNonMoneyUpdates) {
                             Text("Goal targets will also be updated.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("templates-goal-note"))

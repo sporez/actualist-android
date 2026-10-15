@@ -153,6 +153,13 @@ class AccountsViewModel(private val session: BudgetSession) : ViewModel() {
     }
 
     /** The open accounts and the expense categories a closing balance can move to. */
+    /** The names of the account's schedules that would pause or stop posting. */
+    suspend fun closeScheduleNames(id: String): List<String> = try {
+        session.read { com.sporez.actualist.core.transactions.AccountCloseConsequences.activeScheduleNames(database, id, LocalDate.now().toString()) }
+    } catch (error: Exception) {
+        emptyList()
+    }
+
     suspend fun closeChoices(): Pair<List<Account>, List<com.sporez.actualist.core.transactions.CategoryOption>> =
         session.read { ledger.accounts(includeClosed = false) to ledger.categories(includeHidden = true).filter { !it.isIncome } }
 
@@ -190,11 +197,19 @@ class AccountsViewModel(private val session: BudgetSession) : ViewModel() {
 }
 
 @Composable
-fun AccountsScreen(viewModel: AccountsViewModel, onRefresh: suspend () -> Unit = {}, onOpenAccount: (Account) -> Unit) {
+fun AccountsScreen(viewModel: AccountsViewModel, onRefresh: suspend () -> Unit = {}, onAddTransaction: () -> Unit = {}, onOpenAccount: (Account) -> Unit) {
     // Balances are projected to sample values together (the net worth adds up), so money() must not hash them again.
     androidx.compose.runtime.CompositionLocalProvider(com.sporez.actualist.android.ui.components.LocalValuesProjected provides com.sporez.actualist.android.ui.components.LocalSampleValues.current) {
-        com.sporez.actualist.android.ui.components.ScreenPullToRefresh("accounts-refresh", onRefresh) {
-            AccountsScreenContent(viewModel, onOpenAccount)
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+            com.sporez.actualist.android.ui.components.ScreenPullToRefresh("accounts-refresh", onRefresh) {
+                AccountsScreenContent(viewModel, onOpenAccount)
+            }
+            androidx.compose.material3.FloatingActionButton(
+                onClick = onAddTransaction,
+                modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(18.dp).testTag("accounts-add-transaction"),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Add transaction")
+            }
         }
     }
 }

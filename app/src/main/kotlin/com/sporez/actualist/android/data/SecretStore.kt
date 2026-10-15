@@ -59,6 +59,17 @@ class SecretStore(context: Context) {
 
     fun getString(name: String): String? = get(name)?.toString(Charsets.UTF_8)
 
+    /**
+     * True when a secret named [name] is stored but cannot be decrypted (the Keystore key was lost or
+     * replaced), as opposed to never having been saved. Actualist's "Saved credentials unavailable".
+     */
+    fun isUnreadable(name: String): Boolean =
+        prefs.getString("$name.data", null) != null && prefs.getString("$name.iv", null) != null && get(name) == null
+
+    /** Why the saved credentials cannot be used, or null when they are readable or absent. */
+    fun recoveryMessage(): String? =
+        if (isUnreadable(SERVER_TOKEN)) "This device could not read its saved credentials." else null
+
     fun remove(name: String) {
         prefs.edit().remove("$name.iv").remove("$name.data").apply()
     }

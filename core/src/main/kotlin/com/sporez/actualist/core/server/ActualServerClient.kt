@@ -27,6 +27,8 @@ sealed class ServerException(message: String) : Exception(message) {
     class InsecureUrl : ServerException(ServerConnectionSecurity.REMOTE_HTTP_BLOCKED)
     class AuthenticationFailed : ServerException("Your Actual session is no longer valid. Sign in again to resume syncing.")
     class WrongPassword : ServerException("The server password is incorrect.")
+    class PasswordSignInDisabled : ServerException(ServerErrorCategory.PASSWORD_AUTH_DISABLED.description)
+    class HeaderRejected : ServerException(ServerErrorCategory.INVALID_HEADER.description)
     class RedirectRefused : ServerException("The server redirected the request. Enter the final server URL directly.")
     class SyncRejected(val reason: String) : ServerException(
         when (reason) {
@@ -126,13 +128,26 @@ class ActualServerClient(
         val response = http.newCall(request("account/login").post(payload.toRequestBody(JSON)).build()).executeSafely()
         response.use {
             val text = it.bodyText()
+            if (!it.isSuccessful) {
+                when (ServerErrorCategory.classifyBody(text)) {
+                    ServerErrorCategory.PASSWORD_AUTH_DISABLED -> throw ServerException.PasswordSignInDisabled()
+                    ServerErrorCategory.INVALID_HEADER -> throw ServerException.HeaderRejected()
+                    else -> Unit
+                }
+            }
             if (it.code == 400 || it.code == 401 || it.code == 403) throw ServerException.WrongPassword()
             if (!it.isSuccessful) throw errorFor(it.code, text)
             val root = parse(text)
             val token = ((root["data"] as? JsonObject)?.get("token") as? JsonPrimitive)?.contentOrNull
                 ?: (root["token"] as? JsonPrimitive)?.contentOrNull
             if (token.isNullOrEmpty()) {
-                if ((root["status"] as? JsonPrimitive)?.contentOrNull == "error") throw ServerException.WrongPassword()
+                if ((root["status"] as? JsonPrimitive)?.contentOrNull == "error") {
+                    when (ServerErrorCategory.classifyBody(text)) {
+                        ServerErrorCategory.PASSWORD_AUTH_DISABLED -> throw ServerException.PasswordSignInDisabled()
+                        ServerErrorCategory.INVALID_HEADER -> throw ServerException.HeaderRejected()
+                        else -> throw ServerException.WrongPassword()
+                    }
+                }
                 throw ServerException.InvalidResponse()
             }
             return token
@@ -268,6 +283,7 @@ class ActualServerClient(
     }
 
     private fun errorFor(status: Int, body: String): ServerException {
+        if (ServerErrorCategory.classifyBody(body) == ServerErrorCategory.INVALID_HEADER) return ServerException.HeaderRejected()
         if (status == 401 || status == 403) return ServerException.AuthenticationFailed()
         val token = body.trim()
         if (token in SYNC_REJECTIONS) return ServerException.SyncRejected(token)

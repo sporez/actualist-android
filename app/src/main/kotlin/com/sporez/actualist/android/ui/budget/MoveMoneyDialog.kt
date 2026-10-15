@@ -16,6 +16,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,12 +33,36 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.ui.components.AmountField
+import com.sporez.actualist.android.ui.components.LocalMoneyFormat
 import com.sporez.actualist.android.ui.components.PickerDialog
 import com.sporez.actualist.android.ui.components.PickerOption
 import com.sporez.actualist.android.ui.components.money
 import com.sporez.actualist.android.ui.theme.MoneyTextStyle
 import com.sporez.actualist.core.budget.BudgetMonthCategory
 import com.sporez.actualist.core.money.MoneyExpression
+
+/**
+ * Slider range and detent for Move Money (Actualist's BudgetMoveMoneySliderMetrics): the track is 125%
+ * of the paying side's available amount, never less than the typed amount, or 10.00 when both are zero.
+ * Dragging up to the available amount holds there for a short stretch before the slider passes it.
+ */
+internal object MoveMoneySliderMetrics {
+    private const val ZERO_AVAILABLE_MAXIMUM = 1_000L
+
+    fun maximumAmount(baseline: Long, current: Long): Long {
+        val scaled = (maxOf(0L, baseline) * 5 + 3) / 4
+        val candidate = maxOf(scaled, maxOf(0L, current))
+        return if (candidate > 0L) candidate else ZERO_AVAILABLE_MAXIMUM
+    }
+
+    /** The amount a drag to [proposed] lands on: held at [detent] for the next 4% of the track. */
+    fun apply(proposed: Long, detent: Long, maximum: Long): Long {
+        val value = maxOf(0L, proposed)
+        if (detent <= 0L) return value
+        val hold = maxOf(1L, maximum / 25)
+        return if (value > detent && value <= detent + hold) detent else value
+    }
+}
 
 /** One counterparty of a move (null is To Budget) with the amount typed for it. */
 private data class MoveLeg(val counterpartyId: String?, val amountText: String)
@@ -54,6 +80,7 @@ internal fun MoveMoneyDialog(category: BudgetMonthCategory, screen: BudgetScreen
     val legs = remember(category.id) { mutableStateListOf(MoveLeg(null, "")) }
     // Which leg the picker is choosing for; legs.size means a new one ("Select Another").
     var pickingFor by remember { mutableStateOf<Int?>(null) }
+    val format = LocalMoneyFormat.current
     val others = screen.month.categoryGroups.filter { !it.isIncome }.flatMap { group -> group.categories.map { it to group } }.filter { it.first.id != category.id }
 
     fun balanceOf(id: String?): Long = if (id == null) screen.month.toBudget else others.firstOrNull { it.first.id == id }?.first?.balance ?: 0L
@@ -102,6 +129,27 @@ internal fun MoveMoneyDialog(category: BudgetMonthCategory, screen: BudgetScreen
                         }
                     }
                     AmountField(leg.amountText, { legs[index] = leg.copy(amountText = it) }, label = "Amount", tag = "move-amount-field$suffix", expressions = true)
+                    // The payer's available amount is the detent; the track runs 125% of it so a move can pass it.
+                    val detent = if (outgoing) category.balance else balanceOf(leg.counterpartyId)
+                    val current = amountOf(leg) ?: 0L
+                    val maximum = MoveMoneySliderMetrics.maximumAmount(detent, current)
+                    val overshooting = detent > 0L && current > detent
+                    Slider(
+                        value = current.coerceAtMost(maximum).toFloat(),
+                        onValueChange = { raw ->
+                            val snapped = MoveMoneySliderMetrics.apply(raw.toLong(), detent, maximum)
+                            legs[index] = leg.copy(amountText = if (snapped == 0L) "" else format.editText(snapped))
+                        },
+                        valueRange = 0f..maximum.toFloat(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = if (overshooting) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            activeTrackColor = if (overshooting) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        ),
+                        modifier = Modifier.testTag("move-slider$suffix"),
+                    )
+                    if (overshooting) {
+                        Text("Past the available amount", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("move-past-available$suffix"))
+                    }
                 }
                 if (canAddAnother) {
                     TextButton(onClick = { pickingFor = legs.size }, modifier = Modifier.testTag("move-add-another")) { Text("Select Another") }

@@ -496,6 +496,14 @@ class TransactionWrites(
             }
         }
 
+        // Across sides only the on-budget leg carries the category: from an off-budget account it goes on the paired row.
+        val pairedId = transferId
+        val chosenCategory = edit.categoryId
+        if (offBudget && pairedId != null && destination != null && !accountOffBudget(destination) && chosenCategory != null) {
+            validateCategory(chosenCategory)
+            transferDrafts += CellDraft("transactions", pairedId, "category", SyncValue.text(chosenCategory))
+        }
+
         if (account != row.accountId) cell(transactionId, "acct", SyncValue.text(account))
         if (date != row.date && date != null) cell(transactionId, "date", SyncValue.int(date))
         if (amount != row.amount) cell(transactionId, "amount", SyncValue.int(amount))
@@ -578,6 +586,38 @@ class TransactionWrites(
 
     fun updateSplit(transactionId: String, edit: SplitFamilyEdit): TransactionWriteResult {
         val result = database.commitLocal { updateSplitDrafts(transactionId, edit) to Unit }
+        return TransactionWriteResult(transactionId, result.messages)
+    }
+
+    /**
+     * Collapses a split parent back to a normal transaction (Actualist: removing split rows down to
+     * one): the children are tombstoned, the parent stops being a parent and takes the survivor's
+     * [categoryId], and the supplied [edit] fields (amount, date, notes, cleared, payee) are applied.
+     */
+    fun collapseSplitDrafts(transactionId: String, categoryId: String?, edit: TransactionEdit): List<CellDraft> {
+        val parent = loadRow(transactionId)?.takeIf { !it.tombstone } ?: throw LocalFirstException.InvalidLocalWrite("missing transaction")
+        if (!parent.isParent) throw LocalFirstException.InvalidLocalWrite("not a split transaction")
+        if (parent.reconciled) throw LocalFirstException.InvalidLocalWrite("reconciled transactions are locked")
+        categoryId?.let(::validateCategory)
+        val drafts = mutableListOf<CellDraft>()
+        sql.query("SELECT id FROM transactions WHERE parent_id = ? AND (tombstone IS NULL OR tombstone = 0)", transactionId)
+            .mapNotNull { it.string("id") }.sorted()
+            .forEach { drafts += CellDraft("transactions", it, "tombstone", SyncValue.bool(true)) }
+        fun cell(column: String, value: SyncValue) {
+            drafts += CellDraft("transactions", transactionId, column, value)
+        }
+        cell("isParent", SyncValue.bool(false))
+        cell("category", SyncValue.textOrNull(categoryId))
+        edit.amount?.let { cell("amount", SyncValue.int(it)) }
+        edit.date?.let { cell("date", SyncValue.int(Months.packedDate(it).toLong())) }
+        edit.notes?.let { cell("notes", SyncValue.textOrNull(it.ifEmpty { null })) }
+        edit.cleared?.let { cell("cleared", SyncValue.bool(it)) }
+        edit.payeeId?.let { cell("description", SyncValue.text(it)) }
+        return drafts
+    }
+
+    fun collapseSplit(transactionId: String, categoryId: String?, edit: TransactionEdit): TransactionWriteResult {
+        val result = database.commitLocal { collapseSplitDrafts(transactionId, categoryId, edit) to Unit }
         return TransactionWriteResult(transactionId, result.messages)
     }
 

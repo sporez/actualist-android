@@ -145,10 +145,10 @@ fun BankSyncScreen(session: BudgetSession, server: ServerConnection) {
     }
     LaunchedEffect(revision, available) { reload() }
 
-    fun record(lines: List<BankSyncRunLine>) {
+    fun record(lines: List<BankSyncRunLine>, source: String = "Sync All") {
         val now = System.currentTimeMillis()
         val outcome = BankSyncRunReport.outcome(lines)
-        prefs.edit().putLong("last_time", now).putString("last_outcome", outcome).apply()
+        prefs.edit().putLong("last_time", now).putString("last_outcome", outcome).putString("last_source", source).apply()
         lastTime = now
         lastOutcome = outcome
     }
@@ -181,7 +181,7 @@ fun BankSyncScreen(session: BudgetSession, server: ServerConnection) {
             running = true
             val line = syncOne(row)
             results = listOf(line)
-            record(listOf(line))
+            record(listOf(line), "Sync")
             running = false
             reload()
         }
@@ -237,6 +237,16 @@ fun BankSyncScreen(session: BudgetSession, server: ServerConnection) {
                     else "${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(lastTime))} · $outcome",
                     modifier = Modifier.testTag("bank-sync-last-result"),
                 )
+                if (outcome != null && lastTime != 0L) {
+                    // Actualist's "Sync All · 2h ago".
+                    val source = prefs.getString("last_source", null) ?: "Sync All"
+                    Text(
+                        "$source · ${BankSyncCopy.ageText(lastTime, System.currentTimeMillis())}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("bank-sync-last-caption"),
+                    )
+                }
                 Button(
                     onClick = { syncAll() },
                     enabled = !running && rows.any { it.syncable },

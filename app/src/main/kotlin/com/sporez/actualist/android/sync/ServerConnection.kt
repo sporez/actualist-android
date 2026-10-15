@@ -162,7 +162,7 @@ class ServerConnection(
             val changed = !url.equals(settings.settings.value.serverUrl, ignoreCase = true)
             val endpoint = if (headers.isEmpty()) null else com.sporez.actualist.core.server.EndpointHeaders(url, headers)
             if (password.isNotEmpty()) {
-                if ("password" !in methods) throw ServerException.HttpStatus(501)
+                if ("password" !in methods) throw ServerException.PasswordSignInDisabled()
                 secrets.putString(SecretStore.SERVER_TOKEN, com.sporez.actualist.core.server.ServerClients.actual(url, endpoint).login(password))
                 _needsReauthentication.value = false
             } else if (changed) {
@@ -188,7 +188,7 @@ class ServerConnection(
     suspend fun signIn(serverUrl: String, password: String) = withContext(Dispatchers.IO) {
         val client = client(serverUrl)
         val methods = client.loginMethods()
-        if ("password" !in methods) throw ServerException.HttpStatus(501)
+        if ("password" !in methods) throw ServerException.PasswordSignInDisabled()
         val token = client.login(password)
         secrets.putString(SecretStore.SERVER_TOKEN, token)
         settings.update { it.copy(serverUrl = client.url) }

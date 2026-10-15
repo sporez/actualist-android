@@ -27,7 +27,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.data.AppSettings
+import com.sporez.actualist.android.sync.BackgroundSyncRecord
 import com.sporez.actualist.android.ui.components.SectionCard
+import com.sporez.actualist.core.server.DiagnosticRedactor
 import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.store.SyncStatus
 import kotlinx.coroutines.launch
@@ -64,7 +66,21 @@ suspend fun buildDiagnosticReport(context: Context, session: BudgetSession, sett
         is SyncStatus.Synced -> "synced, ${s.uploaded} sent, ${s.applied} received"
         is SyncStatus.Failed -> "failed, ${s.pendingChanges} pending"
     }
-    return listOf(
+    val pending = runCatching { session.read { database.pendingLocalMessageCount() } }.getOrNull()
+    val sensitive = listOfNotNull(prefs.serverUrl, prefs.fallbackServerUrl, session.budgetId) +
+        listOfNotNull(prefs.serverUrl, prefs.fallbackServerUrl).mapNotNull { runCatching { Uri.parse(it).host }.getOrNull() }
+    val redactor = DiagnosticRedactor(sensitive)
+    val lastError = (session.syncStatus.value as? SyncStatus.Failed)?.message
+    val runs = BackgroundSyncRecord.history(context)
+    val backgroundLines = if (runs.isEmpty()) {
+        listOf("No retained background runs")
+    } else {
+        runs.mapIndexed { index, run ->
+            "${index + 1}. started ${Instant.ofEpochMilli(run.startedAt)} | completed ${Instant.ofEpochMilli(run.completedAt)} | result ${run.outcome} | ${redactor.redact(run.message)}"
+        }
+    }
+    val skipped = runs.firstOrNull()?.takeIf { it.outcome == "skipped" }?.let { "Skipped: ${redactor.redact(it.message)}" }
+    return (listOf(
         "Actualist Diagnostic Report",
         "Generated: ${Instant.now()}",
         "Privacy: This report excludes credentials, server addresses, names, budget contents, transaction details and amounts.",
@@ -84,6 +100,18 @@ suspend fun buildDiagnosticReport(context: Context, session: BudgetSession, sett
         "Fallback server configured: ${if (prefs.fallbackServerUrl != null) "yes" else "no"}",
         "Sync status: $status",
         "Accounts: ${accounts?.size ?: "unknown"} (${accounts?.count { it.closed } ?: 0} closed)",
+        "Last app error: ${redactor.redact(lastError)}",
+        "",
+        "[Local Store]",
+        "Budget open: yes",
+        "Pending local messages: ${pending ?: "unknown"}",
+        "",
+        "[Background Sync]",
+        "Total background runs: ${BackgroundSyncRecord.total(context)}",
+        "Retained runs: ${runs.size}",
+        "",
+        "[Background Run History]",
+    ) + backgroundLines + listOfNotNull(skipped) + listOf(
         "",
         "[Preferences]",
         "Theme: ${prefs.namedTheme?.name ?: prefs.themeMode.name}",
@@ -94,7 +122,7 @@ suspend fun buildDiagnosticReport(context: Context, session: BudgetSession, sett
         "App switcher privacy: ${prefs.appSwitcherPrivacy.name}",
         "Show total assigned: ${prefs.showTotalAssigned}",
         "Hide carryover arrows: ${prefs.hideCarryoverArrows}",
-    ).joinToString("\n")
+    )).joinToString("\n")
 }
 
 /** Version, licences and the diagnostic report. */

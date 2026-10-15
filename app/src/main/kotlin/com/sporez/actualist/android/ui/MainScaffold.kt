@@ -258,6 +258,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                     onOpenSchedules = { navController.navigate("schedules") },
                     onOpenSettings = { navController.navigate("settings") },
                     onRefresh = { syncNow() },
+                    onAddTransaction = { navController.navigate("transaction-new") },
                 )
             }
             composable("spending") {
@@ -272,7 +273,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
             composable("accounts") {
                 val vm = viewModel(key = "accounts-$key") { AccountsViewModel(session) }
-                AccountsScreen(vm, onRefresh = { syncNow() }) { navController.navigate("account/${encode(it.id)}?name=${encode(it.name)}") }
+                AccountsScreen(vm, onRefresh = { syncNow() }, onAddTransaction = { navController.navigate("transaction-new") }) { navController.navigate("account/${encode(it.id)}?name=${encode(it.name)}") }
             }
             composable("reports") {
                 val vm = viewModel(key = "reports-$key") { ReportsViewModel(session) }

@@ -21,11 +21,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.sporez.actualist.android.data.SecretStore
 import com.sporez.actualist.android.sync.ServerConnection
 import com.sporez.actualist.core.store.SyncStatus
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+
+/**
+ * Actualist's "Saved credentials unavailable" state: the server token is stored but this device
+ * cannot read it. "Try again" reads it once more; signing in again replaces it. Shows nothing otherwise.
+ */
+@Composable
+fun SettingsCredentialsUnavailable(secrets: SecretStore, onRetried: () -> Unit) {
+    var message by remember { mutableStateOf(secrets.recoveryMessage()) }
+    val shown = message ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("credentials-unavailable")) {
+        Text("Saved credentials unavailable", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error)
+        Text(shown, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Try again, or sign in again to save new credentials.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(
+            onClick = {
+                message = secrets.recoveryMessage()
+                onRetried()
+            },
+            modifier = Modifier.testTag("credentials-retry"),
+        ) { Text("Try again") }
+    }
+}
 
 /** Actualist's "Last Synced" and "Pending Sync" rows. */
 @Composable

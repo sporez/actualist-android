@@ -35,6 +35,8 @@ data class TemplateCategoryPreview(
     val goalBefore: Long?,
     val goalAfter: Long?,
     val metric: TemplateMetric,
+    /** The distinct priorities of the category's template entries, ascending. */
+    val priorityLevels: List<Int> = emptyList(),
 )
 
 /**
@@ -449,6 +451,7 @@ class BudgetTemplates(
                     goalBefore = goalBefore,
                     goalAfter = goalAfter,
                     metric = metric,
+                    priorityLevels = entries.mapNotNull { it.priority }.distinct().sorted(),
                 ),
             )
         }
