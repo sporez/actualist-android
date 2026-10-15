@@ -61,9 +61,12 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38690838944 — 3,201 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38690838828 — 4/4, including the local-network URL rules.
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38692086883 — 107/109 on the third audit's work; the two failures (a pre-existing search bug, and a test needing a scroll) were fixed and passed in https://github.com/sporez/actualist-android/actions/runs/38696168324 (11/11). Before that, 97/97 in https://github.com/sporez/actualist-android/actions/runs/38688475759; process-death relaunch reopened the selected budget. The run starts with a throwaway warm-up instrumentation; every test class saves `failure-<test>.png` when it fails.
+- Build and unit test: green on `8f11586` (the last code change), https://github.com/sporez/actualist-android/actions/runs/38719467754 — 3,248 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in their own workflow).
+- Real Actual server: green, https://github.com/sporez/actualist-android/actions/runs/38690838828 — 4/4.
+- Emulator (API 34): https://github.com/sporez/actualist-android/actions/runs/38717929707 — 128/129 on `9c823fb`; process-death relaunch reopened the selected budget. The one failure was test-side (a lower row in the longer grouped category picker); its fix (`0903929`) and the sixth audit's copy-level changes (`8f11586`) have not run on the emulator yet.
+- **Blocked:** since `0903929`, GitHub Actions refuses to start jobs ("recent account payments have failed or your spending limit needs to be increased"). Builds and emulator rounds resume once the account's billing or spending limit is fixed.
+
+Parity: six audits against Actualist's source and its own tests; the last estimates about 99% of user-visible features matching, with the copy-level remainder since implemented.
 
 ## Known limitations
 
