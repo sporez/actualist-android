@@ -29,7 +29,7 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 /** What the widget shows: the selected budget's To Budget this month and its net worth. */
-data class WidgetSummary(val budgetName: String, val month: String, val toBudget: Long, val netWorth: Long, val hideAmounts: Boolean, val dark: Boolean = true)
+data class WidgetSummary(val budgetName: String, val month: String, val toBudget: Long, val netWorth: Long, val hideAmounts: Boolean, val dark: Boolean = true, val named: com.sporez.actualist.android.data.NamedTheme? = null)
 
 object WidgetData {
     /** Reads through the session hub, so an open budget is shared rather than opened twice. */
@@ -46,7 +46,8 @@ object WidgetData {
                     toBudget = budget.fetchBudgetMonth(month).toBudget,
                     netWorth = ledger.accounts().filter { !it.closed }.sumOf { it.balance },
                     hideAmounts = settings.hideAmounts,
-                    dark = context?.let { WidgetPalette.resolve(it, settings.themeMode).dark } ?: (settings.themeMode != com.sporez.actualist.android.data.ThemeMode.LIGHT),
+                    dark = settings.namedTheme?.dark ?: context?.let { WidgetPalette.resolve(it, settings.themeMode).dark } ?: (settings.themeMode != com.sporez.actualist.android.data.ThemeMode.LIGHT),
+                    named = settings.namedTheme,
                 )
             }
         } finally {
@@ -69,7 +70,7 @@ class BudgetWidget : GlanceAppWidget() {
 
     @androidx.compose.runtime.Composable
     private fun Content(summary: WidgetSummary?) {
-        val palette = WidgetPalette(summary?.dark ?: true)
+        val palette = WidgetPalette(summary?.dark ?: true, summary?.named)
         val text = palette.text
         val muted = palette.muted
         fun amount(value: Long) = if (summary?.hideAmounts == true) "•••" else Money.format(value)

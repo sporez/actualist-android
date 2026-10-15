@@ -8,4 +8,6 @@
     android:targetCellHeight="2"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="1800000"
+    android:configure="com.sporez.actualist.android.widget.config.QuickActionsConfigActivity"
+    android:widgetFeatures="reconfigurable"
     android:widgetCategory="home_screen" />

@@ -6,8 +6,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.provideContent
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
@@ -29,30 +31,48 @@ private fun Title(palette: WidgetPalette, text: String) {
 }
 
 @Composable
-private fun ListRow(palette: WidgetPalette, left: String, right: String, rightColor: androidx.glance.unit.ColorProvider) {
-    Row(GlanceModifier.fillMaxWidth().padding(vertical = 2.dp)) {
+private fun ListRow(
+    palette: WidgetPalette,
+    left: String,
+    right: String,
+    rightColor: androidx.glance.unit.ColorProvider,
+    modifier: GlanceModifier = GlanceModifier,
+) {
+    Row(modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(left, style = TextStyle(color = palette.text, fontSize = 13.sp), maxLines = 1, modifier = GlanceModifier.defaultWeight())
         Text(right, style = TextStyle(color = rightColor, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
     }
 }
 
-private suspend fun loadPanels(context: Context): WidgetPanels? {
+private suspend fun loadPanels(context: Context, accountIds: List<String>? = null): WidgetPanels? {
     val container = (context.applicationContext as ActualistApplication).container
-    return runCatching { WidgetPanelData.load(context, container) }.getOrNull()
+    return runCatching { WidgetPanelData.load(context, container, accountIds = accountIds) }.getOrNull()
 }
 
+private fun paletteOf(panels: WidgetPanels?) = WidgetPalette(panels?.dark ?: true, panels?.named)
+
 class AccountBalancesWidget : GlanceAppWidget() {
+    override val sizeMode: SizeMode = WidgetResponsiveSizes
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val panels = loadPanels(context)
+        val panels = loadPanels(context, chosenIds(context, id))
         provideContent {
-            val palette = WidgetPalette(panels?.dark ?: true)
+            val palette = paletteOf(panels)
             WidgetFrame(context, palette, "accounts") {
                 if (panels == null) {
                     Text("Open Actualist to choose a budget", style = TextStyle(color = palette.text, fontSize = 14.sp))
                 } else {
                     Title(palette, "Account balances")
                     if (panels.accounts.isEmpty()) Text("No accounts", style = TextStyle(color = palette.muted, fontSize = 13.sp))
-                    panels.accounts.forEach { ListRow(palette, it.name, money(panels, it.balance), if (it.balance < 0) palette.danger else palette.text) }
+                    panels.accounts.take(currentSizeClass().accountRows).forEach {
+                        ListRow(
+                            palette,
+                            it.name,
+                            money(panels, it.balance),
+                            if (it.balance < 0) palette.danger else palette.text,
+                            GlanceModifier.clickable(widgetOpenAction(context, "account/${it.id}")),
+                        )
+                    }
                 }
             }
         }
@@ -60,18 +80,26 @@ class AccountBalancesWidget : GlanceAppWidget() {
 }
 
 class RecentTransactionsWidget : GlanceAppWidget() {
+    override val sizeMode: SizeMode = WidgetResponsiveSizes
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val panels = loadPanels(context)
         provideContent {
-            val palette = WidgetPalette(panels?.dark ?: true)
+            val palette = paletteOf(panels)
             WidgetFrame(context, palette, "spending") {
                 if (panels == null) {
                     Text("Open Actualist to choose a budget", style = TextStyle(color = palette.text, fontSize = 14.sp))
                 } else {
                     Title(palette, "Recent transactions")
                     if (panels.recent.isEmpty()) Text("No transactions", style = TextStyle(color = palette.muted, fontSize = 13.sp))
-                    panels.recent.forEach {
-                        ListRow(palette, "${it.payee}  ${it.date}", money(panels, it.amount), if (it.amount < 0) palette.text else palette.positive)
+                    panels.recent.take(currentSizeClass().transactionRows).forEach {
+                        ListRow(
+                            palette,
+                            "${it.payee}  ${it.date}",
+                            money(panels, it.amount),
+                            if (it.amount < 0) palette.text else palette.positive,
+                            GlanceModifier.clickable(widgetOpenAction(context, "account/${it.accountId}")),
+                        )
                     }
                 }
             }
@@ -83,7 +111,7 @@ class NeedsAttentionWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val panels = loadPanels(context)
         provideContent {
-            val palette = WidgetPalette(panels?.dark ?: true)
+            val palette = paletteOf(panels)
             WidgetFrame(context, palette, "budget") {
                 if (panels == null) {
                     Text("Open Actualist to choose a budget", style = TextStyle(color = palette.text, fontSize = 14.sp))

@@ -135,6 +135,30 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/quick_actions_widget_info" />
         </receiver>
+        <activity
+            android:name=".widget.config.QuickActionsConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Actualist">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widget.config.CategoryBalanceConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Actualist">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".widget.config.AccountBalancesConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Actualist">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

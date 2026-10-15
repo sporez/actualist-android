@@ -118,15 +118,25 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
         }
     }
 
+    // Every foreground sync, then Actual's schedule advancement (auto-post due schedules, move paid
+    // ones on), uploading again if that changed anything.
+    val scheduleContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    suspend fun syncNow() {
+        if (session.isDemo) return
+        val status = container.server.sync(session)
+        if (status is SyncStatus.Failed) return
+        val advanced = com.sporez.actualist.android.sync.ScheduleAdvancer.advance(scheduleContext, session)
+        if (com.sporez.actualist.android.sync.ScheduleAdvancer.changedData(advanced)) container.server.sync(session)
+    }
     // Pull from the server when a synced budget opens; demo budgets never touch the network.
-    LaunchedEffect(session) { if (!session.isDemo) container.server.sync(session) }
+    LaunchedEffect(session) { syncNow() }
     // Opportunistic flush after local writes, as Actualist does: a short debounce batches
     // quick edits, and a failure leaves the changes queued for the next attempt.
     LaunchedEffect(session) {
         if (session.isDemo) return@LaunchedEffect
         session.revision.drop(1).debounce(1_500).collect {
             val pending = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { session.database.pendingLocalMessageCount() }
-            if (pending > 0 && session.syncStatus.value !is SyncStatus.Syncing) container.server.sync(session)
+            if (pending > 0 && session.syncStatus.value !is SyncStatus.Syncing) syncNow()
         }
     }
     // Keep the home-screen widget current shortly after edits and syncs.
@@ -136,7 +146,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
     }
     // Sync again whenever the app returns to the foreground.
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-        if (!session.isDemo) scope.launch { container.server.sync(session) }
+        if (!session.isDemo) scope.launch { syncNow() }
     }
 
     Scaffold(
@@ -156,7 +166,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                             route == "schedules" -> "Schedules"
                             route == "history" -> "History"
                             route == "bank-sync" -> "Bank sync"
-                            route == "explorer" -> "Explorer"
+                            route.startsWith("explorer") -> "Explorer"
                             route.startsWith("account/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Account"
                             route.startsWith("category/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Category"
                             route == "server" -> "Server"
@@ -185,7 +195,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                         }
                     }
                     if (!session.isDemo) {
-                        IconButton(onClick = { scope.launch { container.server.sync(session) } }, modifier = Modifier.testTag("sync-button")) {
+                        IconButton(onClick = { scope.launch { syncNow() } }, modifier = Modifier.testTag("sync-button")) {
                             Icon(if (syncStatus is SyncStatus.Failed) Icons.Filled.SyncProblem else Icons.Filled.Sync, contentDescription = "Sync")
                         }
                     }
@@ -248,7 +258,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
             composable("spending") {
                 val vm = viewModel(key = "spending-$key") { TransactionsViewModel(session, null, null) }
-                TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new") })
+                TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new") }, onRefresh = { syncNow() })
             }
             composable("accounts") {
                 val vm = viewModel(key = "accounts-$key") { AccountsViewModel(session) }
@@ -256,11 +266,21 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             }
             composable("reports") {
                 val vm = viewModel(key = "reports-$key") { ReportsViewModel(session) }
-                ReportsScreen(vm, onExplore = { navController.navigate("explorer") }) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
+                ReportsScreen(
+                    vm,
+                    onExplore = { navController.navigate("explorer") },
+                    onOpenCard = { card -> navController.navigate("explorer?card=${encode(card)}") },
+                ) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
             }
-            composable("explorer") {
-                val vm = viewModel(key = "explorer-$key") { com.sporez.actualist.android.ui.reports.ExplorerViewModel(session) }
-                com.sporez.actualist.android.ui.reports.ExplorerScreen(vm)
+            composable(
+                "explorer?card={card}",
+                arguments = listOf(navArgument("card") { type = NavType.StringType; defaultValue = "" }),
+            ) { backStack ->
+                val card = backStack.arguments?.getString("card").orEmpty()
+                val vm = viewModel(key = "explorer-$key-$card") {
+                    com.sporez.actualist.android.ui.reports.ExplorerViewModel(session, preset = com.sporez.actualist.core.reports.ReportExplorerPresets.forCard(card))
+                }
+                com.sporez.actualist.android.ui.reports.ExplorerScreen(vm) { id -> navController.navigate("transaction/${encode(id)}") }
             }
             composable("settings") {
                 SettingsScreen(
@@ -318,7 +338,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             ) { backStack ->
                 val id = decode(backStack.arguments?.getString("id") ?: "")
                 val vm = viewModel(key = "account-$id-$key") { TransactionsViewModel(session, id, null, container.server) }
-                TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new?account=${encode(id)}") })
+                TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new?account=${encode(id)}") }, onRefresh = { syncNow() })
             }
             composable(
                 "category/{id}?name={name}",
@@ -326,7 +346,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
             ) { backStack ->
                 val id = decode(backStack.arguments?.getString("id") ?: "")
                 val vm = viewModel(key = "category-$id-$key") { TransactionsViewModel(session, null, id) }
-                TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new") })
+                TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new") }, onRefresh = { syncNow() })
             }
             composable(
                 "transaction-new?account={account}",

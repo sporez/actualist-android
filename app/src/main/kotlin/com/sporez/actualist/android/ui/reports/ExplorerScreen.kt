@@ -57,6 +57,8 @@ import com.sporez.actualist.android.ui.components.SectionCard
 import com.sporez.actualist.android.ui.reloading
 import com.sporez.actualist.android.ui.theme.LocalMoneyColors
 import com.sporez.actualist.core.reports.ExplorerFilter
+import com.sporez.actualist.core.reports.ExplorerPaging
+import com.sporez.actualist.core.reports.ExplorerPreset
 import com.sporez.actualist.core.reports.ExplorerResult
 import com.sporez.actualist.core.reports.RangePreset
 import com.sporez.actualist.core.reports.ReportExplorer
@@ -90,11 +92,19 @@ data class ExplorerState(
  * Actualist's Report Explorer: one of five reports over a range and interval with the filter
  * sheet, plus the matching transactions below the chart.
  */
-class ExplorerViewModel(session: BudgetSession, private val today: LocalDate = LocalDate.now()) : ViewModel() {
-    private val initialRange = RangePreset.MONTH_TO_DATE.range(today)!!
-    private val _query = MutableStateFlow(SeriesQuery(ReportMetric.CASH_FLOW, initialRange.first, initialRange.second, ReportInterval.MONTH))
+class ExplorerViewModel(
+    session: BudgetSession,
+    private val today: LocalDate = LocalDate.now(),
+    /** The report, range and interval a tapped Reports card opens with; null opens Cash Flow for the month to date. */
+    preset: ExplorerPreset? = null,
+) : ViewModel() {
+    private val initialPreset = preset?.range ?: RangePreset.MONTH_TO_DATE
+    private val initialRange = initialPreset.range(today)!!
+    private val _query = MutableStateFlow(
+        SeriesQuery(preset?.metric ?: ReportMetric.CASH_FLOW, initialRange.first, initialRange.second, preset?.interval ?: ReportInterval.MONTH),
+    )
     val query: StateFlow<SeriesQuery> = _query
-    private val _preset = MutableStateFlow(RangePreset.MONTH_TO_DATE)
+    private val _preset = MutableStateFlow(initialPreset)
     val preset: StateFlow<RangePreset> = _preset
 
     val state = reloading(session, _query) { q ->
@@ -170,13 +180,15 @@ private fun LocalDate.toPickerMillis(): Long = atStartOfDay(ZoneOffset.UTC).toIn
 private fun Long.toPickerDate(): LocalDate = Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
 
 @Composable
-fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.now()) {
+fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.now(), onOpenTransaction: (String) -> Unit = {}) {
     val state by viewModel.state.collectAsState()
     val query by viewModel.query.collectAsState()
     val preset by viewModel.preset.collectAsState()
     var focusCategory by remember { mutableStateOf<String?>(null) }
     var filtering by remember { mutableStateOf(false) }
     var pickingDate by remember { mutableStateOf<String?>(null) }
+    // Rows shown so far; a new query or category focus starts again at the first page.
+    var shown by remember(query, focusCategory) { mutableStateOf(ExplorerPaging.PAGE_SIZE) }
     when (val current = state) {
         Loadable.Loading -> LoadingBox()
         is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
@@ -296,8 +308,14 @@ fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.no
                         style = MaterialTheme.typography.titleSmall,
                     )
                 }
-                items(rows.take(100), key = { it.id ?: it.hashCode().toString() }) { row ->
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp).testTag("explorer-row")) {
+                items(rows.take(shown), key = { it.id ?: it.hashCode().toString() }) { row ->
+                    val target = row.parentId ?: row.id
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable(enabled = target != null) { target?.let(onOpenTransaction) }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("explorer-row"),
+                    ) {
                         Column(Modifier.weight(1f)) {
                             Text(row.payeeName ?: row.importedPayee ?: "No payee", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text("${row.date} · ${names[row.accountId] ?: row.accountId}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -305,7 +323,20 @@ fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.no
                         MoneyText(row.amount ?: 0L, colored = true)
                     }
                 }
-                if (rows.size > 100) item { Text("Showing the newest 100 of ${rows.size}.", style = MaterialTheme.typography.bodySmall) }
+                item {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Showing ${minOf(shown, rows.size)} of ${rows.size}",
+                            Modifier.testTag("explorer-rows-count"),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (ExplorerPaging.hasMore(shown, rows.size)) {
+                            OutlinedButton(onClick = { shown = ExplorerPaging.next(shown, rows.size) }, modifier = Modifier.testTag("explorer-load-more")) {
+                                Text("Show more")
+                            }
+                        }
+                    }
+                }
             }
             if (filtering) {
                 FilterSheet(

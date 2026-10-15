@@ -93,7 +93,13 @@ class ReportsViewModel(session: BudgetSession) : ViewModel() {
 }
 
 @Composable
-fun ReportsScreen(viewModel: ReportsViewModel, onExplore: () -> Unit = {}, onOpenCategory: (String, String) -> Unit = { _, _ -> }) {
+fun ReportsScreen(
+    viewModel: ReportsViewModel,
+    onExplore: () -> Unit = {},
+    /** A card was tapped: its [ReportCardOrder] id, so the Explorer can open preset for that report. */
+    onOpenCard: (String) -> Unit = { onExplore() },
+    onOpenCategory: (String, String) -> Unit = { _, _ -> },
+) {
     val state by viewModel.dashboard.collectAsState()
     val month by viewModel.month.collectAsState()
     val cardsState by viewModel.cards.collectAsState()
@@ -145,13 +151,13 @@ fun ReportsScreen(viewModel: ReportsViewModel, onExplore: () -> Unit = {}, onOpe
                         }
                         for (id in order) {
                             when (id) {
-                                "net-worth" -> item(key = id) { NetWorthCard(dashboard) }
-                                "cash-flow" -> item(key = id) { CashFlowCard(dashboard) }
-                                "month-comparison" -> if (cards != null) item(key = id) { MonthComparisonCard(cards.comparison) }
-                                "spending" -> item(key = id) { SpendingCard(dashboard, onOpenCategory) }
-                                "budget-comparison" -> item(key = id) { BudgetComparisonCard(dashboard, onOpenCategory) }
-                                "three-month-average" -> if (cards != null) item(key = id) { ThreeMonthAverageCard(cards.average) }
-                                "transaction-calendar" -> if (cards != null) item(key = id) { TransactionCalendarCard(cards.calendar) }
+                                "net-worth" -> item(key = id) { NetWorthCard(dashboard) { onOpenCard(id) } }
+                                "cash-flow" -> item(key = id) { CashFlowCard(dashboard) { onOpenCard(id) } }
+                                "month-comparison" -> if (cards != null) item(key = id) { MonthComparisonCard(cards.comparison) { onOpenCard(id) } }
+                                "spending" -> item(key = id) { SpendingCard(dashboard, onOpenCategory) { onOpenCard(id) } }
+                                "budget-comparison" -> item(key = id) { BudgetComparisonCard(dashboard, onOpenCategory) { onOpenCard(id) } }
+                                "three-month-average" -> if (cards != null) item(key = id) { ThreeMonthAverageCard(cards.average) { onOpenCard(id) } }
+                                "transaction-calendar" -> if (cards != null) item(key = id) { TransactionCalendarCard(cards.calendar) { onOpenCard(id) } }
                             }
                         }
                     }
@@ -200,11 +206,11 @@ private fun CardTitle(title: String, subtitle: String) {
 }
 
 @Composable
-private fun NetWorthCard(dashboard: ReportsDashboard) {
+private fun NetWorthCard(dashboard: ReportsDashboard, onOpen: () -> Unit) {
     val report = dashboard.netWorth
     val lineColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
-    SectionCard(Modifier.testTag("report-net-worth")) {
+    SectionCard(Modifier.testTag("report-net-worth").clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             CardTitle("Net Worth", "${monthTitle(report.points.first().month)} – ${monthTitle(report.points.last().month)}")
             Row(verticalAlignment = Alignment.Bottom) {
@@ -238,10 +244,10 @@ private fun NetWorthCard(dashboard: ReportsDashboard) {
 }
 
 @Composable
-private fun CashFlowCard(dashboard: ReportsDashboard) {
+private fun CashFlowCard(dashboard: ReportsDashboard, onOpen: () -> Unit) {
     val flow = dashboard.cashFlow
     val colors = LocalMoneyColors.current
-    SectionCard(Modifier.testTag("report-cash-flow")) {
+    SectionCard(Modifier.testTag("report-cash-flow").clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             CardTitle("Cash Flow", "${monthTitle(flow.month)} so far · transfers excluded")
             Row {
@@ -282,10 +288,10 @@ private fun CashFlowCard(dashboard: ReportsDashboard) {
 }
 
 @Composable
-private fun SpendingCard(dashboard: ReportsDashboard, onOpenCategory: (String, String) -> Unit) {
+private fun SpendingCard(dashboard: ReportsDashboard, onOpenCategory: (String, String) -> Unit, onOpen: () -> Unit) {
     val spending = dashboard.spending.filter { it.spent > 0 }
     val total = spending.sumOf { it.spent }.takeIf { it > 0 } ?: 1L
-    SectionCard(Modifier.testTag("report-spending")) {
+    SectionCard(Modifier.testTag("report-spending").clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CardTitle("Spending by Category", "${monthTitle(dashboard.anchorMonth)} · budgeted ${money(dashboard.budgetedExpenses)}")
             for (item in spending.take(10)) {
@@ -311,9 +317,9 @@ private fun SpendingCard(dashboard: ReportsDashboard, onOpenCategory: (String, S
 
 /** Budgeted against spent per category for the month, largest overspending first. */
 @Composable
-private fun BudgetComparisonCard(dashboard: ReportsDashboard, onOpenCategory: (String, String) -> Unit) {
+private fun BudgetComparisonCard(dashboard: ReportsDashboard, onOpenCategory: (String, String) -> Unit, onOpen: () -> Unit) {
     val rows = dashboard.spending.filter { it.budgeted != 0L || it.spent != 0L }.sortedBy { it.budgeted - it.spent }
-    SectionCard(Modifier.testTag("report-budget-comparison")) {
+    SectionCard(Modifier.testTag("report-budget-comparison").clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             CardTitle("Budget vs Spent", "${monthTitle(dashboard.anchorMonth)} · ${money(rows.sumOf { it.spent })} of ${money(rows.sumOf { it.budgeted })}")
             for (item in rows.take(12)) {
@@ -368,8 +374,8 @@ private fun ComparisonChart(points: List<com.sporez.actualist.core.reports.Daily
 }
 
 @Composable
-private fun MonthComparisonCard(report: MonthComparisonReport) {
-    SectionCard(Modifier.testTag("report-month-comparison")) {
+private fun MonthComparisonCard(report: MonthComparisonReport, onOpen: () -> Unit) {
+    SectionCard(Modifier.testTag("report-month-comparison").clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             CardTitle("This Month", "Compare ${monthTitle(report.currentMonth)} to ${monthTitle(report.comparisonMonth)}")
             VarianceHeadline(report.variance, "month-comparison-variance")
@@ -379,8 +385,8 @@ private fun MonthComparisonCard(report: MonthComparisonReport) {
 }
 
 @Composable
-private fun ThreeMonthAverageCard(report: ThreeMonthAverageReport) {
-    SectionCard(Modifier.testTag("report-three-month-average")) {
+private fun ThreeMonthAverageCard(report: ThreeMonthAverageReport, onOpen: () -> Unit) {
+    SectionCard(Modifier.testTag("report-three-month-average").clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             CardTitle("3-Month Average", "Compare ${monthTitle(report.month)} to the last 3 months")
             VarianceHeadline(report.variance, "three-month-variance")
@@ -390,12 +396,12 @@ private fun ThreeMonthAverageCard(report: ThreeMonthAverageReport) {
 }
 
 @Composable
-private fun TransactionCalendarCard(months: List<TransactionCalendarMonth>) {
+private fun TransactionCalendarCard(months: List<TransactionCalendarMonth>, onOpen: () -> Unit) {
     val colors = LocalMoneyColors.current
     val maximum = months.maxOfOrNull { month -> month.days.maxOfOrNull { maxOf(it.income, it.expenses) } ?: 0L }?.takeIf { it > 0 } ?: 1L
     fun intensity(amount: Long): Float = if (amount == 0L) 0f else (amount.toFloat() / maximum).coerceIn(0.22f, 1f)
     val weekdays = listOf("S", "M", "T", "W", "T", "F", "S")
-    SectionCard(Modifier.testTag("report-transaction-calendar")) {
+    SectionCard(Modifier.testTag("report-transaction-calendar").clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             CardTitle("Transaction Calendar", "${monthTitle(months.first().month)} – ${monthTitle(months.last().month)}")
             for (month in months) {
