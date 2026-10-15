@@ -39,6 +39,23 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             val before = withContext(Dispatchers.IO) { pending.liveTransactionAccounts() }
             val status = container.server.sync(session)
             withContext(Dispatchers.IO) { recordNewTransactions(session, pending, before) }
+            if (status !is SyncStatus.Failed) {
+                // Actual runs schedule advancement after a successful sync; what it posts is ours, not "new".
+                val advanced = ScheduleAdvancer.advance(applicationContext, session)
+                val banked = if (BackgroundBankSyncPrefs.isEnabled(applicationContext)) {
+                    BackgroundBankSync.run(
+                        applicationContext,
+                        session,
+                        container.settings.settings.value.serverUrl,
+                        container.server,
+                        container.secrets,
+                    )
+                } else {
+                    0
+                }
+                // Upload what advancement and the bank posted so other devices do not post the same occurrence again.
+                if (ScheduleAdvancer.changedData(advanced) || banked > 0) container.server.sync(session)
+            }
             com.sporez.actualist.android.widget.WidgetData.refresh(applicationContext)
             if (status is SyncStatus.Failed) Result.retry() else Result.success()
         } finally {

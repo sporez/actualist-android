@@ -21,10 +21,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sporez.actualist.android.ActualistApplication
+import com.sporez.actualist.android.sync.ScheduleAdvancer
+import com.sporez.actualist.android.sync.ServerConnection
 import com.sporez.actualist.android.ui.Loadable
 import com.sporez.actualist.android.ui.MessageState
 import com.sporez.actualist.android.ui.components.ErrorBanner
@@ -36,9 +40,12 @@ import com.sporez.actualist.android.ui.components.money
 import com.sporez.actualist.android.ui.reloading
 import com.sporez.actualist.core.schedules.ScheduleListItem
 import com.sporez.actualist.core.schedules.ScheduleListPresentation
+import com.sporez.actualist.core.schedules.ScheduleReviewPresentation
+import com.sporez.actualist.core.schedules.ScheduleAutoPostRefusals
 import com.sporez.actualist.core.schedules.ScheduleStatus
 import com.sporez.actualist.core.schedules.Schedules
 import com.sporez.actualist.core.store.BudgetSession
+import com.sporez.actualist.core.store.SyncStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -50,13 +57,60 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
 
     fun todayId(): String = today()
 
-    /** Posts the occurrence on its scheduled date, or today when [postsToday] (the review's choice). */
-    fun post(item: ScheduleListItem, postsToday: Boolean = false) =
-        write("Posted ${item.name}") { Schedules(database, clock).postNow(item.id, today(), postsToday) }
+    val budgetId: String get() = session.budgetId
+    val isDemo: Boolean get() = session.isDemo
+
+    /** Syncs the budget through [server]; the failure message, or null when it worked. */
+    internal suspend fun syncFailure(server: ServerConnection): String? =
+        (server.sync(session) as? SyncStatus.Failed)?.message
+
+    internal val postState = MutableStateFlow<SchedulePostState>(SchedulePostState.Idle)
+
+    internal fun resetPost() {
+        postState.value = SchedulePostState.Idle
+    }
+
+    /**
+     * Posts the occurrence on its scheduled date, or today when [postsToday] (the review's choice).
+     * [syncFirst] runs a budget sync and returns its failure message (null when it worked or was not needed), so a
+     * payment another device already posted is seen before this one is added. On any failure the review stays open
+     * with the reason; [onPosted] runs once the transaction is in.
+     */
+    internal fun post(item: ScheduleListItem, postsToday: Boolean, syncFirst: (suspend () -> String?)?, onPosted: () -> Unit) {
+        if (postState.value is SchedulePostState.Syncing || postState.value is SchedulePostState.Posting) return
+        viewModelScope.launch {
+            try {
+                if (syncFirst != null) {
+                    postState.value = SchedulePostState.Syncing
+                    val failure = syncFirst()
+                    if (failure != null) {
+                        postState.value = SchedulePostState.Failed("Your budget could not sync first, so nothing was posted. $failure")
+                        return@launch
+                    }
+                }
+                postState.value = SchedulePostState.Posting
+                val current = session.read { Schedules(database, clock).list(today()) }.firstOrNull { it.id == item.id }
+                if (!ScheduleReviewPresentation.stillPostable(item, current)) {
+                    postState.value = SchedulePostState.Failed("This schedule changed during sync. Review its latest details and try again.")
+                    return@launch
+                }
+                session.write { Schedules(database, clock).postNow(item.id, today(), postsToday) }
+                postState.value = SchedulePostState.Idle
+                messages.show("Posted ${item.name}")
+                onPosted()
+            } catch (error: Exception) {
+                postState.value = SchedulePostState.Failed(error.message ?: "The schedule could not be posted.")
+            }
+        }
+    }
 
     /** The schedule's editable definition, for the detail view. */
     suspend fun detail(item: ScheduleListItem): com.sporez.actualist.core.schedules.ScheduleEditorModel? =
         session.read { Schedules(database, clock).editor(item.id, today()) }
+
+    /** The schedule's own upcoming window (null is the budget default), for the editor. */
+    suspend fun upcomingWindow(item: ScheduleListItem): String? =
+        session.read { Schedules(database, clock).editor(item.id, today())?.customUpcomingLength }
 
     fun skip(item: ScheduleListItem) = write("Skipped to the next date") { Schedules(database, clock).skipNextDate(item.id) }
     fun complete(item: ScheduleListItem) = write("Completed") { Schedules(database, clock).complete(item.id) }
@@ -117,6 +171,7 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
         approximate: Boolean,
         posts: Boolean,
         dateRule: com.sporez.actualist.core.schedules.ScheduleDateRule? = null,
+        upcomingChange: com.sporez.actualist.core.schedules.ScheduleOptionalChange<String> = com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
     ) =
         write("Updated ${name.ifBlank { item.name }}") {
             val trimmed = name.trim()
@@ -135,6 +190,7 @@ class SchedulesViewModel(private val session: BudgetSession) : ViewModel() {
                 postsTransaction = posts.takeIf { it != item.postsTransaction },
                 dateRule = dateRule?.let { com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(it) }
                     ?: com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
+                customUpcomingLength = upcomingChange,
             )
             if (!fields.isEmpty) Schedules(database, clock).update(item.id, fields, today())
         }
@@ -167,6 +223,7 @@ fun SchedulesScreen(viewModel: SchedulesViewModel) {
             val all = current.value
             val groups = ScheduleListPresentation.groups(all, query, showCompleted)
             val completedCount = ScheduleListPresentation.completedCount(all)
+            val refusals = ScheduleAutoPostRefusals.rows(ScheduleAdvancer.refusals(viewModel.budgetId), all)
             LazyColumn(Modifier.fillMaxSize().testTag("schedules-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item {
                     androidx.compose.material3.OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth().testTag("schedule-add")) { Text("Add schedule") }
@@ -181,6 +238,21 @@ fun SchedulesScreen(viewModel: SchedulesViewModel) {
                     )
                 }
                 message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("schedules-message")) } }
+                if (refusals.isNotEmpty()) {
+                    item(key = "auto-post-refusals") {
+                        Column(Modifier.fillMaxWidth().testTag("schedules-auto-post-refusals"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Not Posted Automatically", style = MaterialTheme.typography.titleSmall)
+                            for (row in refusals) {
+                                SectionCard(Modifier.testTag("schedule-refusal-${row.scheduleId}")) {
+                                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(row.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                                        Text(row.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if (groups.isEmpty()) {
                     item {
                         Text(
@@ -310,15 +382,39 @@ private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) 
     var reviewing by androidx.compose.runtime.saveable.rememberSaveable(item.id) { androidx.compose.runtime.mutableStateOf(false) }
     var showingDetail by androidx.compose.runtime.saveable.rememberSaveable(item.id) { androidx.compose.runtime.mutableStateOf(false) }
     if (editing) EditScheduleDialog(item, viewModel) { editing = false }
+    val context = LocalContext.current
+    val server = remember { (context.applicationContext as ActualistApplication).container.server }
+    val postState by viewModel.postState.collectAsState()
+    var managing by androidx.compose.runtime.saveable.rememberSaveable(item.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val syncFirst: (suspend () -> String?)? = if (server.isSignedIn && !viewModel.isDemo) ({ viewModel.syncFailure(server) }) else null
     if (reviewing) {
         SchedulePostReviewDialog(
             item = item,
             today = viewModel.todayId(),
-            onConfirm = { postsToday ->
+            onConfirm = { postsToday -> viewModel.post(item, postsToday, syncFirst, onPosted = { reviewing = false }) },
+            onDismiss = {
                 reviewing = false
-                viewModel.post(item, postsToday)
+                viewModel.resetPost()
             },
-            onDismiss = { reviewing = false },
+            state = postState,
+            syncsFirst = syncFirst != null,
+        )
+    }
+    managing?.let { name ->
+        val kind = ScheduleManageKind.valueOf(name)
+        ScheduleManageReviewDialog(
+            kind = kind,
+            item = item,
+            load = { viewModel.detail(item) },
+            onConfirm = {
+                managing = null
+                when (kind) {
+                    ScheduleManageKind.SKIP -> viewModel.skip(item)
+                    ScheduleManageKind.COMPLETE -> viewModel.complete(item)
+                    ScheduleManageKind.DELETE -> viewModel.delete(item)
+                }
+            },
+            onDismiss = { managing = null },
         )
     }
     if (showingDetail) ScheduleDetailDialog(item, load = { viewModel.detail(item) }, onDismiss = { showingDetail = false })
@@ -356,10 +452,10 @@ private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) 
             )
             Row {
                 if (item.isSupported && !item.completed) TextButton(onClick = { editing = true }, modifier = Modifier.testTag("schedule-edit-${item.id}")) { Text("Edit") }
-                if (item.canPost) TextButton(onClick = { reviewing = true }, modifier = Modifier.testTag("schedule-post-${item.id}")) { Text("Post now") }
-                if (item.canSkip) TextButton(onClick = { viewModel.skip(item) }, modifier = Modifier.testTag("schedule-skip-${item.id}")) { Text("Skip") }
-                if (item.canComplete) TextButton(onClick = { viewModel.complete(item) }, modifier = Modifier.testTag("schedule-complete-${item.id}")) { Text("Complete") }
-                if (item.canDelete) TextButton(onClick = { viewModel.delete(item) }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                if (item.canPost) TextButton(onClick = { viewModel.resetPost(); reviewing = true }, modifier = Modifier.testTag("schedule-post-${item.id}")) { Text("Post now") }
+                if (item.canSkip) TextButton(onClick = { managing = ScheduleManageKind.SKIP.name }, modifier = Modifier.testTag("schedule-skip-${item.id}")) { Text("Skip") }
+                if (item.canComplete) TextButton(onClick = { managing = ScheduleManageKind.COMPLETE.name }, modifier = Modifier.testTag("schedule-complete-${item.id}")) { Text("Complete") }
+                if (item.canDelete) TextButton(onClick = { managing = ScheduleManageKind.DELETE.name }, modifier = Modifier.testTag("schedule-delete-${item.id}")) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -390,7 +486,11 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
     var startText by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var frequency by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var repeat by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(RepeatOptions()) }
+    var upcoming by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var originalUpcoming by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(item.id) {
+        originalUpcoming = viewModel.upcomingWindow(item)
+        upcoming = originalUpcoming
         val loaded = viewModel.dateRule(item)
         rule = loaded
         when (val current = loaded) {
@@ -453,6 +553,17 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                     androidx.compose.material3.Checkbox(checked = posts, onCheckedChange = { posts = it })
                     Text("Post the transaction automatically")
                 }
+                Text("Upcoming window", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    for ((value, label) in com.sporez.actualist.core.schedules.ScheduleUpcomingWindow.options) {
+                        androidx.compose.material3.FilterChip(
+                            selected = upcoming == value,
+                            onClick = { upcoming = value },
+                            label = { Text(label) },
+                            modifier = Modifier.padding(end = 4.dp).testTag("schedule-edit-upcoming-${value ?: "default"}"),
+                        )
+                    }
+                }
                 if (simpleRule) {
                     ScheduleDateField(startText, { startText = it }, "schedule-edit-start")
                     Row {
@@ -471,7 +582,16 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                 enabled = (isRange || (magnitude != null && magnitude != 0L)) && (!simpleRule || start != null),
                 onClick = {
                     val signed = if (isRange) null else kotlin.math.abs(magnitude!!).let { if (outflow) -it else it }
-                    viewModel.update(item, name, signed, approximate, posts, editedRule())
+                    viewModel.update(
+                        item,
+                        name,
+                        signed,
+                        approximate,
+                        posts,
+                        editedRule(),
+                        if (upcoming != originalUpcoming) com.sporez.actualist.core.schedules.ScheduleOptionalChange.Assign(upcoming)
+                        else com.sporez.actualist.core.schedules.ScheduleOptionalChange.Unchanged,
+                    )
                     onDismiss()
                 },
                 modifier = Modifier.testTag("schedule-edit-save"),

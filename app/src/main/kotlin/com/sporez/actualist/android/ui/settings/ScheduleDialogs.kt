@@ -24,9 +24,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.ui.components.money
+import com.sporez.actualist.core.rules.ScheduleEnding
 import com.sporez.actualist.core.schedules.ScheduleEditorModel
 import com.sporez.actualist.core.schedules.ScheduleListItem
 import com.sporez.actualist.core.schedules.ScheduleListPresentation
+import com.sporez.actualist.core.schedules.ScheduleUpcomingWindow
 
 /** The amount text of a schedule row: "~$X" for approximate, a range for between, else the amount. */
 @Composable
@@ -48,7 +50,10 @@ internal fun SchedulePostReviewDialog(
     today: String,
     onConfirm: (postsToday: Boolean) -> Unit,
     onDismiss: () -> Unit,
+    state: SchedulePostState = SchedulePostState.Idle,
+    syncsFirst: Boolean = false,
 ) {
+    val busy = state is SchedulePostState.Syncing || state is SchedulePostState.Posting
     var postsToday by rememberSaveable { mutableStateOf(false) }
     val scheduled = item.nextDate
     val early = postsToday && scheduled != null && today < scheduled
@@ -78,6 +83,23 @@ internal fun SchedulePostReviewDialog(
                         modifier = Modifier.testTag("schedule-post-date-today"),
                     )
                 }
+                if (syncsFirst) {
+                    Text(
+                        "Your budget syncs first, so a payment another device already added isn't added twice.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("schedule-post-sync-notice"),
+                    )
+                }
+                when (state) {
+                    SchedulePostState.Syncing -> Text("Syncing before post…", modifier = Modifier.testTag("schedule-post-progress"))
+                    SchedulePostState.Posting -> Text("Posting…", modifier = Modifier.testTag("schedule-post-progress"))
+                    is SchedulePostState.Failed -> Column(Modifier.testTag("schedule-post-failure")) {
+                        Text("Transaction Not Posted", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
+                        Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    SchedulePostState.Idle -> Unit
+                }
                 if (early) {
                     Text(
                         "The transaction will be dated today. The schedule may still show $scheduled as upcoming.",
@@ -89,10 +111,12 @@ internal fun SchedulePostReviewDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(postsToday) }, modifier = Modifier.testTag("schedule-post-confirm")) { Text("Post transaction") }
+            TextButton(onClick = { onConfirm(postsToday) }, enabled = !busy, modifier = Modifier.testTag("schedule-post-confirm")) {
+                Text(if (state is SchedulePostState.Failed) "Try Again" else "Post transaction")
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("schedule-post-cancel")) { Text("Cancel") }
+            TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.testTag("schedule-post-cancel")) { Text("Cancel") }
         },
     )
 }
@@ -120,6 +144,20 @@ internal fun ScheduleDetailDialog(
                 DetailLine("Account", item.accountName ?: "None")
                 DetailLine("Payee", item.payeeName ?: "None")
                 DetailLine("Repeats", item.recurrenceDescription)
+                model?.dateRule?.recurrence?.let { recurrence ->
+                    DetailLine("Weekend", if (recurrence.skipWeekend) "Moves off weekends" else "No change")
+                    DetailLine(
+                        "Ends",
+                        when (val ending = recurrence.ending) {
+                            is ScheduleEnding.Never -> "Never"
+                            is ScheduleEnding.AfterOccurrences -> "After ${ending.count} times"
+                            is ScheduleEnding.OnDate -> "On ${ending.dayId}"
+                        },
+                    )
+                }
+                if (model != null) {
+                    DetailLine("Upcoming window", ScheduleUpcomingWindow.label(model?.customUpcomingLength))
+                }
                 DetailLine("Posts automatically", if (item.postsTransaction) "Yes" else "No")
                 Text("Upcoming dates", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
                 if (dates.isEmpty()) {

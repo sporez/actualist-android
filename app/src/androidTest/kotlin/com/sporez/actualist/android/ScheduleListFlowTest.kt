@@ -102,6 +102,9 @@ class ScheduleListFlowTest {
             compose.onAllNodes(completeButton).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onAllNodes(completeButton)[0].performClick()
+        // Complete asks for a review first, as Actualist's does.
+        compose.waitForTag("schedule-review")
+        compose.onNodeWithTag("schedule-review-confirm").performClick()
         compose.waitOrCapture("completed-hidden") { !hasAnyScheduleRow() }
 
         scrollTo("schedule-show-completed")
