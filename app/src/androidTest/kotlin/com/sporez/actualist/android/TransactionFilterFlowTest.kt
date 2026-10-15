@@ -1,5 +1,6 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -84,7 +85,8 @@ class TransactionFilterFlowTest {
         openSheet()
         choosePayee("Fresh Market")
         compose.onNodeWithTag("filter-name").performScrollTo().performTextInput("Groceries Run")
-        compose.onNodeWithTag("filter-save").performScrollTo().performClick()
+        // The keyboard can cover the button: invoke its action rather than tapping.
+        compose.onNodeWithTag("filter-save").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
         compose.waitForGone("filter-sheet")
         compose.waitOrCapture("filter-saved") { hasText("Groceries Run") }
 
