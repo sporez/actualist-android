@@ -129,6 +129,8 @@ fun SettingsScreen(
                 com.sporez.actualist.android.notifications.NewTransactionAlertsSetting()
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 com.sporez.actualist.android.sync.BackgroundBankSyncSetting()
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                com.sporez.actualist.android.automation.AutomationSetting()
             }
         }
         BudgetDisplayCard(settings)

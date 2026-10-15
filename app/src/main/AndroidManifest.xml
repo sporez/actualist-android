@@ -6,6 +6,13 @@
     <!-- New Transaction Alerts (Android 13+ asks when the user turns them on). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Lets Tasker, Routines and other apps send the automation intents (they also need Allow Automation on in Settings). -->
+    <permission
+        android:name="com.sporez.actualist.android.permission.AUTOMATION"
+        android:description="@string/automation_permission_description"
+        android:label="@string/automation_permission_label"
+        android:protectionLevel="dangerous" />
+
     <application
         android:name=".ActualistApplication"
         android:allowBackup="false"
@@ -46,6 +53,27 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <!-- Quick Settings tile: Add expense. -->
+        <service
+            android:name=".automation.AddExpenseTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_add"
+            android:label="@string/tile_add_expense_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <!-- Automation API (Tasker, Routines): LOG_TRANSACTION and GET_BALANCES, guarded by a permission and the Allow Automation setting. -->
+        <receiver
+            android:name=".automation.AutomationReceiver"
+            android:exported="true"
+            android:permission="com.sporez.actualist.android.permission.AUTOMATION">
+            <intent-filter>
+                <action android:name="com.sporez.actualist.android.automation.LOG_TRANSACTION" />
+                <action android:name="com.sporez.actualist.android.automation.GET_BALANCES" />
+            </intent-filter>
+        </receiver>
         <!-- Budget overview home-screen widget (Jetpack Glance). -->
         <receiver
             android:name=".widget.BudgetWidgetReceiver"

@@ -81,4 +81,63 @@ class TextImportParserTest {
         assertEquals("a1", moved.accountId)
         assertEquals("p2", moved.payeeId)
     }
+
+    private fun assertShape(text: String, amount: Long, direction: TextImportDirection, payee: String?, account: String?, destination: String?, category: String?) {
+        val result = parse(text)
+        assertEquals(text, amount, result.amountMinorUnits)
+        assertEquals(text, direction, result.direction)
+        assertEquals(text, payee, result.payeeText)
+        assertEquals(text, account, result.accountText)
+        assertEquals(text, destination, result.destinationAccountText)
+        assertEquals(text, category, result.categoryText)
+    }
+
+    /** The accepted shapes from Actualist's ShortcutTextImportParserTests. */
+    @Test
+    fun actualistAcceptedShapes() {
+        assertShape("\$12.50 coffee", 1250, TextImportDirection.SPEND, "coffee", null, null, null)
+        assertShape("12.50 at Starbucks", 1250, TextImportDirection.SPEND, "Starbucks", null, null, null)
+        assertShape("Coffee 12.50", 1250, TextImportDirection.SPEND, "Coffee", null, null, null)
+        assertShape("spent 12.50 on coffee in Checking", 1250, TextImportDirection.SPEND, "coffee", "Checking", null, null)
+        assertShape("received 200 paycheck", 20000, TextImportDirection.INFLOW, "paycheck", null, null, null)
+        assertShape("12.50 coffee Groceries Checking", 1250, TextImportDirection.SPEND, "coffee", "Checking", null, "Groceries")
+        assertShape("transfer 50 from Checking to Savings", 5000, TextImportDirection.TRANSFER, null, "Checking", "Savings", null)
+    }
+
+    @Test
+    fun actualistCurrencySymbolsAndCaseAreOptional() {
+        val result = parse("SPENT \$12.5 ON Coffee")
+        assertEquals(1250L, result.amountMinorUnits)
+        assertEquals(TextImportDirection.SPEND, result.direction)
+        assertEquals("Coffee", result.payeeText)
+    }
+
+    @Test
+    fun actualistDatesAreNotTreatedAsAmounts() {
+        val result = parse("2026-04-01 coffee 12.50")
+        assertEquals(1250L, result.amountMinorUnits)
+        assertEquals("coffee", result.payeeText)
+    }
+
+    @Test
+    fun actualistMultiWordPayeeAfterAtIsPreserved() {
+        val result = parse("12.50 at Starbucks Reserve")
+        assertEquals(1250L, result.amountMinorUnits)
+        assertEquals("Starbucks Reserve", result.payeeText)
+        assertNull(result.categoryText)
+    }
+
+    @Test
+    fun actualistInflowKeywordsAndLeftoverAccount() {
+        assertEquals(TextImportDirection.INFLOW, parse("got 15 paycheck").direction)
+        assertEquals(1500L, parse("got 15 paycheck").amountMinorUnits)
+        assertEquals(TextImportDirection.INFLOW, parse("inflow 20 bonus").direction)
+        assertEquals(TextImportDirection.SPEND, parse("spend 8 snacks").direction)
+        assertEquals(125050L, parse("\$1,250.50 coffee").amountMinorUnits)
+        val leftover = parse("spent 9 on coffee in Checking Extra")
+        assertEquals("coffee", leftover.payeeText)
+        assertEquals("Checking Extra", leftover.accountText)
+        assertNull(TextImportParser.parse("coffee at Starbucks"))
+        assertNull(TextImportParser.parse("transfer nope from Checking to Savings"))
+    }
 }

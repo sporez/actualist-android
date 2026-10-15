@@ -1,6 +1,7 @@
 package com.sporez.actualist.android.widget
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -10,6 +11,7 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Column
@@ -25,6 +27,8 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import com.sporez.actualist.android.ActualistApplication
 import com.sporez.actualist.android.AppContainer
+import com.sporez.actualist.android.DeepLinks
+import com.sporez.actualist.android.MainActivity
 import com.sporez.actualist.android.data.NamedTheme
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.money.Money
@@ -303,7 +307,14 @@ class QuickActionsWidget : GlanceAppWidget() {
                                 maxLines = 1,
                                 modifier = GlanceModifier.defaultWeight().padding(12.dp)
                                     .background(palette.control)
-                                    .clickable(widgetOpenAction(context, action.route)),
+                                    .clickable(
+                                        if (action == WidgetQuickAction.ADD_INCOME) {
+                                            // Opens a new transaction with the inflow direction preselected.
+                                            actionStartActivity(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(DeepLinks.incomeUri()))
+                                        } else {
+                                            widgetOpenAction(context, action.route)
+                                        },
+                                    ),
                             )
                         }
                     }

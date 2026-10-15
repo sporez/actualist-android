@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.sporez.actualist.android.BackgroundSyncScheduling
 import com.sporez.actualist.android.data.SecretStore
 import com.sporez.actualist.core.banksync.SimpleFinServerSupport
 import com.sporez.actualist.core.banksync.SimpleFinSync
@@ -38,6 +39,7 @@ object BackgroundBankSyncPrefs {
 
     fun setEnabled(context: Context, enabled: Boolean) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(KEY, enabled).apply()
+        BackgroundSyncScheduling.update(context)
     }
 }
 

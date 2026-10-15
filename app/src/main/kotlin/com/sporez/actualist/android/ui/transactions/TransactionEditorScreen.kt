@@ -278,7 +278,8 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
         if (existing == null) {
             com.sporez.actualist.android.TextImportPrefill.take(loaded.accounts, loaded.payees, loaded.categories)?.let { d ->
                 outflow = d.outflow
-                amountText = Money.format(d.amountMinorUnits, symbol = "", grouping = false)
+                // A link may carry only a direction; keep the field empty rather than 0.00.
+                if (d.amountMinorUnits > 0) amountText = Money.format(d.amountMinorUnits, symbol = "", grouping = false)
                 d.accountId?.let { accountId = it }
                 payeeId = d.payeeId
                 newPayeeName = d.newPayeeName

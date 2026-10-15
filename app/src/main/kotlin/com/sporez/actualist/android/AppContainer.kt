@@ -21,6 +21,28 @@ class ActualistApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        com.sporez.actualist.android.sync.BackgroundSyncWorker.schedule(this)
+        BackgroundSyncScheduling.update(this)
+    }
+}
+
+/**
+ * Actualist registers background refresh only when new-transaction alerts or background bank sync
+ * is on (`wantsBackgroundAppRefresh`). The hourly worker follows the same rule: scheduled while
+ * either toggle is on, cancelled otherwise. The two toggles call [update] when they change.
+ */
+object BackgroundSyncScheduling {
+    fun wanted(context: Context): Boolean =
+        com.sporez.actualist.android.notifications.TransactionAlertPrefs.isEnabled(context) ||
+            com.sporez.actualist.android.sync.BackgroundBankSyncPrefs.isEnabled(context)
+
+    fun update(context: Context) {
+        val app = context.applicationContext
+        runCatching {
+            if (wanted(app)) {
+                com.sporez.actualist.android.sync.BackgroundSyncWorker.schedule(app)
+            } else {
+                androidx.work.WorkManager.getInstance(app).cancelUniqueWork(com.sporez.actualist.android.sync.BackgroundSyncWorker.NAME)
+            }
+        }
     }
 }

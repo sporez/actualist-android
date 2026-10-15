@@ -21,19 +21,38 @@ object TextImportPrefill {
     /** The last shared text's parse, waiting for the editor. */
     val pending = MutableStateFlow<TextImportParse?>(null)
 
+    /** Ids a deep link named for the account and category; an id that exists wins over the name match. */
+    private class Hints(val accountId: String?, val categoryId: String?)
+
+    @Volatile
+    private var hints: Hints? = null
+
     /** Parses [text] and queues the new-transaction screen; false (nothing queued) when it holds no amount. */
     fun queue(text: String?): Boolean {
         val parse = text?.let(TextImportParser::parse) ?: return false
+        queueParse(parse)
+        return true
+    }
+
+    /** Queues a ready-made [parse] (a deep link's prefill, which may carry no amount) for the new-transaction screen. */
+    fun queueParse(parse: TextImportParse, accountId: String? = null, categoryId: String? = null) {
+        hints = if (accountId == null && categoryId == null) null else Hints(accountId, categoryId)
         pending.value = parse
         AppShortcuts.pending.value = "transaction-new"
-        return true
     }
 
     /** Consumes the waiting parse against the budget's lists; null when nothing was shared. */
     fun take(accounts: List<Account>, payees: List<Payee>, categories: List<CategoryOption>): TextImportDraft? {
         val parse = pending.value ?: return null
         pending.value = null
-        return TextImportResolver.resolve(parse, accounts, payees, categories)
+        val draft = TextImportResolver.resolve(parse, accounts, payees, categories)
+        val named = hints
+        hints = null
+        if (named == null) return draft
+        return draft.copy(
+            accountId = named.accountId?.takeIf { id -> accounts.any { it.id == id && !it.closed } } ?: draft.accountId,
+            categoryId = named.categoryId?.takeIf { id -> categories.any { it.id == id } } ?: draft.categoryId,
+        )
     }
 
     /** Handles an ACTION_SEND text/plain intent; true when it was one (even if no amount was found). */

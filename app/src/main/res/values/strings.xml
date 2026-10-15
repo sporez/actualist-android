@@ -16,4 +16,7 @@
     <string name="net_worth_widget_description">Net worth across your accounts</string>
     <string name="quick_actions_widget_name">Quick actions</string>
     <string name="quick_actions_widget_description">Shortcuts into Actualist</string>
+    <string name="tile_add_expense_label">Add expense</string>
+    <string name="automation_permission_label">Send automation commands to Actualist</string>
+    <string name="automation_permission_description">Lets this app log transactions and read account balances in Actualist when Allow Automation is on.</string>
 </resources>

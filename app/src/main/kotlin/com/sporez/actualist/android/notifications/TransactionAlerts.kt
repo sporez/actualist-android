@@ -32,6 +32,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.sporez.actualist.android.AppShortcuts
+import com.sporez.actualist.android.BackgroundSyncScheduling
 import com.sporez.actualist.android.MainActivity
 import com.sporez.actualist.android.R
 import com.sporez.actualist.core.notifications.NewTransactionsNotificationCopy
@@ -46,6 +47,7 @@ object TransactionAlertPrefs {
 
     fun setEnabled(context: Context, enabled: Boolean) {
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(ENABLED, enabled).apply()
+        BackgroundSyncScheduling.update(context)
     }
 }
 
