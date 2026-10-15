@@ -9,25 +9,49 @@ import com.sporez.actualist.core.sync.SyncMessage
  * Undo and redo for local edits, ported from Actual's `server/undo.ts`: each recorded gesture
  * (one [record] call, Actual's undo marker) keeps the batches it committed; undo writes their
  * [UndoBatch.undoCells] in reverse order with fresh timestamps, redo writes the batches again
- * and resurrects the rows they created. Like Actual, the history lives in memory only and is
- * lost when the budget closes.
+ * and resurrects the rows they created. Unlike Actual, the history is
+ * kept in the budget database's local-only
+ * `actualist_history` table ([HistoryStore]) and loaded again when a session opens, so it
+ * survives a restart; it is bounded by [limit] gestures and [maxAgeMillis].
  *
  * Unlike Actual, a gesture whose rows changed since (a later local edit or a synced change to
  * any row it touched) cannot be undone or redone: Actual would silently overwrite the newer
  * values. This is Actualist's intended OP-76, which also compares whole rows.
  */
-class UndoHistory(private val database: BudgetDatabase, private val limit: Int = 100) {
-    private class Entry(val batches: List<UndoBatch>) {
+class UndoHistory(
+    private val database: BudgetDatabase,
+    private val limit: Int = 100,
+    private val maxAgeMillis: Long = THIRTY_DAYS_MILLIS,
+    private val nowMillis: () -> Long = { System.currentTimeMillis() },
+    persist: Boolean = true,
+) {
+    private class Entry(val batches: List<UndoBatch>, rows: HistoryRows? = null) {
+        var id: Long = 0L
+
         /** The touched rows as they must still be for the next undo or redo. */
-        var rows: Map<Pair<String, String>, Map<String, String>?> = merged(batches)
+        var rows: HistoryRows = rows ?: merged(batches)
     }
 
     private val entries = ArrayList<Entry>()
     private var cursor = 0
     private var recording: MutableList<UndoBatch>? = null
 
+    private val store: HistoryStore? = if (persist) HistoryStore(database) else null
+
     init {
         database.undoListener = { batch -> recording?.add(batch) }
+        if (store != null) {
+            val loaded = try {
+                store.load(limit, maxAgeMillis, nowMillis())
+            } catch (error: Exception) {
+                emptyList()
+            }
+            for (stored in loaded) {
+                entries += Entry(stored.batches, stored.rows).also { it.id = stored.id }
+            }
+            // Undone gestures are always the newest ones: the cursor sits before the first.
+            cursor = loaded.indexOfFirst { it.undone }.let { if (it < 0) loaded.size else it }
+        }
     }
 
     val canUndo: Boolean @Synchronized get() = cursor > 0
@@ -59,9 +83,18 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
         }
         if (batches.isNotEmpty()) {
             while (entries.size > cursor) entries.removeAt(entries.size - 1)
-            entries += Entry(batches)
+            val entry = Entry(batches)
+            entries += entry
             if (entries.size > limit) entries.removeAt(0)
             cursor = entries.size
+            if (store != null) {
+                // A failed save leaves the in-memory history working; it only will not survive a restart.
+                try {
+                    database.sql.transaction { entry.id = store.append(batches, entry.rows, limit, maxAgeMillis, nowMillis()) }
+                } catch (error: Exception) {
+                    entry.id = 0L
+                }
+            }
         }
         return result
     }
@@ -72,7 +105,7 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
         if (!canUndo) return null
         val entry = entries[cursor - 1]
         requireUnchanged(entry.rows, "This change was edited again since, so it can no longer be undone.")
-        val written = commitCapturing(entry, entry.batches.flatMap { it.undoCells }.reversed())
+        val written = commitCapturing(entry, entry.batches.flatMap { it.undoCells }.reversed(), undone = true)
         cursor -= 1
         return written
     }
@@ -83,21 +116,28 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
         if (!canRedo) return null
         val entry = entries[cursor]
         requireUnchanged(entry.rows, "This budget changed since the undo, so it can no longer be redone.")
-        val written = commitCapturing(entry, entry.batches.flatMap { it.redoCells })
+        val written = commitCapturing(entry, entry.batches.flatMap { it.redoCells }, undone = false)
         cursor += 1
         return written
     }
 
     /** Commits [cells] and records the rows they leave as the entry's next expected state. */
-    private fun commitCapturing(entry: Entry, cells: List<com.sporez.actualist.core.db.CellDraft>): List<SyncMessage> {
+    private fun commitCapturing(entry: Entry, cells: List<com.sporez.actualist.core.db.CellDraft>, undone: Boolean): List<SyncMessage> {
         val captured = mutableListOf<UndoBatch>()
         recording = captured
+        var rows = entry.rows
+        // The cells and the history row commit together, so a crash cannot leave them disagreeing.
         val written = try {
-            database.commitLocal(cells)
+            database.sql.transaction {
+                val committed = database.commitLocal(cells)
+                rows = entry.rows + merged(captured)
+                if (store != null && entry.id != 0L) store.update(entry.id, undone, rows)
+                committed
+            }
         } finally {
             recording = null
         }
-        entry.rows = entry.rows + merged(captured)
+        entry.rows = rows
         return written
     }
 
@@ -105,6 +145,11 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     fun clear() {
         entries.clear()
         cursor = 0
+        try {
+            store?.clear()
+        } catch (error: Exception) {
+            // The in-memory history is already empty.
+        }
     }
 
     private fun requireUnchanged(rows: Map<Pair<String, String>, Map<String, String>?>, reason: String) {
@@ -114,6 +159,8 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
     }
 
     private companion object {
+        const val THIRTY_DAYS_MILLIS = 30L * 24 * 60 * 60 * 1000
+
         private val alwaysChanged = setOf("zero_budgets", "reflect_budgets", "zero_budget_months", "notes")
 
         private val labels = mapOf(
@@ -154,7 +201,7 @@ class UndoHistory(private val database: BudgetDatabase, private val limit: Int =
             }
         }
 
-        fun merged(batches: List<UndoBatch>): Map<Pair<String, String>, Map<String, String>?> {
+        fun merged(batches: List<UndoBatch>): HistoryRows {
             val rows = LinkedHashMap<Pair<String, String>, Map<String, String>?>()
             for (batch in batches) rows.putAll(batch.rowsAfter)
             return rows

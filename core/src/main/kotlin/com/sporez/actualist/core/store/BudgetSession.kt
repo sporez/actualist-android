@@ -51,7 +51,7 @@ class BudgetSession(
     val budgetWrites = BudgetWrites(database)
     val transactionWrites = TransactionWrites(database, clock)
 
-    /** Undo and redo of this session's writes (in memory, as in Actual). */
+    /** Undo and redo of this session's writes; the history persists in the budget database (see HistoryStore). */
     val history = UndoHistory(database)
     private val _undoState = MutableStateFlow(UndoState(false, false))
     val undoState: StateFlow<UndoState> = _undoState.asStateFlow()
