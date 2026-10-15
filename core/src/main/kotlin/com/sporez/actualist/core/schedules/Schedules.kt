@@ -33,6 +33,9 @@ data class ScheduleListItem(
     val canComplete: Boolean,
     val canDelete: Boolean,
     val canEdit: Boolean,
+    /** The payee mapping points at a payee that no longer exists. */
+    val payeeMissing: Boolean = false,
+    val accountAvailability: ScheduleReferenceAvailability = ScheduleReferenceAvailability.AVAILABLE,
 )
 
 /** A schedule's detail for an editor: the list item plus its editable definition. */
@@ -41,6 +44,8 @@ data class ScheduleEditorModel(
     val dateRule: ScheduleDateRule,
     val customUpcomingLength: String?,
     val unsupportedMessages: List<String>,
+    /** The budget's own upcoming window, used when [customUpcomingLength] is null. */
+    val defaultUpcomingLength: String = "7",
 )
 
 /** English descriptions of a schedule's date rule. */
@@ -138,6 +143,7 @@ class Schedules(
             dateRule = detail.dateRule,
             customUpcomingLength = detail.customUpcomingLength,
             unsupportedMessages = detail.unsupportedReasons.map { it.message }.distinct(),
+            defaultUpcomingLength = reads.defaultUpcomingLength(),
         )
     }
 
@@ -224,6 +230,8 @@ class Schedules(
             canComplete = capabilities?.canComplete == true,
             canDelete = capabilities?.canDelete == true,
             canEdit = capabilities?.canEdit == true,
+            payeeMissing = summary.payee.isMissing,
+            accountAvailability = summary.account.availability,
         )
     }
 }

@@ -139,6 +139,8 @@ fun SettingsScreen(
             }
         }
         BudgetDisplayCard(settings)
+        SettingsAccountOrder(session)
+        SettingsReportOrder()
         SettingsBudgetDataCard(session, settings, server)
         RolloverAllCard(session)
         SettingsEraseCard(session)
@@ -277,7 +279,7 @@ private fun RolloverAllCard(session: BudgetSession) {
         fun applyAll(carryover: Boolean) {
             confirming = false
             scope.launch {
-                error = runCatching { session.write { budgetWrites.setAllExpenseCarryover(carryover, month, month) } }.exceptionOrNull()?.let { it.message ?: "Rollover could not be changed." }
+                error = runCatching { session.write { budgetWrites.setAllExpenseCarryover(carryover, month, com.sporez.actualist.core.budget.BudgetWrites.carryoverHorizonMonth(month, com.sporez.actualist.core.budget.Months.current())) } }.exceptionOrNull()?.let { it.message ?: "Rollover could not be changed." }
             }
         }
         androidx.compose.material3.AlertDialog(

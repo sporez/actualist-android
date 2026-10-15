@@ -402,6 +402,8 @@ class ScheduleReads(private val database: BudgetDatabase) {
         return result
     }
 
+    fun defaultUpcomingLength(): String = sql.locked { upcomingLengthPreference() }
+
     private fun upcomingLengthPreference(): String {
         if (!database.tableExists("preferences")) return "7"
         val columns = database.columnSet("preferences")

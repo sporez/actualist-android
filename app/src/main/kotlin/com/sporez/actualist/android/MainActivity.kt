@@ -98,6 +98,7 @@ fun ActualistApp(app: AppViewModel = viewModel()) {
                 when (val current = state) {
                     AppState.Loading -> LoadingBox()
                     is AppState.Failed -> MessageBox("Could not open the budget", current.message, action = "Start over" to app::closeBudget)
+                    is AppState.CredentialRecovery -> com.sporez.actualist.android.ui.CredentialRecoveryView(current.message, onRetry = app::retryCredentialAccess)
                     AppState.Onboarding -> {
                         var connecting by rememberSaveable { mutableStateOf(false) }
                         Box(Modifier.fillMaxSize().safeDrawingPadding()) {

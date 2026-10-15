@@ -33,4 +33,15 @@ object TemplatePreviewCopy {
             "No eligible templates were found for this month."
         }
     }
+
+    /** Shown in place of a preview that could not be built for one apply mode. */
+    fun modeUnavailable(mode: TemplateApplyMode): String =
+        (if (mode == TemplateApplyMode.OVERWRITE) "Overwrite" else "Fill Empty") + " is unavailable."
+
+    /** "<category> needs <amount> to fund." for a category whose demand was not fully met. */
+    fun fundingNeeded(name: String, formattedAmount: String): String = "$name needs $formattedAmount to fund."
+
+    /** The label of one template's contribution line: its kind title when known, else "Template N". */
+    fun contributionTitle(index: Int, kindTitles: List<String>, perTemplateCount: Int): String =
+        if (kindTitles.size == perTemplateCount && index in kindTitles.indices) kindTitles[index] else "Template ${index + 1}"
 }

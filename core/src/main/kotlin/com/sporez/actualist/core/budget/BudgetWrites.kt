@@ -400,6 +400,14 @@ class BudgetWrites(private val database: BudgetDatabase) {
 
     companion object {
         const val MAXIMUM_CARRYOVER_MONTH_SPAN = 600
+        const val CARRYOVER_HORIZON_MONTHS = 12
+
+        /** Actualist's carryover horizon: the current month plus 12, never before [startMonth]. */
+        fun carryoverHorizonMonth(startMonth: String, currentMonth: String): String {
+            val horizon = Months.shifted(currentMonth, CARRYOVER_HORIZON_MONTHS)
+            return if (Months.monthInt(horizon) < Months.monthInt(startMonth)) startMonth else horizon
+        }
+
         const val TO_BUDGET_ROW_CATEGORY = "to-budget"
         const val MAXIMUM_USER_AMOUNT = 9_000_000_000_000_000L
 

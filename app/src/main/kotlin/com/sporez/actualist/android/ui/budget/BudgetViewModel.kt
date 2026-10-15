@@ -127,7 +127,7 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
     }
 
     fun setCarryover(categoryId: String, carryover: Boolean) = write(if (carryover) "Rollover on" else "Rollover off") {
-        budgetWrites.setCarryover(categoryId, carryover, month.value, month.value)
+        budgetWrites.setCarryover(categoryId, carryover, month.value, com.sporez.actualist.core.budget.BudgetWrites.carryoverHorizonMonth(month.value, Months.current()))
     }
 
     fun addCategory(name: String, groupId: String?, newGroupName: String?) = write("Added $name") {

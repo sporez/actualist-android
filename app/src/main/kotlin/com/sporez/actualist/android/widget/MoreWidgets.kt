@@ -114,7 +114,7 @@ data class MoreWidgetData(
 }
 
 object MoreWidgetLoader {
-    private val monthTitle = DateTimeFormatter.ofPattern("MMMM yyyy")
+    private val monthTitle: DateTimeFormatter get() = com.sporez.actualist.android.ui.components.Dates.monthYearLong()
 
     suspend fun load(context: Context, container: AppContainer, today: LocalDate = LocalDate.now(), categoryIds: List<String>? = null): MoreWidgetData? = withContext(Dispatchers.IO) {
         val settings = container.settings.settings.value

@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,6 +85,8 @@ data class EditorData(
     val recentPayeeIds: List<String> = emptyList(),
     /** The category on a transfer's paired row (an off-budget source keeps it there). */
     val pairedCategoryId: String? = null,
+    /** True for a tracking budget, where income categories are real choices; envelope budgets show "To Budget". */
+    val isTracking: Boolean = false,
 )
 
 class TransactionEditorViewModel(
@@ -107,6 +110,9 @@ class TransactionEditorViewModel(
                         payees = ledger.payees(),
                         categories = ledger.categories(),
                         existing = transactionId?.let { ledger.transaction(it) },
+                        isTracking = runCatching {
+                            budget.fetchBudgetMonth(Months.id(LocalDate.now().year, LocalDate.now().monthValue)).trackingSummary != null
+                        }.getOrDefault(false),
                         pairedCategoryId = transactionId?.let { ledger.transaction(it) }?.transferId?.let { ledger.transaction(it) }?.categoryId,
                         recentPayeeIds = com.sporez.actualist.core.transactions.PayeeRecents.ids(
                             ledger.transactions(com.sporez.actualist.core.transactions.TransactionQuery(limit = 200)),
@@ -286,6 +292,30 @@ private data class SplitLine(
     val outflow: Boolean? = null,
 )
 
+/** Keeps the split rows through rotation and resizing (a flat list of seven fields per row). */
+private val SplitLinesSaver = listSaver<List<SplitLine>, String?>(
+    save = { lines ->
+        lines.flatMap { l ->
+            listOf(l.categoryId, l.amountText, l.id, l.payeeId, l.payeeName, l.notes, l.outflow?.toString())
+        }
+    },
+    restore = { flat ->
+        flat.chunked(7).map { f ->
+            SplitLine(
+                categoryId = f[0],
+                amountText = f[1] ?: "",
+                id = f[2],
+                payeeId = f[3],
+                payeeName = f[4] ?: "",
+                notes = f[5] ?: "",
+                outflow = f[6]?.toBooleanStrictOrNull(),
+            )
+        }
+    },
+)
+
+private val StringListSaver = listSaver<List<String>, String>(save = { it }, restore = { it })
+
 @Composable
 fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () -> Unit) {
     val data by viewModel.data.collectAsState()
@@ -323,14 +353,14 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             }
         }
     }
-    var picking by remember { mutableStateOf<String?>(null) }
+    var picking by rememberSaveable { mutableStateOf<String?>(null) }
     var categoryBalances by remember { mutableStateOf<Map<String, Long>?>(null) }
     val pickingCategory = picking == "category" || picking?.startsWith("split-") == true
     LaunchedEffect(pickingCategory, dateEpochDay) {
         if (pickingCategory) categoryBalances = viewModel.categoryBalances(LocalDate.ofEpochDay(dateEpochDay))
     }
     var splitting by rememberSaveable { mutableStateOf(existing?.isParent == true) }
-    var splits by remember {
+    var splits by rememberSaveable(stateSaver = SplitLinesSaver) {
         mutableStateOf(
             existing?.takeIf { it.isParent }?.let { parent ->
                 val parentOutflow = parent.amount <= 0
@@ -365,12 +395,12 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     val splitRemaining = (signed ?: 0) - splitAmounts.sumOf { it ?: 0 }
     val canSave = signed != null && account != null && (!splitting || (splitAmounts.all { it != null } && splitRemaining == 0L))
     val editingSplit = existing?.isChild == true
-    var rulesApplied by remember { mutableStateOf<List<String>>(emptyList()) }
+    var rulesApplied by rememberSaveable(stateSaver = StringListSaver) { mutableStateOf<List<String>>(emptyList()) }
 
-    var ruleDeletes by remember { mutableStateOf(false) }
-    var ruleDeleteReview by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    var discardPrompt by remember { mutableStateOf(false) }
+    var ruleDeletes by rememberSaveable { mutableStateOf(false) }
+    var ruleDeleteReview by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var discardPrompt by rememberSaveable { mutableStateOf(false) }
     val editorScope = rememberCoroutineScope()
     fun ruleInput() = com.sporez.actualist.core.rules.RuleTransactionInput(
         accountId = accountId!!,
@@ -385,7 +415,12 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     )
 
     // New simple transactions get the rule preview whenever the payee or account changes.
+    var previewedFor by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(payeeId, newPayeeName, accountId) {
+        // After a rotation the restored form already holds the rules' result; do not apply it over later edits.
+        val previewKey = "$payeeId|$newPayeeName|$accountId"
+        if (previewedFor == previewKey) return@LaunchedEffect
+        previewedFor = previewKey
         if (existing != null || splitting || isTransfer || accountId == null) return@LaunchedEffect
         if (payeeId == null && newPayeeName.isBlank()) return@LaunchedEffect
         val result = viewModel.previewRules(ruleInput()) ?: return@LaunchedEffect
@@ -413,17 +448,17 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     }
 
     // Unsaved edits: what the form holds now against what it held once it had loaded (and any shared text was applied).
-    fun formSnapshot(): List<Any?> = listOf(
+    fun formSnapshot(): String = listOf(
         outflow, amountText, accountId, payeeId, newPayeeName, categoryId, notes, cleared, dateEpochDay, splitting,
         splits.toList(),
-    )
-    var baseline by remember { mutableStateOf<List<Any?>?>(null) }
-    LaunchedEffect(Unit) { baseline = formSnapshot() }
+    ).toString()
+    var baseline by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { if (baseline == null) baseline = formSnapshot() }
     val dirty = baseline.let { it != null && it != formSnapshot() }
     BackHandler(enabled = dirty) { discardPrompt = true }
 
     var reconciledScope by remember { mutableStateOf<com.sporez.actualist.core.transactions.ReconciledScope?>(null) }
-    var reconcileGuard by remember { mutableStateOf<String?>(null) }
+    var reconcileGuard by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(existing?.id) { reconciledScope = viewModel.reconciledScope() }
     val reconciledNow = reconciledScope?.isEmpty == false
     val performSave: (Boolean) -> Unit = { unlock ->
@@ -535,7 +570,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             FieldButton("Payee", payee?.let { if (it.isTransfer) "Transfer: ${it.name}" else it.name } ?: newPayeeName.ifBlank { "None" }, "editor-payee") { picking = "payee" }
             FieldButton("Account", account?.name ?: "Choose", "editor-account") { picking = "account" }
             if (showCategory) {
-                FieldButton("Category", loaded.categories.firstOrNull { it.id == categoryId }?.name ?: "Uncategorized", "editor-category") { picking = "category" }
+                FieldButton("Category", CategoryPickerOptions.label(loaded.categories, !loaded.isTracking, categoryId), "editor-category") { picking = "category" }
             }
             FieldButton("Date", LocalDate.ofEpochDay(dateEpochDay).format(dateLabel), "editor-date") { picking = "date" }
             androidx.compose.material3.OutlinedTextField(notes, { notes = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("editor-notes"))
@@ -571,7 +606,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                             if (lineIsTransfer) {
                                 FieldButton("Split ${index + 1} category", "Account Transfer", "split-category-$index") {}
                             } else {
-                                FieldButton("Split ${index + 1} category", loaded.categories.firstOrNull { it.id == line.categoryId }?.name ?: "Uncategorized", "split-category-$index") { picking = "split-$index" }
+                                FieldButton("Split ${index + 1} category", CategoryPickerOptions.label(loaded.categories, !loaded.isTracking, line.categoryId), "split-category-$index") { picking = "split-$index" }
                             }
                             androidx.compose.material3.OutlinedTextField(
                                 line.notes,
@@ -748,6 +783,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             onDismiss = { picking = null },
             balances = categoryBalances,
             selectedId = categoryId,
+            envelope = !loaded.isTracking,
         )
         "date" -> {
             val state = rememberDatePickerState(initialSelectedDateMillis = LocalDate.ofEpochDay(dateEpochDay).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
@@ -840,6 +876,7 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                 onDismiss = { picking = null },
                 balances = categoryBalances,
                 selectedId = splits.getOrNull(index)?.categoryId,
+                envelope = !loaded.isTracking,
             )
         }
     }

@@ -64,8 +64,11 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
     var overwrite by rememberSaveable { mutableStateOf(false) }
     var preview by remember { mutableStateOf<TemplatePreview?>(null) }
     var loaded by remember { mutableStateOf(false) }
+    var overwriteFailed by remember { mutableStateOf(false) }
     LaunchedEffect(overwrite) {
         preview = viewModel.templatePreview(overwrite)
+        // A null preview with a template present means this mode could not be read.
+        overwriteFailed = preview == null && viewModel.templateDefinitions().isNotEmpty()
         loaded = true
     }
     AlertDialog(
@@ -76,6 +79,7 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                 val p = preview
                 when {
                     !loaded -> Text("Reading templates…")
+                    p == null && overwriteFailed -> Text(TemplatePreviewCopy.modeUnavailable(if (overwrite) com.sporez.actualist.core.templates.TemplateApplyMode.OVERWRITE else com.sporez.actualist.core.templates.TemplateApplyMode.FILL_EMPTY), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("templates-mode-unavailable"))
                     p == null -> Text("No category in this budget has a template. Add one from a category's Template button or the template browser.")
                     else -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -125,6 +129,9 @@ internal fun TemplatesDialog(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                         TemplateSummaryLine("Assigned", p.assigned)
                         if (p.released != 0L) TemplateSummaryLine(TemplatePreviewCopy.releasedTitle(p.isTracking), p.released)
                         if (p.stillNeeded > 0L) TemplateSummaryLine("Still needed", p.stillNeeded)
+                        for (short in p.categories.filter { it.shortfall > 0L }) {
+                            Text(TemplatePreviewCopy.fundingNeeded(short.name, money(short.shortfall)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         TemplateSummaryLine(if (p.isTracking) "Saved after" else "To Budget after", p.leftover)
                         Row(Modifier.testTag("templates-leftover-change")) {
                             Text(if (p.isTracking) "Total Saved" else "To Budget", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -45,10 +45,14 @@ fun CategoryPickerDialog(
     balances: Map<String, Long>? = null,
     /** The category the transaction has now, marked with a check. */
     selectedId: String? = null,
+    /** Envelope budgets fold the income categories into one "To Budget" choice, as Actualist does. */
+    envelope: Boolean = false,
 ) {
     var query by remember { mutableStateOf("") }
     val needle = query.trim()
-    val matching = if (needle.isEmpty()) categories else categories.filter {
+    val allOptions = remember(categories, envelope) { CategoryPickerOptions.make(categories, envelope) }
+    val shownSelectedId = CategoryPickerOptions.selectedId(categories, envelope, selectedId)
+    val matching = if (needle.isEmpty()) allOptions else allOptions.filter {
         it.name.contains(needle, ignoreCase = true) || it.groupName.contains(needle, ignoreCase = true)
     }
     val groups = matching.groupBy { it.groupName }
@@ -102,10 +106,10 @@ fun CategoryPickerDialog(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Text(option.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                                balances?.get(option.id)?.let { available ->
+                                balances?.takeIf { !option.isToBudget }?.get(option.id)?.let { available ->
                                     BalancePill(available, Modifier.testTag("category-balance-${option.id}"))
                                 }
-                                if (option.id == selectedId) {
+                                if (option.id == shownSelectedId) {
                                     Icon(
                                         Icons.Filled.Check,
                                         contentDescription = "Selected",
@@ -123,4 +127,34 @@ fun CategoryPickerDialog(
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** One row of the picker: a category, or the synthetic "To Budget" choice. */
+internal data class CategoryPickerOption(val id: String, val name: String, val groupName: String, val isToBudget: Boolean = false)
+
+internal object CategoryPickerOptions {
+    /**
+     * In an envelope budget the income categories collapse into a single "To Budget" option (backed by the
+     * first visible income category) listed first; every other choice is an expense category.
+     */
+    fun make(categories: List<com.sporez.actualist.core.transactions.CategoryOption>, envelope: Boolean): List<CategoryPickerOption> {
+        val plain = categories.filter { !envelope || !it.isIncome }.map { CategoryPickerOption(it.id, it.name, it.groupName) }
+        if (!envelope) return plain
+        val income = categories.firstOrNull { it.isIncome && !it.hidden } ?: return plain
+        return listOf(CategoryPickerOption(income.id, "To Budget", "To Budget", isToBudget = true)) + plain
+    }
+
+    /** The row to mark as chosen: any income category counts as "To Budget" in an envelope budget. */
+    fun selectedId(categories: List<com.sporez.actualist.core.transactions.CategoryOption>, envelope: Boolean, selectedId: String?): String? {
+        if (!envelope || selectedId == null) return selectedId
+        val chosen = categories.firstOrNull { it.id == selectedId } ?: return selectedId
+        if (!chosen.isIncome) return selectedId
+        return categories.firstOrNull { it.isIncome && !it.hidden }?.id ?: selectedId
+    }
+
+    /** The name the editor field shows for [categoryId]. */
+    fun label(categories: List<com.sporez.actualist.core.transactions.CategoryOption>, envelope: Boolean, categoryId: String?): String {
+        val chosen = categories.firstOrNull { it.id == categoryId } ?: return "Uncategorized"
+        return if (envelope && chosen.isIncome) "To Budget" else chosen.name
+    }
 }

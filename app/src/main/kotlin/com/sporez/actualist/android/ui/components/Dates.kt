@@ -20,6 +20,12 @@ object Dates {
     /** Month and year: "Oct 2026". */
     fun monthYear(): DateTimeFormatter = formatter("yMMM")
 
+    /** Month and year with the full month name: "October 2026". */
+    fun monthYearLong(): DateTimeFormatter = formatter("yMMMM")
+
+    /** Month and day: "Oct 14". */
+    fun monthDay(): DateTimeFormatter = formatter("MMMd")
+
     /** The standalone short month name: "Oct". */
     fun shortMonthName(month: Int): String =
         java.time.Month.of(month).getDisplayName(java.time.format.TextStyle.SHORT_STANDALONE, Locale.getDefault())

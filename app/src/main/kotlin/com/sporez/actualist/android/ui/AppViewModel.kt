@@ -19,6 +19,8 @@ sealed class AppState {
     data object Onboarding : AppState()
     data class Open(val session: BudgetSession) : AppState()
     data class Failed(val message: String) : AppState()
+    /** The saved server token exists but cannot be decrypted and no budget is cached to open. */
+    data class CredentialRecovery(val message: String) : AppState()
 }
 
 /**
@@ -33,10 +35,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val selected = container.settings.settings.value.selectedBudgetId
         if (selected == null) {
-            _state.value = AppState.Onboarding
+            val recovery = container.secrets.recoveryMessage()
+            _state.value = if (recovery != null) AppState.CredentialRecovery(recovery) else AppState.Onboarding
         } else {
             openSession(selected) { container.library.open(selected) ?: error("The selected budget is no longer on this device.") }
         }
+    }
+
+    /** Reads the saved credentials once more; normal onboarding follows when they are readable (or gone). */
+    fun retryCredentialAccess() {
+        val message = container.secrets.recoveryMessage()
+        _state.value = if (message != null) AppState.CredentialRecovery(message) else AppState.Onboarding
     }
 
     fun openDemo() = openSession(DemoBudget.FILE_ID) { container.library.openDemo() }

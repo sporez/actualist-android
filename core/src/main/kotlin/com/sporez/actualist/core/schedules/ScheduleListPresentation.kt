@@ -40,6 +40,31 @@ object ScheduleListPresentation {
         ScheduleStatus.SCHEDULED -> "Scheduled"
     }
 
+    /** The payee line: "Unavailable payee" for a payee that is gone, the name, or null when there is none. */
+    fun payeeText(item: ScheduleListItem): String? = when {
+        item.payeeMissing -> "Unavailable payee"
+        else -> item.payeeName
+    }
+
+    /** The account line: "Unavailable account" when gone, "Name (Closed)" when closed. */
+    fun accountText(item: ScheduleListItem): String? = when (item.accountAvailability) {
+        ScheduleReferenceAvailability.MISSING -> "Unavailable account"
+        ScheduleReferenceAvailability.CLOSED -> item.accountName?.let { "$it (Closed)" } ?: "Unavailable account"
+        ScheduleReferenceAvailability.AVAILABLE -> item.accountName
+    }
+
+    /** The row's second line, e.g. "Unavailable payee • Closed Card (Closed)". */
+    fun referenceText(item: ScheduleListItem): String =
+        listOfNotNull(payeeText(item), accountText(item)).joinToString(" \u2022 ")
+
+    fun limitationText(item: ScheduleListItem): String? = if (item.isSupported) null else "Some schedule options are unavailable"
+
+    /** The upcoming window with "(Budget default)" when the schedule inherits the budget's value. */
+    fun upcomingWindowText(customLength: String?, defaultLength: String): String {
+        val label = ScheduleUpcomingWindow.label(customLength ?: defaultLength)
+        return if (customLength == null) "$label (Budget default)" else label
+    }
+
     fun completedCount(items: List<ScheduleListItem>): Int = items.count { it.status == ScheduleStatus.COMPLETED }
 
     /** The text a search query is matched against: name, payee, account, amount, next date and status. */

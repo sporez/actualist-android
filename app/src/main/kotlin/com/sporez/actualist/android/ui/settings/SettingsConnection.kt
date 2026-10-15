@@ -105,6 +105,20 @@ fun SettingsCustomHeaders(server: ServerConnection, serverUrl: String) {
         var error by remember { mutableStateOf<String?>(null) }
         var busy by remember { mutableStateOf(false) }
         val addressChanged = saved?.first?.let { !ServerHeaderScope.sameOrigin(it, serverUrl) } ?: false
+        fun saveHeaders() {
+            scope.launch {
+                busy = true
+                error = null
+                try {
+                    server.saveCustomHeadersTested(serverUrl, HeaderDraft.validated(rows))
+                    saved = server.savedCustomHeaders()
+                    editing = false
+                } catch (failure: Exception) {
+                    error = failure.message ?: "Those headers are not valid."
+                }
+                busy = false
+            }
+        }
         AlertDialog(
             onDismissRequest = { if (!busy) editing = false },
             title = { Text("Custom headers") },
@@ -117,6 +131,11 @@ fun SettingsCustomHeaders(server: ServerConnection, serverUrl: String) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
+                        if (rows.isNotEmpty()) {
+                            TextButton(onClick = { saveHeaders() }, enabled = !busy, modifier = Modifier.testTag("custom-headers-use-saved")) {
+                                Text("Use Saved Headers for This Server")
+                            }
+                        }
                     }
                     Text(
                         "Headers are sent with requests to this server. Values are stored securely on this device. Remove every header to stop sending them.",
@@ -129,20 +148,7 @@ fun SettingsCustomHeaders(server: ServerConnection, serverUrl: String) {
             confirmButton = {
                 TextButton(
                     enabled = !busy,
-                    onClick = {
-                        scope.launch {
-                            busy = true
-                            error = null
-                            try {
-                                server.saveCustomHeadersTested(serverUrl, HeaderDraft.validated(rows))
-                                saved = server.savedCustomHeaders()
-                                editing = false
-                            } catch (failure: Exception) {
-                                error = failure.message ?: "Those headers are not valid."
-                            }
-                            busy = false
-                        }
-                    },
+                    onClick = { saveHeaders() },
                     modifier = Modifier.testTag("custom-headers-save"),
                 ) { Text(if (busy) "Checking" else "Save") }
             },

@@ -45,6 +45,15 @@ class TemplatePreviewCopyTest {
     }
 
     @Test
+    fun unavailableAndFundingCopy() {
+        assertEquals("Fill Empty is unavailable.", TemplatePreviewCopy.modeUnavailable(TemplateApplyMode.FILL_EMPTY))
+        assertEquals("Overwrite is unavailable.", TemplatePreviewCopy.modeUnavailable(TemplateApplyMode.OVERWRITE))
+        assertEquals("Groceries needs 123.45 to fund.", TemplatePreviewCopy.fundingNeeded("Groceries", "123.45"))
+        assertEquals("Template 2", TemplatePreviewCopy.contributionTitle(1, emptyList(), 2))
+        assertEquals("Fixed", TemplatePreviewCopy.contributionTitle(0, listOf("Fixed", "Percent"), 2))
+    }
+
+    @Test
     fun releasedTitle() {
         assertEquals("Reduced", TemplatePreviewCopy.releasedTitle(true))
         assertEquals("Released", TemplatePreviewCopy.releasedTitle(false))

@@ -28,13 +28,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.ui.components.SectionCard
 import com.sporez.actualist.core.store.BudgetSession
+import com.sporez.actualist.core.store.HistoryExplanations
 import com.sporez.actualist.core.store.HistoryPresenter
 import com.sporez.actualist.core.store.HistoryReview
 import com.sporez.actualist.core.store.HistoryRow
 import kotlinx.coroutines.launch
 
 /** One loaded History row with the review that undoing or redoing it would show, when it is the next step. */
-private class HistoryEntryModel(val row: HistoryRow, val undone: Boolean, val summary: String, val review: HistoryReview?)
+private class HistoryEntryModel(val row: HistoryRow, val undone: Boolean, val summary: String, val review: HistoryReview?, val reason: String? = null)
 
 /** The undo or redo awaiting confirmation. */
 private class PendingStep(val undo: Boolean, val review: HistoryReview)
@@ -65,7 +66,10 @@ fun HistoryScreen(session: BudgetSession, onRefresh: suspend () -> Unit = {}) {
                     nextRedo -> presenter.review(detail.batches, undoing = false)
                     else -> null
                 }
-                HistoryEntryModel(presenter.row(detail.batches), detail.undone, summaries[index].summary, review)
+                HistoryEntryModel(
+                    presenter.row(detail.batches), detail.undone, summaries[index].summary, review,
+                    HistoryExplanations.undoBlockedReason(index, detail.undone, nextUndo),
+                )
             }
         }
     }
@@ -117,6 +121,9 @@ fun HistoryScreen(session: BudgetSession, onRefresh: suspend () -> Unit = {}) {
                             Text(entry.row.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(entry.summary, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        entry.reason?.let { reason ->
+                            Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("history-reason-$index"))
+                        }
                         if (entry.undone) Text("Undone", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     entry.row.amountText?.let { amount ->

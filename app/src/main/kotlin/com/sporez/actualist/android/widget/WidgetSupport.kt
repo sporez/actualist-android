@@ -125,7 +125,7 @@ fun applyBudgetMoneyFormat(session: BudgetSession) {
 }
 
 object WidgetPanelData {
-    private val dateFormat = DateTimeFormatter.ofPattern("MMM d")
+    private val dateFormat: DateTimeFormatter get() = com.sporez.actualist.android.ui.components.Dates.monthDay()
 
     suspend fun load(context: Context, container: AppContainer, today: LocalDate = LocalDate.now(), accountIds: List<String>? = null): WidgetPanels? = withContext(Dispatchers.IO) {
         val settings = container.settings.settings.value

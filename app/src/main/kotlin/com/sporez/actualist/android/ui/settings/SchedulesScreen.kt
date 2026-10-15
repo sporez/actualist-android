@@ -493,7 +493,7 @@ private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) 
                 }
             }
             Text(
-                listOfNotNull(item.payeeName, item.accountName).joinToString(" · "),
+                ScheduleListPresentation.referenceText(item).replace(" \u2022 ", " · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -593,6 +593,16 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
         }
         return next.takeIf { it != current }
     }
+    var noChange by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    fun hasSupportedChange(): Boolean {
+        val amountChanged = !locked && (
+            amountMode != (ScheduleAmountInput.mode(item.amount) ?: ScheduleAmountMode.EXACT).name ||
+                outflow != ScheduleAmountInput.isOutflow(item.amount) ||
+                amountText != initialTexts.first ||
+                (mode == ScheduleAmountMode.RANGE && upperText != initialTexts.second)
+            )
+        return name.trim() != item.name || posts != item.postsTransaction || upcoming != originalUpcoming || amountChanged || editedRule() != null
+    }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit schedule") },
@@ -662,12 +672,19 @@ private fun EditScheduleDialog(item: ScheduleListItem, viewModel: SchedulesViewM
                     null
                 }
                 if (problem != null) Text(problem, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("schedule-edit-validation"))
+                if (noChange && problem == null) {
+                    Text(ScheduleValidation.NO_CHANGE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("schedule-edit-no-change"))
+                }
             }
         },
         confirmButton = {
             TextButton(
                 enabled = (locked || amountDraft != null) && (!simpleRule || start != null),
                 onClick = {
+                    if (!hasSupportedChange()) {
+                        noChange = true
+                        return@TextButton
+                    }
                     viewModel.update(
                         item,
                         name,
@@ -694,6 +711,7 @@ internal object ScheduleValidation {
     const val COUNT = "Enter a number of occurrences greater than zero."
     const val ACCOUNT = "Choose an open account."
     const val DATE = "Choose a valid schedule date and recurrence."
+    const val NO_CHANGE = "Make a supported change before saving."
 
     /** True when the "after N times" ending holds anything but a count of 1 or more. */
     fun hasInvalidCount(options: RepeatOptions): Boolean =

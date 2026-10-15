@@ -32,7 +32,6 @@ import com.sporez.actualist.core.rules.ScheduleEnding
 import com.sporez.actualist.core.schedules.ScheduleEditorModel
 import com.sporez.actualist.core.schedules.ScheduleListItem
 import com.sporez.actualist.core.schedules.ScheduleListPresentation
-import com.sporez.actualist.core.schedules.ScheduleUpcomingWindow
 
 /** The management actions a schedule detail page offers; each opens the matching review or editor. */
 internal class ScheduleDetailActions(
@@ -109,13 +108,13 @@ internal fun ScheduleDetailPage(
                         )
                     }
                     if (model != null) {
-                        DetailLine("Upcoming window", ScheduleUpcomingWindow.label(model?.customUpcomingLength))
+                        DetailLine("Upcoming window", ScheduleListPresentation.upcomingWindowText(model?.customUpcomingLength, model?.defaultUpcomingLength ?: "7"))
                     }
                     HorizontalDivider(Modifier.padding(vertical = 6.dp))
                     Text("Transaction", style = MaterialTheme.typography.titleSmall)
                     DetailLine("Amount", scheduleAmountText(item) ?: "Unavailable")
-                    DetailLine("Account", item.accountName ?: "None")
-                    DetailLine("Payee", item.payeeName ?: "None")
+                    DetailLine("Account", ScheduleListPresentation.accountText(item) ?: "None")
+                    DetailLine("Payee", ScheduleListPresentation.payeeText(item) ?: "No payee")
                     DetailLine("Automatic posting", if (item.postsTransaction) "Yes" else "No")
                     Text("Upcoming dates", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
                     if (dates.isEmpty()) {
