@@ -61,6 +61,7 @@ fun SettingsScreen(
                 Text("Budget", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(session.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("settings-budget-name"))
                 Text(syncDescription(syncStatus), modifier = Modifier.testTag("sync-status"))
+                SettingsBudgetPicker(session.budgetId, onConnectServer)
                 if (!session.isDemo) SettingsSyncRows(syncStatus)
                 if (!session.isDemo) {
                     Button(onClick = { scope.launch { server.sync(session) } }, enabled = syncStatus !is SyncStatus.Syncing, modifier = Modifier.testTag("sync-now")) { Text("Sync now") }
