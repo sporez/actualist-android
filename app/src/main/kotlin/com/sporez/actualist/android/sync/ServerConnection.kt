@@ -40,11 +40,75 @@ class ServerConnection(
     fun savedCustomHeaders(): Pair<String, String>? =
         secrets.getString(CUSTOM_HEADERS)?.let { it.substringBefore('\u0000') to it.substringAfter('\u0000') }
 
-    /** Headers for [url]'s origin only (Actualist scopes them to the server they were saved for). */
+    /**
+     * Headers for [url]'s origin only (Actualist scopes them to the server they were saved for): the
+     * primary server's set or the fallback server's set, whichever was saved for this origin.
+     */
     private fun customHeaders(url: String): com.sporez.actualist.core.server.EndpointHeaders? {
-        val (savedUrl, text) = savedCustomHeaders() ?: return null
-        val endpoint = runCatching { com.sporez.actualist.core.server.EndpointHeaders(savedUrl, com.sporez.actualist.core.server.EndpointHeaders.parse(text)) }.getOrNull()
-        return endpoint?.takeIf { it.appliesToUrl(url) }
+        for (key in listOf(CUSTOM_HEADERS, CUSTOM_HEADERS_FALLBACK)) {
+            val saved = secrets.getString(key) ?: continue
+            val endpoint = runCatching {
+                com.sporez.actualist.core.server.EndpointHeaders(
+                    saved.substringBefore('\u0000'),
+                    com.sporez.actualist.core.server.EndpointHeaders.parse(saved.substringAfter('\u0000')),
+                )
+            }.getOrNull()
+            if (endpoint != null && endpoint.appliesToUrl(url)) return endpoint
+        }
+        return null
+    }
+
+    private val failover = com.sporez.actualist.core.server.ServerFailover()
+    private val _usedFallback = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /** True when the last request to the server went through the fallback address (Actualist's "used fallback"). */
+    val usedFallback: kotlinx.coroutines.flow.StateFlow<Boolean> = _usedFallback
+
+    /** The saved fallback server address, if any. */
+    val fallbackUrl: String? get() = settings.settings.value.fallbackServerUrl
+
+    /** The fallback server's saved custom headers (`Name: value` lines), if any. */
+    fun savedFallbackHeaders(): String? = secrets.getString(CUSTOM_HEADERS_FALLBACK)?.substringAfter('\u0000')
+
+    /**
+     * Saves the fallback address (blank clears it) and the custom headers for it, validated like the
+     * primary: https, or http only for this device. Returns the reason it was rejected (nothing is
+     * changed then), or null when saved.
+     */
+    fun saveFallback(urlInput: String, headersText: String): String? {
+        val normalized = com.sporez.actualist.core.server.ServerFailover.normalize(urlInput)
+        com.sporez.actualist.core.server.ServerFailover.rejection(normalized)?.let { return it }
+        if (normalized.isEmpty()) {
+            secrets.remove(CUSTOM_HEADERS_FALLBACK)
+            settings.update { it.copy(fallbackServerUrl = null) }
+            failover.clear()
+            return null
+        }
+        if (headersText.isBlank()) {
+            secrets.remove(CUSTOM_HEADERS_FALLBACK)
+        } else {
+            try {
+                val url = ActualServerClient(normalized).url
+                com.sporez.actualist.core.server.EndpointHeaders(url, com.sporez.actualist.core.server.EndpointHeaders.parse(headersText))
+                secrets.putString(CUSTOM_HEADERS_FALLBACK, url + "\u0000" + headersText.trim())
+            } catch (error: com.sporez.actualist.core.server.CustomHeaderException) {
+                return error.message ?: "Those headers are not valid."
+            }
+        }
+        settings.update { it.copy(fallbackServerUrl = normalized) }
+        failover.clear()
+        return null
+    }
+
+    /**
+     * Runs [operation] against the saved server, then against the fallback address when the server
+     * cannot be reached at all (Actualist's connection and sync failover). Application errors never fail over.
+     */
+    private fun <T> withFailover(operation: (ActualServerClient) -> T): T {
+        val primary = settings.settings.value.serverUrl ?: throw ServerException.InvalidUrl()
+        val fallback = com.sporez.actualist.core.server.ServerFailover.usableFallback(primary, settings.settings.value.fallbackServerUrl)
+        val attempt = failover.run(primary, fallback) { url -> operation(client(url)) }
+        _usedFallback.value = attempt.usedFallback
+        return attempt.value
     }
 
     /** Validates and stores custom headers for [serverUrl] (blank removes them). Throws with a readable reason. */
@@ -133,22 +197,70 @@ class ServerConnection(
         settings.update { it.copy(serverUrl = null) }
     }
 
-    suspend fun remoteBudgets(): List<RemoteFile> = withContext(Dispatchers.IO) { client().listUserFiles(token()) }
+    /** Whether the budget [budgetId] is end-to-end encrypted, and whether its key is on this device. */
+    enum class BudgetSecurity(val label: String) {
+        NotEncrypted("Not encrypted"),
+        Unlocked("Encrypted · Unlocked"),
+        Locked("Encrypted · Locked"),
+    }
+
+    fun securityOf(budgetId: String): BudgetSecurity {
+        val metadata = library.metadata(budgetId)
+        if (metadata?.encryptKeyId == null) return BudgetSecurity.NotEncrypted
+        return if (secrets.get(SecretStore.budgetKey(budgetId)) != null) BudgetSecurity.Unlocked else BudgetSecurity.Locked
+    }
+
+    /**
+     * Deletes one budget file on this device with its saved encryption key. The server's copy is not
+     * touched. The caller closes the budget first if it is open.
+     */
+    fun deleteLocalBudget(budgetId: String) {
+        library.delete(budgetId)
+        secrets.remove(SecretStore.budgetKey(budgetId))
+        settings.update { if (it.selectedBudgetId == budgetId) it.copy(selectedBudgetId = null) else it }
+    }
+
+    /**
+     * Actualist's "Disconnect & Erase Local Data": removes the sync token, custom headers, the SimpleFIN
+     * device key, cached budget encryption keys, every budget file and the local selections. The server's
+     * data is not touched. The caller closes the open budget first.
+     */
+    fun eraseLocalData() {
+        for (budget in library.list()) secrets.remove(SecretStore.budgetKey(budget.id))
+        secrets.remove(SecretStore.SERVER_TOKEN)
+        secrets.remove(CUSTOM_HEADERS)
+        secrets.remove(CUSTOM_HEADERS_FALLBACK)
+        secrets.remove(OPENID_PENDING)
+        secrets.remove(SIMPLEFIN_BRIDGE)
+        for (budget in library.list()) library.delete(budget.id)
+        failover.clear()
+        _usedFallback.value = false
+        _needsReauthentication.value = false
+        settings.update { it.copy(serverUrl = null, fallbackServerUrl = null, selectedBudgetId = null, defaultAccountId = null) }
+    }
+
+    suspend fun remoteBudgets(): List<RemoteFile> = withContext(Dispatchers.IO) {
+        val token = token()
+        withFailover { it.listUserFiles(token) }
+    }
 
     /**
      * Downloads, decrypts and installs a budget with a fresh node id, as Actualist does for
      * every download. [password] is required when the budget is encrypted.
      */
     suspend fun download(remote: RemoteFile, password: String?): LocalBudget = withContext(Dispatchers.IO) {
-        val client = client()
         val token = token()
-        val encryption: EncryptionContext? = if (remote.encryptKeyId != null) {
-            val secret = password ?: throw LocalFirstException.EncryptedBudgetRequiresPassword()
-            BudgetImporter.validateUserKey(client.userKey(token, remote.fileId), secret)
-        } else {
-            null
+        val downloaded = withFailover { client ->
+            val key: EncryptionContext? = if (remote.encryptKeyId != null) {
+                val secret = password ?: throw LocalFirstException.EncryptedBudgetRequiresPassword()
+                BudgetImporter.validateUserKey(client.userKey(token, remote.fileId), secret)
+            } else {
+                null
+            }
+            key to client.downloadUserFile(token, remote.fileId)
         }
-        val bytes = client.downloadUserFile(token, remote.fileId)
+        val encryption: EncryptionContext? = downloaded.first
+        val bytes: ByteArray = downloaded.second
         val zip = BudgetImporter.decryptIfNeeded(bytes, remote, encryption)
         val id = remote.fileId
         BudgetImporter.install(zip, library.databaseFile(id), driver)
@@ -244,7 +356,8 @@ class ServerConnection(
     suspend fun unlockBudget(session: BudgetSession, password: String): SyncStatus {
         val metadata = library.metadata(session.budgetId) ?: throw IllegalStateException("This budget has no server link.")
         withContext(Dispatchers.IO) {
-            val key = BudgetImporter.validateUserKey(client().userKey(token(), metadata.cloudFileId ?: session.budgetId), password)
+            val token = token()
+            val key = withFailover { BudgetImporter.validateUserKey(it.userKey(token, metadata.cloudFileId ?: session.budgetId), password) }
             secrets.put(SecretStore.budgetKey(session.budgetId), key.keyData)
         }
         return sync(session)
@@ -258,28 +371,31 @@ class ServerConnection(
         return try {
             val result = session.syncing {
                 val keyData = metadata.encryptKeyId?.let { secrets.get(SecretStore.budgetKey(session.budgetId)) ?: throw LocalFirstException.EncryptedBudgetRequiresPassword() }
-                val engine = SyncEngine(
-                    database,
-                    client(),
-                    SyncConfiguration(
-                        fileId = metadata.cloudFileId ?: session.budgetId,
-                        groupId = metadata.groupId,
-                        encryptionKeyId = metadata.encryptKeyId,
-                        encryption = keyData?.let { EncryptionContext(metadata.encryptKeyId!!, it) },
-                    ),
-                    clock,
-                )
-                var pass = engine.sync(token())
-                var uploaded = pass.uploaded
-                var applied = pass.applied
-                // Drain later outbox batches in the same user-visible sync.
-                var guard = 0
-                while (pass.pendingAfter > 0 && guard++ < 50) {
-                    pass = engine.sync(token())
-                    uploaded += pass.uploaded
-                    applied += pass.applied
+                val token = token()
+                withFailover { client ->
+                    val engine = SyncEngine(
+                        database,
+                        client,
+                        SyncConfiguration(
+                            fileId = metadata.cloudFileId ?: session.budgetId,
+                            groupId = metadata.groupId,
+                            encryptionKeyId = metadata.encryptKeyId,
+                            encryption = keyData?.let { EncryptionContext(metadata.encryptKeyId!!, it) },
+                        ),
+                        clock,
+                    )
+                    var pass = engine.sync(token)
+                    var uploaded = pass.uploaded
+                    var applied = pass.applied
+                    // Drain later outbox batches in the same user-visible sync.
+                    var guard = 0
+                    while (pass.pendingAfter > 0 && guard++ < 50) {
+                        pass = engine.sync(token)
+                        uploaded += pass.uploaded
+                        applied += pass.applied
+                    }
+                    Triple(uploaded, applied, pass.pendingAfter)
                 }
-                Triple(uploaded, applied, pass.pendingAfter)
             }
             val now = System.currentTimeMillis()
             library.saveMetadata(metadata.copy(lastSyncedAtMillis = now))
@@ -297,6 +413,7 @@ class ServerConnection(
     private companion object {
         const val OPENID_PENDING = "openid.pending"
         const val CUSTOM_HEADERS = "server.custom_headers"
+        const val CUSTOM_HEADERS_FALLBACK = "server.custom_headers_fallback"
         const val SIMPLEFIN_BRIDGE = "simplefin.bridge_access_key"
     }
 }

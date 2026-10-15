@@ -106,7 +106,7 @@ object MoreWidgetLoader {
             session.read {
                 val month = budget.fetchBudgetMonth(monthId)
                 val expense = month.categories.filter { !it.isIncome && !it.hidden }
-                val pick = WidgetShaping.overspent(month.categories).firstOrNull() ?: expense.minByOrNull { it.spent }
+                val pick = WidgetShaping.overspent(month.categories, settings.includeRolloverInAlerts).firstOrNull() ?: expense.minByOrNull { it.spent }
                 val chosen = WidgetChoices.pick(categoryIds, expense, WidgetChoices.CATEGORY_LIMIT, listOfNotNull(pick)) { it.id }
                 val accounts = ledger.accounts().filter { !it.closed }
                 val trend = runCatching { reports.dashboard(monthId, today.toString()).netWorth.points.map { it.value } }.getOrDefault(emptyList())
@@ -119,7 +119,7 @@ object MoreWidgetLoader {
                         budgeted = month.totalBudgeted,
                         spent = month.totalSpent,
                         toBudget = month.toBudget,
-                        overspentCount = WidgetShaping.overspent(month.categories).size,
+                        overspentCount = WidgetShaping.overspent(month.categories, settings.includeRolloverInAlerts).size,
                     ),
                     netWorth = NetWorthData(
                         budgetName = name,

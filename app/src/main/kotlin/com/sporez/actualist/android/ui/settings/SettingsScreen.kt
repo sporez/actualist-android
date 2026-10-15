@@ -61,6 +61,7 @@ fun SettingsScreen(
                 Text("Budget", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(session.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("settings-budget-name"))
                 Text(syncDescription(syncStatus), modifier = Modifier.testTag("sync-status"))
+                SettingsSecurityRow(server, session)
                 SettingsBudgetPicker(session.budgetId, onConnectServer)
                 if (!session.isDemo) SettingsSyncRows(syncStatus)
                 if (!session.isDemo) {
@@ -87,13 +88,17 @@ fun SettingsScreen(
                 Text("Server", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (server.isSignedIn) {
                     Text(current.serverUrl ?: "", modifier = Modifier.testTag("server-url"))
+                    if (!session.isDemo) SettingsConnectionStatus(server, session)
                     SettingsCustomHeaders(server, current.serverUrl ?: "")
+                    SettingsFallbackServer(server, current.serverUrl ?: "")
                     Row {
                         TextButton(onClick = onConnectServer) { Text("Open another budget") }
-                        TextButton(onClick = { server.signOut() }, modifier = Modifier.testTag("sign-out")) { Text("Sign out") }
+                        SettingsSignInAgain(server, session)
                     }
+                    SettingsSignOut(server, session)
                 } else {
                     Text("Not connected. Connect to your own Actual server to sync a real budget.", style = MaterialTheme.typography.bodyMedium)
+                    if (current.serverUrl != null) SettingsSignInAgain(server, session)
                     OutlinedButton(onClick = onConnectServer, modifier = Modifier.testTag("connect-server")) { Text("Connect to a server") }
                 }
             }
@@ -122,12 +127,16 @@ fun SettingsScreen(
                 }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 com.sporez.actualist.android.notifications.NewTransactionAlertsSetting()
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                com.sporez.actualist.android.sync.BackgroundBankSyncSetting()
             }
         }
         BudgetDisplayCard(settings)
         SettingsBudgetDataCard(session, settings, server)
         RolloverAllCard(session)
+        SettingsEraseCard(session)
         SettingsAboutCard(session, settings, server.isSignedIn)
+        SettingsSupportCard(session, settings, server.isSignedIn)
     }
 }
 
@@ -169,6 +178,9 @@ private fun BudgetDisplayCard(settings: AppSettings) {
             }
             toggle("Swipe between months", "Swipe sideways on the budget to change month", current.swipeBetweenMonths, "swipe-between-months") { value ->
                 settings.update { it.copy(swipeBetweenMonths = value) }
+            }
+            toggle("Include rollover in alerts", "Count rollover categories in overspent alerts and the cover review", current.includeRolloverInAlerts, "include-rollover-in-alerts") { value ->
+                settings.update { it.copy(includeRolloverInAlerts = value) }
             }
             HorizontalDivider()
             Text("Months shown on wide screens")

@@ -3,6 +3,7 @@ package com.sporez.actualist.android.ui.onboarding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -27,16 +29,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.sporez.actualist.android.ActualistApplication
 import com.sporez.actualist.android.data.LocalBudget
 import com.sporez.actualist.android.sync.ServerConnection
 import com.sporez.actualist.android.ui.components.ErrorBanner
 import com.sporez.actualist.android.ui.components.SectionCard
+import com.sporez.actualist.android.ui.settings.localDataLossMessage
 import com.sporez.actualist.core.server.RemoteFile
 import kotlinx.coroutines.launch
 
@@ -71,14 +77,52 @@ fun OnboardingScreen(
         }
         Text("No account or server needed. All demo data is synthetic.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         OutlinedButton(onClick = onConnect, modifier = Modifier.fillMaxWidth().testTag("onboarding-connect")) { Text("Connect to an Actual server") }
-        val downloaded = localBudgets.filter { !it.isDemo }
+        // Deleting is handled here, so the list needs no help from the caller to drop a deleted budget.
+        val container = (LocalContext.current.applicationContext as ActualistApplication).container
+        var deletedIds by remember { mutableStateOf(setOf<String>()) }
+        var deleting by remember { mutableStateOf<LocalBudget?>(null) }
+        var deletingPending by remember { mutableStateOf(0) }
+        val downloaded = localBudgets.filter { !it.isDemo && it.id !in deletedIds }
         if (downloaded.isNotEmpty()) {
             Text("On this device", style = MaterialTheme.typography.titleMedium)
             SectionCard {
                 for (budget in downloaded) {
-                    Text(budget.name, Modifier.fillMaxWidth().clickable { onOpenLocal(budget.id) }.padding(16.dp).testTag("local-${budget.id}"))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(budget.name, Modifier.weight(1f).clickable { onOpenLocal(budget.id) }.padding(16.dp).testTag("local-${budget.id}"))
+                        TextButton(
+                            onClick = {
+                                deletingPending = container.library.pendingChangeCount(budget.id)
+                                deleting = budget
+                            },
+                            modifier = Modifier.testTag("local-delete-${budget.id}"),
+                        ) { Text("Delete") }
+                    }
                 }
             }
+        }
+        deleting?.let { target ->
+            AlertDialog(
+                onDismissRequest = { deleting = null },
+                title = { Text("Delete ${target.name}?") },
+                text = {
+                    Text(
+                        localDataLossMessage("Actualist will delete this budget and its saved encryption key from this device.", deletingPending),
+                        modifier = Modifier.testTag("local-delete-message"),
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            deleting = null
+                            container.sessions.closeAll()
+                            container.server.deleteLocalBudget(target.id)
+                            deletedIds = deletedIds + target.id
+                        },
+                        modifier = Modifier.testTag("local-delete-confirm"),
+                    ) { Text("Delete") }
+                },
+                dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            )
         }
     }
 }

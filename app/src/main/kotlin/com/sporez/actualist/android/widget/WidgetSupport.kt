@@ -124,7 +124,7 @@ object WidgetPanelData {
             val month = Months.id(today.year, today.monthValue)
             session.read {
                 val allAccounts = ledger.accounts()
-                val overspent = WidgetShaping.overspent(budget.fetchBudgetMonth(month).categories)
+                val overspent = WidgetShaping.overspent(budget.fetchBudgetMonth(month).categories, settings.includeRolloverInAlerts)
                 WidgetPanels(
                     budgetName = name,
                     accounts = allAccounts.let { all ->

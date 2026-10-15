@@ -59,6 +59,12 @@ data class Settings(
     val sampleValues: Boolean = false,
     /** Account preselected for new transactions; null keeps the automatic choice. */
     val defaultAccountId: String? = null,
+    /** Actualist's fallback server: a second address tried when [serverUrl] cannot be reached. */
+    val fallbackServerUrl: String? = null,
+    /** Actualist's "Include Rollover in Alerts": off keeps rollover categories out of the overspent alerts. */
+    val includeRolloverInAlerts: Boolean = false,
+    /** Actualist's "Show hidden categories" on the Budget screen, remembered across launches. */
+    val showHiddenCategories: Boolean = false,
 )
 
 class AppSettings(context: Context) {
@@ -81,7 +87,19 @@ class AppSettings(context: Context) {
         greenIncomeAmounts = prefs.getBoolean("green_income_amounts", true),
         sampleValues = prefs.getBoolean("sample_values", false),
         defaultAccountId = prefs.getString("default_account", null),
+        fallbackServerUrl = prefs.getString("fallback_server_url", null),
+        includeRolloverInAlerts = prefs.getBoolean("include_rollover_in_alerts", false),
+        showHiddenCategories = prefs.getBoolean("show_hidden_categories", false),
     )
+
+    /** The category groups collapsed on the Budget screen of one budget, remembered across launches. */
+    fun collapsedCategoryGroups(budgetId: String?): Set<String> =
+        prefs.getStringSet("collapsed_groups_${budgetId.orEmpty()}", emptySet())?.toSet().orEmpty()
+
+    fun setCategoryGroupCollapsed(budgetId: String?, groupId: String, collapsed: Boolean) {
+        val next = collapsedCategoryGroups(budgetId).let { if (collapsed) it + groupId else it - groupId }
+        prefs.edit().putStringSet("collapsed_groups_${budgetId.orEmpty()}", next).apply()
+    }
 
     fun update(transform: (Settings) -> Settings) {
         val next = transform(_settings.value)
@@ -100,6 +118,9 @@ class AppSettings(context: Context) {
             .putBoolean("green_income_amounts", next.greenIncomeAmounts)
             .putBoolean("sample_values", next.sampleValues)
             .putString("default_account", next.defaultAccountId)
+            .putString("fallback_server_url", next.fallbackServerUrl)
+            .putBoolean("include_rollover_in_alerts", next.includeRolloverInAlerts)
+            .putBoolean("show_hidden_categories", next.showHiddenCategories)
             .apply()
         _settings.value = next
     }

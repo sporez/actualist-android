@@ -471,7 +471,7 @@ private fun TemplateEntryCard(index: Int, item: EditorItem, ops: EditorOps) {
             modifier = Modifier.testTag(tag("template-clear-note")),
         ) { Text("Clear Note", color = MaterialTheme.colorScheme.error) }
         if (ops.entries.size > 1 || index > 0) {
-            TextButton(onClick = { ops.remove(id) }, modifier = Modifier.testTag(tag("template-remove-entry"))) { Text("Remove this entry") }
+            TextButton(onClick = { ops.remove(id) }, modifier = Modifier.testTag(tag("template-remove-entry"))) { Text("Delete Template", color = MaterialTheme.colorScheme.error) }
         }
     }
 }

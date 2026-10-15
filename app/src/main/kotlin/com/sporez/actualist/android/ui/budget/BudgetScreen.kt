@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -93,10 +94,12 @@ fun BudgetScreen(
     onOpenHistory: () -> Unit = {},
     onOpenSchedules: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    /** When set, "Show transactions" opens the category's month screen (category id, name, shown month id) instead of [onShowCategoryTransactions]. */
+    onShowCategoryMonth: ((String, String, String) -> Unit)? = null,
 ) {
     // The month shown is projected to sample values as a whole (totals add up), so money() must not hash it again.
     androidx.compose.runtime.CompositionLocalProvider(LocalValuesProjected provides LocalSampleValues.current) {
-        BudgetScreenContent(viewModel, onShowCategoryTransactions, onOpenHistory, onOpenSchedules, onOpenSettings)
+        BudgetScreenContent(viewModel, onShowCategoryTransactions, onOpenHistory, onOpenSchedules, onOpenSettings, onShowCategoryMonth)
     }
 }
 
@@ -107,6 +110,7 @@ private fun BudgetScreenContent(
     onOpenHistory: () -> Unit,
     onOpenSchedules: () -> Unit,
     onOpenSettings: () -> Unit,
+    onShowCategoryMonth: ((String, String, String) -> Unit)?,
 ) {
     val state by viewModel.state.collectAsState()
     val month by viewModel.month.collectAsState()
@@ -114,9 +118,10 @@ private fun BudgetScreenContent(
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var showToBudget by remember { mutableStateOf(false) }
     var addingCategory by remember { mutableStateOf(false) }
-    var showHidden by rememberSaveable { mutableStateOf(false) }
     var managingGroup by remember { mutableStateOf<String?>(null) }
-    val collapsed = remember { mutableStateMapOf<String, Boolean>() }
+    // A later month's header menu switches to that month first; the action opens once the month has loaded.
+    var pendingMonthAction by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var applyingTemplates by remember { mutableStateOf(false) }
     var choosingMonth by remember { mutableStateOf(false) }
     var reviewingCover by remember { mutableStateOf(false) }
     var reviewingUncategorized by remember { mutableStateOf(false) }
@@ -128,6 +133,12 @@ private fun BudgetScreenContent(
     val server = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.sporez.actualist.android.ActualistApplication).container.server
     val appSettings = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.sporez.actualist.android.ActualistApplication).container.settings
     val display by appSettings.settings.collectAsState()
+    // Show hidden categories and the collapsed groups are remembered across launches (the groups per budget).
+    val showHidden = display.showHiddenCategories
+    val budgetId = display.selectedBudgetId
+    val collapsed = remember(budgetId) {
+        mutableStateMapOf<String, Boolean>().also { map -> appSettings.collapsedCategoryGroups(budgetId).forEach { map[it] = true } }
+    }
     val uncategorizedState by viewModel.uncategorized.collectAsState()
     val uncategorizedCount = (uncategorizedState as? Loadable.Ready)?.value?.size ?: 0
     // Actualist's Months Shown: Auto is three months (the shown one and two more); a fixed count of N shows N.
@@ -154,12 +165,27 @@ private fun BudgetScreenContent(
             MonthChooserDialog(month, onPick = { picked -> viewModel.showMonth(picked); choosingMonth = false }, onDismiss = { choosingMonth = false })
         }
         when (val current = state) {
-            Loadable.Loading -> LoadingBox()
+            Loadable.Loading -> Box(Modifier.fillMaxSize().testTag("budget-loading"), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator()
+                    Text("Loading budget", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
             is Loadable.Ready -> {
                 val sample = LocalSampleValues.current
-                val screen = remember(current.value, sample) {
-                    if (sample) current.value.copy(month = SampleValues.project(current.value.month), note = null) else current.value
+                val includeRollover = display.includeRolloverInAlerts
+                val screen = remember(current.value, sample, includeRollover) {
+                    val base = current.value.copy(includeRollover = includeRollover)
+                    if (sample) base.copy(month = SampleValues.project(base.month), note = null) else base
+                }
+                androidx.compose.runtime.LaunchedEffect(screen.month.month, pendingMonthAction) {
+                    pendingMonthAction?.let { (target, action) ->
+                        if (target == screen.month.month) {
+                            if (action == "notes") editingMonthNote = true else applyingTemplates = true
+                            pendingMonthAction = null
+                        }
+                    }
                 }
                 // Wide windows (tablets, landscape) show the next months beside this one, as Actualist's iPad layout.
                 androidx.compose.foundation.layout.BoxWithConstraints(
@@ -227,7 +253,10 @@ private fun BudgetScreenContent(
                     for (group in screen.month.categoryGroups.filter { showHidden || !it.hidden }) {
                         val isCollapsed = collapsed[group.id] == true
                         item(key = "group-${group.id}") {
-                            GroupHeader(group, isCollapsed, onManage = { managingGroup = group.id }) { collapsed[group.id] = !isCollapsed }
+                            GroupHeader(group, isCollapsed, onManage = { managingGroup = group.id }) {
+                                collapsed[group.id] = !isCollapsed
+                                appSettings.setCategoryGroupCollapsed(budgetId, group.id, !isCollapsed)
+                            }
                         }
                         if (!isCollapsed) {
                             item(key = "card-${group.id}") {
@@ -241,10 +270,18 @@ private fun BudgetScreenContent(
                             }
                         }
                     }
+                    if (screen.month.categoryGroups.none { group -> (showHidden || !group.hidden) && group.categories.any { showHidden || !it.hidden } }) {
+                        item(key = "empty") {
+                            Column(Modifier.fillMaxWidth().padding(vertical = 24.dp).testTag("budget-empty"), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("This budget has no visible categories", style = MaterialTheme.typography.titleMedium)
+                                Text("Add a category, or show hidden categories.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                     item(key = "show-hidden") {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Show hidden categories", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                            Switch(checked = showHidden, onCheckedChange = { showHidden = it }, modifier = Modifier.testTag("show-hidden-switch"))
+                            Switch(checked = showHidden, onCheckedChange = { value -> appSettings.update { it.copy(showHiddenCategories = value) } }, modifier = Modifier.testTag("show-hidden-switch"))
                         }
                     }
                     item(key = "add-category") {
@@ -252,7 +289,17 @@ private fun BudgetScreenContent(
                     }
                 }
                 if (wide) {
-                    FollowingMonths(screen, viewModel, collapsed, Modifier.weight(maxOf(0.6f, followingCount / 2f)).fillMaxHeight()) { month, categoryId ->
+                    FollowingMonths(
+                        screen,
+                        viewModel,
+                        collapsed,
+                        Modifier.weight(maxOf(0.6f, followingCount / 2f)).fillMaxHeight(),
+                        onMonthAction = { target, action ->
+                            // Notes and Apply Template act on the shown month: switch to it, then open the action.
+                            pendingMonthAction = target to action
+                            viewModel.showMonth(target)
+                        },
+                    ) { month, categoryId ->
                         // Editing a later month: switch to it and open the category there.
                         viewModel.showMonth(month)
                         selectedCategory = categoryId
@@ -269,12 +316,13 @@ private fun BudgetScreenContent(
                         viewModel = viewModel,
                         onShowTransactions = {
                             selectedCategory = null
-                            onShowCategoryTransactions(category.id, category.name)
+                            if (onShowCategoryMonth != null) onShowCategoryMonth(category.id, category.name, screen.month.month) else onShowCategoryTransactions(category.id, category.name)
                         },
                     )
                 }
                 if (editingMonthNote) MonthNoteDialog(screen.month.month, screen.note, viewModel) { editingMonthNote = false }
                 if (browsingTemplates) TemplatesBrowserDialog(screen, viewModel) { browsingTemplates = false }
+                if (applyingTemplates) TemplatesDialog(viewModel) { applyingTemplates = false }
                 if (unlocking) EncryptedBudgetUnlockDialog(viewModel, server) { unlocking = false }
                 if (showToBudget) ToBudgetSheet(screen, viewModel) { showToBudget = false }
                 if (reviewingCover) CoverReviewSheet(screen, viewModel) { reviewingCover = false }
@@ -617,6 +665,7 @@ private fun FollowingMonths(
     viewModel: BudgetViewModel,
     collapsed: Map<String, Boolean>,
     modifier: Modifier,
+    onMonthAction: (month: String, action: String) -> Unit,
     onEdit: (month: String, categoryId: String) -> Unit,
 ) {
     val state by viewModel.following.collectAsState()
@@ -632,8 +681,11 @@ private fun FollowingMonths(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Next months", Modifier.weight(1.2f), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 for (month in months) {
-                    TextButton(onClick = { viewModel.showMonth(month.month) }, modifier = Modifier.weight(1f).testTag("following-${month.month}")) {
-                        Text(monthTitle(month.month), maxLines = 1)
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { viewModel.showMonth(month.month) }, modifier = Modifier.weight(1f).testTag("following-${month.month}")) {
+                            Text(monthTitle(month.month), maxLines = 1)
+                        }
+                        FollowingMonthMenu(month.month, onMonthAction)
                     }
                 }
             }
@@ -676,6 +728,29 @@ private fun FollowingMonths(
     assigning?.let { (month, categoryId) ->
         val category = months.firstOrNull { it.month == month }?.category(categoryId)
         if (category == null) assigning = null else AssignInMonthDialog(month, category, viewModel) { assigning = null }
+    }
+}
+
+/** A later month's header menu in the wide grid: Notes and Apply Template for that month (Actualist's month header menu). */
+@Composable
+private fun FollowingMonthMenu(month: String, onAction: (month: String, action: String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(28.dp).testTag("following-menu-$month")) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "Actions for ${monthTitle(month)}", modifier = Modifier.size(16.dp))
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("Notes") },
+                onClick = { open = false; onAction(month, "notes") },
+                modifier = Modifier.testTag("following-notes-$month"),
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("Apply Template") },
+                onClick = { open = false; onAction(month, "template") },
+                modifier = Modifier.testTag("following-template-$month"),
+            )
+        }
     }
 }
 

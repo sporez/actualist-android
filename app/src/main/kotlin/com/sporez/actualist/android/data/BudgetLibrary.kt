@@ -85,5 +85,13 @@ class BudgetLibrary(context: Context) {
         directory(id).deleteRecursively()
     }
 
+    /** Local changes of the stored budget [id] the server has not confirmed (0 for the demo or an unreadable file). */
+    fun pendingChangeCount(id: String): Int {
+        val metadata = metadata(id) ?: return 0
+        val file = databaseFile(id)
+        if (metadata.isDemo || !file.exists()) return 0
+        return runCatching { BudgetDatabase.open(driver, file.absolutePath, metadata.nodeId).use { it.pendingLocalMessageCount() } }.getOrDefault(0)
+    }
+
     fun openDriverDatabase(path: String, nodeId: String?): BudgetDatabase = BudgetDatabase.open(driver, path, nodeId)
 }

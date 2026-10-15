@@ -80,6 +80,7 @@ suspend fun buildDiagnosticReport(context: Context, session: BudgetSession, sett
         "Budget ID hash: ${shortHash(session.budgetId)}",
         "Demo budget: ${if (session.isDemo) "yes" else "no"}",
         "Server configured: ${if (hasServer) "yes" else "no"}",
+        "Fallback server configured: ${if (prefs.fallbackServerUrl != null) "yes" else "no"}",
         "Sync status: $status",
         "Accounts: ${accounts?.size ?: "unknown"} (${accounts?.count { it.closed } ?: 0} closed)",
         "",

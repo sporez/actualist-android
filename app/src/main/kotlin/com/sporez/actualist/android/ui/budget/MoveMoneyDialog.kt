@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -19,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,27 +38,35 @@ import com.sporez.actualist.android.ui.theme.MoneyTextStyle
 import com.sporez.actualist.core.budget.BudgetMonthCategory
 import com.sporez.actualist.core.money.MoneyExpression
 
+/** One counterparty of a move (null is To Budget) with the amount typed for it. */
+private data class MoveLeg(val counterpartyId: String?, val amountText: String)
+
 /**
  * Actualist's Move Money for an envelope category: pick the other side (a category or To Budget), an amount
- * (a sum like `20+5` works), switch the direction, and see both sides' balances after the move before confirming.
+ * (a sum like `20+5` works), switch the direction, and see every balance after the move before confirming.
+ * "Select Another" adds more counterparties, each with its own amount; all legs are written together,
+ * so the whole move is one undo step.
  */
 @Composable
 internal fun MoveMoneyDialog(category: BudgetMonthCategory, screen: BudgetScreenState, viewModel: BudgetViewModel, onDone: () -> Unit, onDismiss: () -> Unit) {
-    var amountText by rememberSaveable(category.id) { mutableStateOf("") }
-    // Out of this category (to the other side), or into it.
+    // Out of this category (to the other sides), or into it.
     var outgoing by rememberSaveable(category.id) { mutableStateOf(true) }
-    // The other side: null is To Budget.
-    var counterpartyId by rememberSaveable(category.id) { mutableStateOf<String?>(null) }
-    var picking by remember { mutableStateOf(false) }
+    val legs = remember(category.id) { mutableStateListOf(MoveLeg(null, "")) }
+    // Which leg the picker is choosing for; legs.size means a new one ("Select Another").
+    var pickingFor by remember { mutableStateOf<Int?>(null) }
     val others = screen.month.categoryGroups.filter { !it.isIncome }.flatMap { group -> group.categories.map { it to group } }.filter { it.first.id != category.id }
-    val counterparty = counterpartyId?.let { id -> others.firstOrNull { it.first.id == id }?.first }
-    val counterpartyName = counterparty?.name ?: "To Budget"
-    val counterpartyBalance = counterparty?.balance ?: screen.month.toBudget
-    val amount = MoneyExpression.evaluate(amountText)
-    val canMove = amount != null && amount > 0
-    val shown = if (canMove && amount != null) amount else 0L
-    val focusedAfter = category.balance + if (outgoing) -shown else shown
-    val counterpartyAfter = counterpartyBalance + if (outgoing) shown else -shown
+
+    fun balanceOf(id: String?): Long = if (id == null) screen.month.toBudget else others.firstOrNull { it.first.id == id }?.first?.balance ?: 0L
+    fun nameOf(id: String?): String = if (id == null) "To Budget" else others.firstOrNull { it.first.id == id }?.first?.name ?: "To Budget"
+    fun amountOf(leg: MoveLeg): Long? = MoneyExpression.evaluate(leg.amountText)?.takeIf { it > 0 }
+
+    val amounts = legs.map { amountOf(it) }
+    val canMove = amounts.isNotEmpty() && amounts.all { it != null }
+    val total = amounts.sumOf { it ?: 0L }
+    val focusedAfter = category.balance + if (outgoing) -total else total
+    val usedIds = legs.map { it.counterpartyId }.toSet()
+    val canAddAnother = (others.map { it.first.id } + listOf<String?>(null)).any { it !in usedIds }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (outgoing) "Move from ${category.name}" else "Move to ${category.name}") },
@@ -78,22 +88,44 @@ internal fun MoveMoneyDialog(category: BudgetMonthCategory, screen: BudgetScreen
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag("move-direction"),
                 )
-                OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth().testTag("move-counterparty")) {
-                    Text("$counterpartyName · ${money(counterpartyBalance)}", maxLines = 1)
+                legs.forEachIndexed { index, leg ->
+                    // The first leg keeps the original tags; later ones are suffixed with their index.
+                    val suffix = if (index == 0) "" else "-$index"
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { pickingFor = index }, modifier = Modifier.weight(1f).testTag("move-counterparty$suffix")) {
+                            Text("${nameOf(leg.counterpartyId)} · ${money(balanceOf(leg.counterpartyId))}", maxLines = 1)
+                        }
+                        if (legs.size > 1) {
+                            IconButton(onClick = { legs.removeAt(index) }, modifier = Modifier.testTag("move-leg-remove-$index")) {
+                                Icon(Icons.Filled.Close, contentDescription = "Remove this destination")
+                            }
+                        }
+                    }
+                    AmountField(leg.amountText, { legs[index] = leg.copy(amountText = it) }, label = "Amount", tag = "move-amount-field$suffix", expressions = true)
                 }
-                AmountField(amountText, { amountText = it }, label = "Amount", tag = "move-amount-field", expressions = true)
+                if (canAddAnother) {
+                    TextButton(onClick = { pickingFor = legs.size }, modifier = Modifier.testTag("move-add-another")) { Text("Select Another") }
+                }
                 HorizontalDivider()
                 Text("After Moving", style = MaterialTheme.typography.titleSmall)
                 MoveResultRow(category.name, if (canMove) money(focusedAfter) else "—", "move-result-focused")
-                MoveResultRow(counterpartyName, if (canMove) money(counterpartyAfter) else "—", "move-result-counterparty")
+                legs.forEachIndexed { index, leg ->
+                    val amount = amounts[index]
+                    val after = balanceOf(leg.counterpartyId) + if (outgoing) (amount ?: 0L) else -(amount ?: 0L)
+                    MoveResultRow(nameOf(leg.counterpartyId), if (amount != null) money(after) else "—", "move-result-counterparty${if (index == 0) "" else "-$index"}")
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (amount != null) {
-                        val other = counterparty?.id
-                        viewModel.move(if (outgoing) category.id else other, if (outgoing) other else category.id, amount)
+                    if (canMove) {
+                        viewModel.moveAll(
+                            legs.mapIndexed { index, leg ->
+                                val amount = amounts[index] ?: 0L
+                                if (outgoing) Triple<String?, String?, Long>(category.id, leg.counterpartyId, amount) else Triple<String?, String?, Long>(leg.counterpartyId, category.id, amount)
+                            },
+                        )
                     }
                     onDone()
                 },
@@ -103,15 +135,19 @@ internal fun MoveMoneyDialog(category: BudgetMonthCategory, screen: BudgetScreen
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-    if (picking) {
+    pickingFor?.let { target ->
+        // A counterparty already used by another leg is not offered again.
+        val takenElsewhere = legs.filterIndexed { index, _ -> index != target }.map { it.counterpartyId }.toSet()
+        val all = listOf(PickerOption(null, "To Budget", money(screen.month.toBudget))) +
+            others.map { (c, g) -> PickerOption(c.id, c.name, "${g.name} · ${money(c.balance)}") }
         PickerDialog(
             title = if (outgoing) "Move to" else "Move from",
-            options = listOf(PickerOption(null, "To Budget", money(screen.month.toBudget))) + others.map { (c, g) -> PickerOption(c.id, c.name, "${g.name} · ${money(c.balance)}") },
+            options = all.filter { it.id !in takenElsewhere },
             onPick = { option ->
-                counterpartyId = option.id
-                picking = false
+                if (target >= legs.size) legs.add(MoveLeg(option.id, "")) else legs[target] = legs[target].copy(counterpartyId = option.id)
+                pickingFor = null
             },
-            onDismiss = { picking = false },
+            onDismiss = { pickingFor = null },
         )
     }
 }

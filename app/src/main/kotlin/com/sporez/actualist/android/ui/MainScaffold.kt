@@ -168,7 +168,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                             route == "bank-sync" -> "Bank sync"
                             route.startsWith("explorer") -> "Explorer"
                             route.startsWith("account/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Account"
-                            route.startsWith("category/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Category"
+                            route.startsWith("category/") || route.startsWith("category-month/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Category"
                             route == "server" -> "Server"
                             route.startsWith("transaction") -> ""
                             else -> tabs.firstOrNull { it.route == route }?.label ?: session.name
@@ -251,6 +251,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 BudgetScreen(
                     vm,
                     onShowCategoryTransactions = { id, name -> navController.navigate("category/$id?name=${encode(name)}") },
+                    onShowCategoryMonth = { id, name, month -> navController.navigate("category-month/${encode(id)}?name=${encode(name)}&month=$month") },
                     onOpenHistory = { navController.navigate("history") },
                     onOpenSchedules = { navController.navigate("schedules") },
                     onOpenSettings = { navController.navigate("settings") },
@@ -339,6 +340,20 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 val id = decode(backStack.arguments?.getString("id") ?: "")
                 val vm = viewModel(key = "account-$id-$key") { TransactionsViewModel(session, id, null, container.server) }
                 TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new?account=${encode(id)}") }, onRefresh = { syncNow() })
+            }
+            composable(
+                "category-month/{id}?name={name}&month={month}",
+                arguments = listOf(
+                    navArgument("id") { type = NavType.StringType },
+                    navArgument("name") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("month") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { backStack ->
+                val id = decode(backStack.arguments?.getString("id") ?: "")
+                val month = backStack.arguments?.getString("month") ?: Months.current()
+                com.sporez.actualist.android.ui.budget.CategoryMonthScreen(session, id, month, instanceKey = "$key") {
+                    navController.navigate("transaction/${encode(it.parentId ?: it.id)}")
+                }
             }
             composable(
                 "category/{id}?name={name}",

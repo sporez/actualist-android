@@ -11,8 +11,9 @@ data class AttentionSummary(val overspent: List<BudgetMonthCategory>, val uncate
 
 object WidgetShaping {
     /** Expense categories whose available balance is negative, most overspent first. */
-    fun overspent(categories: List<BudgetMonthCategory>): List<BudgetMonthCategory> =
-        categories.filter { !it.isIncome && !it.hidden && it.balance < 0 }.sortedBy { it.balance }
+    /** [includeRollover] off (Actualist's default) leaves out categories that roll overspending over. */
+    fun overspent(categories: List<BudgetMonthCategory>, includeRollover: Boolean = false): List<BudgetMonthCategory> =
+        categories.filter { !it.isIncome && !it.hidden && it.balance < 0 && (includeRollover || !it.carryover) }.sortedBy { it.balance }
 
     /** Open on-budget accounts in their sort order, as the Account Balances widget lists them. */
     fun onBudgetAccounts(accounts: List<Account>, limit: Int): List<Account> =

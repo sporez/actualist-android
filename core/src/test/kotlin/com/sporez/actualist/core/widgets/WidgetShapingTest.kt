@@ -13,6 +13,14 @@ class WidgetShapingTest {
         Account(id, id, off, closed, 100, 100, order)
 
     @Test
+    fun rolloverCategoriesCountOnlyWhenIncluded() {
+        val rolling = BudgetMonthCategory("r", "r", false, false, "g", 0, 0, -20, true)
+        val plain = category("p", -5)
+        assertEquals(listOf("p"), WidgetShaping.overspent(listOf(rolling, plain)).map { it.id })
+        assertEquals(listOf("r", "p"), WidgetShaping.overspent(listOf(rolling, plain), includeRollover = true).map { it.id })
+    }
+
+    @Test
     fun overspentSkipsIncomeHiddenAndPositive() {
         val result = WidgetShaping.overspent(
             listOf(category("a", -5), category("b", 10), category("c", -50), category("d", -9, income = true), category("e", -9, hidden = true)),

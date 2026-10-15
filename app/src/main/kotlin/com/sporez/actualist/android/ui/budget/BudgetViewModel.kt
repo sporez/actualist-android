@@ -19,8 +19,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class BudgetScreenState(val month: BudgetMonth, val availableMonths: List<String>, val note: String? = null) {
-    val overspent get() = month.categoryGroups.filter { !it.isIncome }.flatMap { it.categories }.filter { it.balance < 0 }
+/**
+ * One month for the screen. With [includeRollover] off (Actualist's default for "Include Rollover in
+ * Alerts"), a category that rolls its overspending over is not counted as overspent.
+ */
+data class BudgetScreenState(
+    val month: BudgetMonth,
+    val availableMonths: List<String>,
+    val note: String? = null,
+    val includeRollover: Boolean = false,
+) {
+    val overspent get() = month.categoryGroups.filter { !it.isIncome }.flatMap { it.categories }.filter { it.balance < 0 && (includeRollover || !it.carryover) }
 }
 
 class BudgetViewModel(private val session: BudgetSession, initialMonth: String) : ViewModel() {
@@ -93,6 +102,17 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
     /** A null side is To Budget. */
     fun move(from: String?, to: String?, amount: Long) = write("Moved") {
         budgetWrites.move(month.value, listOf(MoveMoneyCommand(from, to, amount, if (from == null) MoveMoneyCommand.Kind.TRANSFER_AVAILABLE else MoveMoneyCommand.Kind.MOVE)))
+    }
+
+    /**
+     * Moves money between the focused category and several others in ONE write (one undo step):
+     * (from, to, amount) per leg, a null side being To Budget.
+     */
+    fun moveAll(legs: List<Triple<String?, String?, Long>>) = write(if (legs.size == 1) "Moved" else "Moved in ${legs.size} parts") {
+        budgetWrites.move(
+            month.value,
+            legs.map { (from, to, amount) -> MoveMoneyCommand(from, to, amount, if (from == null) MoveMoneyCommand.Kind.TRANSFER_AVAILABLE else MoveMoneyCommand.Kind.MOVE) },
+        )
     }
 
     /** Covers a category's overspending from To Budget (null) or another category. */

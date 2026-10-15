@@ -55,6 +55,7 @@ fun SettingsBudgetDataCard(session: BudgetSession, settings: AppSettings, server
     val app = remember(activity) { activity?.let { ViewModelProvider(it)[AppViewModel::class.java] } }
     val notice by (app?.notice ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
     val revision by session.revision.collectAsState()
+    val pendingChanges = rememberPendingChanges(session)
     var accounts by remember { mutableStateOf<List<Account>>(emptyList()) }
     var menuOpen by remember { mutableStateOf(false) }
     var confirming by remember { mutableStateOf(false) }
@@ -95,7 +96,11 @@ fun SettingsBudgetDataCard(session: BudgetSession, settings: AppSettings, server
             if (!session.isDemo && server.isSignedIn && app != null) {
                 Text("Reimport budget", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Deletes the local copy of this budget and downloads a fresh one from the server. Changes not yet synced are lost.",
+                    if (pendingChanges > 0) {
+                        "Deletes the local copy of this budget and downloads a fresh one from the server. $pendingChanges unsynced change(s) would be lost."
+                    } else {
+                        "Deletes the local copy of this budget and downloads a fresh one from the server."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -131,7 +136,10 @@ fun SettingsBudgetDataCard(session: BudgetSession, settings: AppSettings, server
             title = { Text("Reimport ${target.name}?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("The local copy is replaced with the server's. Unsynced changes on this device are lost.")
+                    Text(
+                        localDataLossMessage("Actualist will delete the local copy of this budget and download a fresh one from the server.", pendingChanges),
+                        modifier = Modifier.testTag("reimport-message"),
+                    )
                     if (encrypted) {
                         OutlinedTextField(
                             value = password,
