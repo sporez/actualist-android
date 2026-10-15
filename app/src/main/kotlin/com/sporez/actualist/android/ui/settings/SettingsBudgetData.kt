@@ -35,6 +35,7 @@ import com.sporez.actualist.android.data.AppSettings
 import com.sporez.actualist.android.sync.ServerConnection
 import com.sporez.actualist.android.ui.AppViewModel
 import com.sporez.actualist.android.ui.components.SectionCard
+import com.sporez.actualist.android.ui.onboarding.BudgetOpenWatchdog
 import com.sporez.actualist.core.server.RemoteFile
 import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.transactions.Account
@@ -63,6 +64,7 @@ fun SettingsBudgetDataCard(session: BudgetSession, settings: AppSettings, server
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var lookupJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     LaunchedEffect(revision) {
         accounts = runCatching { session.read { ledger.accounts(includeClosed = false) } }.getOrDefault(emptyList())
     }
@@ -108,15 +110,18 @@ fun SettingsBudgetDataCard(session: BudgetSession, settings: AppSettings, server
                     onClick = {
                         error = null
                         loading = true
-                        scope.launch {
+                        lookupJob = scope.launch {
                             try {
                                 remote = server.remoteBudgets().firstOrNull { it.fileId == session.budgetId }
                                     ?: throw IllegalStateException("This budget was not found on the server.")
                                 password = ""
                                 confirming = true
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
                             } catch (failure: Exception) {
                                 error = failure.message ?: "The server could not be reached."
                             }
+                            lookupJob = null
                             loading = false
                         }
                     },
@@ -124,6 +129,15 @@ fun SettingsBudgetDataCard(session: BudgetSession, settings: AppSettings, server
                     modifier = Modifier.testTag("reimport-budget"),
                 ) { Text("Reimport budget") }
             }
+            BudgetOpenWatchdog(
+                active = lookupJob != null,
+                onCancel = {
+                    lookupJob?.cancel()
+                    lookupJob = null
+                    loading = false
+                    error = "Opening this budget was cancelled."
+                },
+            )
             error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             notice?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("reimport-notice")) }
         }

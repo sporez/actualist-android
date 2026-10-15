@@ -267,6 +267,8 @@ fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.no
                         SeriesCard(snapshot)
                     }
                 }
+                // An invalid range or filter combination shows only its message, as Actualist does.
+                if (explorer.snapshot != null) {
                 item {
                     SectionCard(Modifier.testTag("explorer-totals")) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -337,6 +339,7 @@ fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.no
                         }
                     }
                 }
+                }
             }
             if (filtering) {
                 FilterSheet(
@@ -405,7 +408,18 @@ private fun SeriesCard(snapshot: SeriesSnapshot) {
                 ReportMetric.SPENDING_AVERAGE -> SecondaryRow("This range" to totals.expenses)
             }
             if (!snapshot.hasData) {
-                Text("No activity in this range.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 24.dp).testTag("explorer-empty"),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("No Activity in This Range", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Choose another date range to explore this report.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
             } else {
                 SeriesChart(snapshot)
                 Row {

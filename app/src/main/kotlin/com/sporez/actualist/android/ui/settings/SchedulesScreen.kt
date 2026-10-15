@@ -418,7 +418,20 @@ private fun ScheduleCard(item: ScheduleListItem, viewModel: SchedulesViewModel) 
             onDismiss = { managing = null },
         )
     }
-    if (showingDetail) ScheduleDetailDialog(item, load = { viewModel.detail(item) }, onDismiss = { showingDetail = false })
+    if (showingDetail) {
+        ScheduleDetailPage(
+            item = item,
+            load = { viewModel.detail(item) },
+            actions = ScheduleDetailActions(
+                onEdit = { showingDetail = false; editing = true },
+                onPost = { showingDetail = false; viewModel.resetPost(); reviewing = true },
+                onSkip = { showingDetail = false; managing = ScheduleManageKind.SKIP.name },
+                onComplete = { showingDetail = false; managing = ScheduleManageKind.COMPLETE.name },
+                onDelete = { showingDetail = false; managing = ScheduleManageKind.DELETE.name },
+            ),
+            onDismiss = { showingDetail = false },
+        )
+    }
     SectionCard(Modifier.testTag("schedule-${item.id}")) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             // Only the header opens the detail, so the action buttons below keep their own semantics.

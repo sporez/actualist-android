@@ -492,14 +492,28 @@ private fun AddAccountDialog(onDismiss: () -> Unit, onCreate: (String, Boolean, 
     var name by rememberSaveable { mutableStateOf("") }
     var balance by rememberSaveable { mutableStateOf("") }
     var offBudget by rememberSaveable { mutableStateOf(false) }
+    var triedBlank by rememberSaveable { mutableStateOf(false) }
     val amount = if (balance.isBlank()) 0L else Money.parse(balance)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add account") },
+        title = { Text("Add Account") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("account-name"))
+                if (triedBlank && name.isBlank()) {
+                    Text("Enter an account name.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("account-name-error"))
+                }
                 AmountField(balance, { balance = it }, label = "Current balance", tag = "account-balance")
+                if (amount == null) {
+                    Text("Enter a valid balance.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("account-balance-error"))
+                } else {
+                    Text(
+                        "Leave empty for 0. Use a minus sign for a credit card or loan balance you owe.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("account-balance-hint"),
+                    )
+                }
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     SegmentedButton(selected = !offBudget, onClick = { offBudget = false }, shape = SegmentedButtonDefaults.itemShape(0, 2), modifier = Modifier.testTag("account-kind-budget")) { Text("Budget") }
                     SegmentedButton(selected = offBudget, onClick = { offBudget = true }, shape = SegmentedButtonDefaults.itemShape(1, 2), modifier = Modifier.testTag("account-kind-offbudget")) { Text("Off Budget") }
@@ -512,7 +526,11 @@ private fun AddAccountDialog(onDismiss: () -> Unit, onCreate: (String, Boolean, 
             }
         },
         confirmButton = {
-            TextButton(onClick = { onCreate(name, offBudget, amount ?: 0) }, enabled = name.isNotBlank() && amount != null, modifier = Modifier.testTag("account-create")) { Text("Add") }
+            TextButton(
+                onClick = { if (name.isBlank()) triedBlank = true else onCreate(name.trim(), offBudget, amount ?: 0) },
+                enabled = amount != null,
+                modifier = Modifier.testTag("account-create"),
+            ) { Text("Create Account") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

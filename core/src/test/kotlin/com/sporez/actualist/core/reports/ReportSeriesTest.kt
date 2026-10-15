@@ -148,6 +148,20 @@ class ReportSeriesTest {
     }
 
     @Test
+    fun rangeLimitsBoundTheBucketCountAndThePickers() {
+        val end = LocalDate.of(2026, 10, 15)
+        val daily = SeriesQuery.earliestStart(end, ReportInterval.DAY)
+        assertNull(SeriesQuery(ReportMetric.CASH_FLOW, daily, end, ReportInterval.DAY).validationError)
+        assertEquals(1100, SeriesQuery(ReportMetric.CASH_FLOW, daily, end, ReportInterval.DAY).periods.size)
+        assertEquals(SeriesError.RANGE_TOO_LARGE, SeriesQuery(ReportMetric.CASH_FLOW, daily.minusDays(1), end, ReportInterval.DAY).validationError)
+        assertTrue(SeriesQuery(ReportMetric.CASH_FLOW, daily.minusDays(1), end, ReportInterval.DAY).periods.isEmpty())
+        val monthly = SeriesQuery.earliestStart(end, ReportInterval.MONTH)
+        assertNull(SeriesQuery(ReportMetric.CASH_FLOW, monthly, end, ReportInterval.MONTH).validationError)
+        assertEquals(SeriesError.RANGE_TOO_LARGE, SeriesQuery(ReportMetric.CASH_FLOW, monthly.minusMonths(1), end, ReportInterval.MONTH).validationError)
+        assertEquals(end, SeriesQuery.latestEnd(daily, ReportInterval.DAY))
+    }
+
+    @Test
     fun presetsAndMonthlyPeriodsClampToTheRange() {
         val today = LocalDate.of(2026, 10, 15)
         assertEquals(LocalDate.of(2026, 10, 1) to today, RangePreset.MONTH_TO_DATE.range(today))

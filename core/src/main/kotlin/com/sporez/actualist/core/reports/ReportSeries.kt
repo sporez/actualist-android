@@ -152,6 +152,18 @@ data class SeriesQuery(
         const val MAX_DAYS = 1_100L
         const val MAX_MONTHS = 600L
 
+        /** Earliest start a range ending on [end] may have (Actualist `earliestStart(forEnd:)`). */
+        fun earliestStart(end: LocalDate, interval: ReportInterval): LocalDate = when (interval) {
+            ReportInterval.DAY -> end.minusDays(MAX_DAYS - 1)
+            ReportInterval.MONTH -> end.minusMonths(MAX_MONTHS - 1)
+        }
+
+        /** Latest end a range starting on [start] may have (Actualist `latestEnd(forStart:)`). */
+        fun latestEnd(start: LocalDate, interval: ReportInterval): LocalDate = when (interval) {
+            ReportInterval.DAY -> start.plusDays(MAX_DAYS - 1)
+            ReportInterval.MONTH -> start.plusMonths(MAX_MONTHS - 1)
+        }
+
         fun days(from: LocalDate, through: LocalDate): List<LocalDate> {
             if (from.isAfter(through)) return emptyList()
             val count = ChronoUnit.DAYS.between(from, through).toInt() + 1

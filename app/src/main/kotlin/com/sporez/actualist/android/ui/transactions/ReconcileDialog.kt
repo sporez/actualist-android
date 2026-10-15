@@ -50,7 +50,14 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(ReconcileStep.ENTER) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { info = viewModel.reconcileInfo() }
+    var loadFailed by remember { mutableStateOf(false) }
+    var loadAttempt by remember { mutableStateOf(0) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(loadAttempt) {
+        loadFailed = false
+        info = viewModel.reconcileInfo()
+        loadFailed = info == null
+    }
     val loaded = info
     val bank = Money.parse(balanceText)
     val difference = if (bank != null && loaded != null) bank - loaded.clearedBalance else null
@@ -59,11 +66,44 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
     fun refreshAfter(action: suspend () -> Boolean, next: ReconcileStep?) {
         if (busy) return
         busy = true
+        problem = null
         scope.launch {
             val ok = action()
             if (ok) {
                 info = viewModel.reconcileInfo()
                 if (next != null) step = next
+            } else {
+                problem = "The reconciliation transaction could not be created. Review the difference and try again."
+            }
+            busy = false
+        }
+    }
+
+    // Re-reads the balances; false (with the reason in [problem]) when they cannot be read or have moved.
+    suspend fun balancesStillMatch(): Boolean {
+        val fresh = viewModel.reconcileInfo()
+        if (fresh == null) {
+            problem = "The account balances could not be refreshed."
+            return false
+        }
+        val changed = loaded != null && fresh.clearedBalance != loaded.clearedBalance
+        info = fresh
+        if (changed) {
+            problem = "The cleared balance changed. Review the new difference before locking."
+            step = ReconcileStep.REVIEW
+            return false
+        }
+        return true
+    }
+
+    fun lock(target: Long) {
+        if (busy) return
+        busy = true
+        problem = null
+        scope.launch {
+            if (balancesStillMatch()) {
+                viewModel.lockReconciled(target)
+                onDismiss()
             }
             busy = false
         }
@@ -72,7 +112,7 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag("reconcile-dialog"),
-        title = { Text(if (step == ReconcileStep.ENTER) "Reconcile account" else "Reconciling ${loaded?.accountName.orEmpty()}".trim()) },
+        title = { Text(if (step == ReconcileStep.ENTER) "Reconcile" else "Reconciling ${loaded?.accountName.orEmpty()}".trim()) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (step) {
@@ -87,7 +127,23 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
                                 modifier = Modifier.testTag("reconcile-last"),
                             )
                         }
+                        if (loadFailed) {
+                            Text(
+                                "This account's balance could not be loaded.",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag("reconcile-load-error"),
+                            )
+                            TextButton(onClick = { loadAttempt += 1 }, modifier = Modifier.testTag("reconcile-retry")) { Text("Try Again") }
+                        }
                         AmountField(balanceText, { balanceText = it }, label = "Bank statement balance", tag = "reconcile-balance")
+                        entryMessage(balanceText, bank)?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (balanceText.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag("reconcile-entry-message"),
+                            )
+                        }
                         difference?.let {
                             Text(
                                 if (it == 0L) "Balanced. Finishing locks every cleared transaction." else "Difference ${Money.format(it)} can be added as a cleared adjustment.",
@@ -114,6 +170,18 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        TextButton(
+                            enabled = !busy,
+                            onClick = {
+                                busy = true
+                                problem = null
+                                scope.launch {
+                                    balancesStillMatch()
+                                    busy = false
+                                }
+                            },
+                            modifier = Modifier.testTag("reconcile-refresh"),
+                        ) { Text("Refresh balances") }
                     }
                     ReconcileStep.PREVIEW -> {
                         Text("This transaction will be created, cleared, dated today:", style = MaterialTheme.typography.bodySmall)
@@ -128,6 +196,9 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
                         )
                     }
                 }
+                problem?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("reconcile-problem"))
+                }
             }
         },
         confirmButton = {
@@ -141,9 +212,9 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
                     difference == null -> {}
                     difference == 0L -> TextButton(
                         enabled = !busy,
-                        onClick = { viewModel.lockReconciled(bank!!); onDismiss() },
+                        onClick = { lock(bank!!) },
                         modifier = Modifier.testTag("reconcile-finish"),
-                    ) { Text("Lock transactions") }
+                    ) { Text(if (busy) "Locking Transactions" else "Lock transactions") }
                     else -> TextButton(enabled = !busy, onClick = { step = ReconcileStep.PREVIEW }, modifier = Modifier.testTag("reconcile-adjust")) {
                         Text("Create reconciliation transaction")
                     }
@@ -152,7 +223,7 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
                     enabled = !busy,
                     onClick = { refreshAfter({ viewModel.addReconcileAdjustment(bank!!) }, ReconcileStep.REVIEW) },
                     modifier = Modifier.testTag("reconcile-adjust-confirm"),
-                ) { Text("Create") }
+                ) { Text(if (busy) "Creating Transaction" else if (problem != null) "Try Again" else "Create") }
             }
         },
         dismissButton = {
@@ -171,6 +242,14 @@ fun ReconcileDialog(viewModel: TransactionsViewModel, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/** Actualist's balance-entry messages: a hint when empty, then what is wrong with the text. */
+private fun entryMessage(text: String, parsed: Long?): String? = when {
+    text.isBlank() -> "Enter the balance shown by your bank."
+    parsed != null -> null
+    Regex("[.,]\\d{3,}\\s*$").containsMatchIn(text.trim()) -> "This balance has more decimal places than the budget currency supports."
+    else -> "Enter a valid balance."
 }
 
 @Composable

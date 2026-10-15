@@ -137,6 +137,7 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
     var url by rememberSaveable { mutableStateOf("https://") }
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var downloadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var files by remember { mutableStateOf<List<RemoteFile>?>(null) }
     var encrypted by remember { mutableStateOf<RemoteFile?>(null) }
@@ -172,14 +173,17 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
     }
 
     fun download(file: RemoteFile, secret: String?) {
-        scope.launch {
+        downloadJob = scope.launch {
             busy = true
             error = null
             try {
                 onDownloaded(server.download(file, secret))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 error = e.message ?: "The budget could not be downloaded."
             }
+            downloadJob = null
             busy = false
         }
     }
@@ -312,6 +316,15 @@ fun ServerScreen(server: ServerConnection, onDownloaded: (LocalBudget) -> Unit, 
             ) { Text("Import a budget ZIP as a new budget") }
         }
         if (busy) CircularProgressIndicator()
+        BudgetOpenWatchdog(
+            active = downloadJob != null,
+            onCancel = {
+                downloadJob?.cancel()
+                downloadJob = null
+                busy = false
+                error = "Opening this budget was cancelled."
+            },
+        )
         files?.let { list ->
             if (list.isEmpty()) Text("No budgets on this server.")
             SectionCard {
