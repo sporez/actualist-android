@@ -107,10 +107,12 @@ class TransactionReviewsFlowTest {
             openDemo()
             compose.onNodeWithTag("tab-spending").performClick()
             compose.waitForTag("transaction-list")
-            compose.waitOrCapture("load-older") { hasNode(hasTestTag("load-older")) }
+            // The row sits after the page, below the fold of the lazy list: scroll until it is composed.
+            compose.waitOrCapture("load-older") {
+                runCatching { compose.onNodeWithTag("transaction-list").performScrollToNode(hasTestTag("load-older")) }.isSuccess
+            }
             val before = compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size
             assertTrue("a page holds at most 5 rows, saw $before", before in 1..5)
-            compose.onNodeWithTag("transaction-list").performScrollToNode(hasTestTag("load-older"))
             compose.onNodeWithTag("load-older").performClick()
             compose.waitOrCapture("more-rows") {
                 compose.onAllNodes(rowMatcher).fetchSemanticsNodes().size > before || !hasNode(hasTestTag("load-older"))

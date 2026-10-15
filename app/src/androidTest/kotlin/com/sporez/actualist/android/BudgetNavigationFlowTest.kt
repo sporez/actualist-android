@@ -88,7 +88,10 @@ class BudgetNavigationFlowTest {
         compose.onNodeWithTag("assign-save").performClick()
         compose.waitForGone("category-sheet")
 
-        compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("overspent-row"))
+        // The row appears once the budget reloads after the write.
+        compose.waitOrCapture("overspent-row") {
+            runCatching { compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("overspent-row")) }.isSuccess
+        }
         compose.waitForTag("overspent-row")
         compose.onNodeWithTag("overspent-row").performClick()
         compose.waitForTag("cover-review")

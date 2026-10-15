@@ -144,7 +144,9 @@ fun BudgetScreen(
                 androidx.compose.foundation.layout.BoxWithConstraints(
                     Modifier.fillMaxSize().monthSwipe(display.swipeBetweenMonths, onPrevious = viewModel::previousMonth, onNext = viewModel::nextMonth),
                 ) {
-                val wide = maxWidth >= 840.dp && followingCount > 0
+                // Wide is a property of the window (as the navigation rail decides it), not of the
+                // width left after the rail, so the months column survives the rail.
+                val wide = com.sporez.actualist.android.ui.isWideShell() && maxWidth >= 600.dp && followingCount > 0
                 androidx.compose.runtime.LaunchedEffect(wide, followingCount) { viewModel.setFollowingCount(if (wide) followingCount else 0) }
                 Row(Modifier.fillMaxSize()) {
                 LazyColumn(

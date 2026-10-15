@@ -37,7 +37,11 @@ class FreshAppState : ExternalResource() {
 }
 
 fun ComposeTestRule.waitForTag(tag: String, timeoutMillis: Long = 60_000) {
-    waitUntil(timeoutMillis) { onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+    // Merged or not: a tag inside a text field's supporting text exists only in the unmerged tree.
+    waitUntil(timeoutMillis) {
+        onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() ||
+            onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+    }
 }
 
 /** [waitUntil] that saves a screenshot and logs the semantics tree before failing. */
