@@ -82,7 +82,7 @@ data class MoneyCurrency(
         MoneyCurrency("TWD", "New Taiwan Dollar", "NT$", 2, NumberStyle.COMMA_DOT, true),
         MoneyCurrency("UAH", "Ukrainian Hryvnia", "₴", 2, NumberStyle.SPACE_COMMA, false),
         MoneyCurrency("USD", "US Dollar", "$", 2, NumberStyle.COMMA_DOT, true),
-        MoneyCurrency("UYU", "Uruguayan Peso", "$U", 2, NumberStyle.DOT_COMMA, true),
+        MoneyCurrency("UYU", "Uruguayan Peso", "\$U", 2, NumberStyle.DOT_COMMA, true),
         MoneyCurrency("UZS", "Uzbek Soum", "UZS", 2, NumberStyle.SPACE_COMMA, false),
         )
     }
