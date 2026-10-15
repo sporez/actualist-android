@@ -28,6 +28,15 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Completed milestones
 
+- Parity sweep against Actualist's feature folders (two read-only audits, then five waves of parallel work, each verified in CI):
+  - Budget: month chooser, Today, swipe between months, total assigned, carryover badges, months shown; category and group rename, reorder, move, unhide, delete with transfer; overspending cover review and uncategorized review; hold preview, move money with direction swap, amount arithmetic, savings banner, Budget Actions menu, Markdown notes, encrypted-budget unlock; the full template editor (every kind and option Actualist authors, Fill Empty, a browser).
+  - Transactions: filter sheet (match all/any, several values, is not, dates) applied without saving, saved-filter rename/update/delete; reconcile in steps; reconciled-row guards; batch and merge reviews; Fill Remaining; CSV import and export reviews; schedule conversion review; paged feed; payee picker with recents.
+  - Accounts: reorder, move between groups, budget/off-budget picker, working/cleared/uncleared header. Payees: search, add, delete unused, favorites, rules per payee. Rules: search, duplicate, match preview.
+  - Reports: This Month, 3-Month Average and Transaction Calendar cards, card order, and an Explorer with five report types, daily/monthly, presets, custom range, charts and filters.
+  - Schedules: search, status sections, show completed, details, post with scheduled date or today, date picker.
+  - Settings: named themes, display size, green income, sample values, app-switcher privacy, budget display options, rollover all overspending, reimport, default account, custom headers after sign-in, diagnostics, change budget; History with named rows and an undo review; Bank Sync screen with Sync All.
+  - App: only the sign-in methods the server offers (header auth explained), re-authentication banner, new-transaction alerts with "new" markers, launcher shortcuts, `actualist://open/<route>` deep links, share text to create a transaction, a navigation rail on wide windows, and seven home-screen widgets.
+  - Bugs the emulator found in this sweep: a filter option row whose name did not toggle it, Delete pushed out of view in the saved-filters list, and history naming every budget assignment "Deleted category" (budget row ids were sliced wrongly).
 - Reference pinned (Actualist `61987e5`, Actual `v26.10.0` `2bebdbaa`), private repo, Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
 - Rule editor: pre/default/post stages, "add before/after notes" actions, "is not" on text, "is between" on amounts, plain date conditions (a day, month or year), on/off-budget accounts, tags, and inflow/outflow amounts (stored as Actual stores them; JVM round trips; device test for stages, notes actions and "is between").
 - Report Explorer over the ported query engine (date range, accounts, categories, transfers; totals, per-category, matching transactions). Its JVM test checks totals against ledger sums; its device steps (part of the reports test) passed on the emulator in https://github.com/sporez/actualist-android/actions/runs/38591078296.
@@ -49,18 +58,20 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38632642945 — 3,038 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38631777282 — 4/4, none skipped.
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38629152079 — 25/25, none skipped, with per-test timeouts; process-death relaunch reopened the selected budget. Since then the schedule test (now with a weekday among the days) passed alone in https://github.com/sporez/actualist-android/actions/runs/38632960824. Earlier rounds today: one cascade (fixed: sessions closed on reset), one hang (now bounded), and one test that needed to scroll to a post-stage rule.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38677321312 — 3,142 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38667273955 — 4/4 (last core change).
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38677586005 — 71/71, none skipped; process-death relaunch reopened the selected budget. The run starts with a throwaway warm-up instrumentation, after the first test on a freshly booted emulator hung twice; every test class saves `failure-<test>.png` when it fails.
 
 ## Known limitations
 
-- Not ported: GoCardless, header auth, schedule patterns counted from the month's end other than "last" (such as second to last) in the editor, template kinds and options beyond those listed in the README, in the rule editor: recurring date values, split and schedule-link actions, and Handlebars templates (such rules stay read-only), Actual's dashboard widgets.
+- Not ported: GoCardless and header auth (neither is in Actualist), Apple Wallet import and the app icon picker (iOS-only), schedule patterns counted from the month's end other than "last" (such as second to last) in the editor, template kinds and options beyond those listed in the README, in the rule editor: recurring date values, split and schedule-link actions, and Handlebars templates (such rules stay read-only), Actual's dashboard widgets.
 - Real-server coverage is a disposable `actualbudget/actual-server:26.10.0` container in CI with synthetic data (login, new plain and encrypted budgets, download, two-device sync, conflicts); the on-device tests use an in-process loopback server.
 - Background sync runs hourly on any network; its first run waits 30 minutes, since opening the app syncs anyway.
 - Plain-http servers are refused except on loopback.
 
 ## Next recommended work
 
-1. Split actions in the rule editor (`set-split-amount`), the largest group of rules still read-only.
+1. Sample values cover only amounts shown through `money()`; Actualist also randomises names and hides notes.
+2. Display size scales text only, not row density.
+3. Split actions in the rule editor (`set-split-amount`), beyond Actualist (it cannot author them either).
 

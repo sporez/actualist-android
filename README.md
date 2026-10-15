@@ -27,30 +27,33 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Area | Status | Oracle cases replayed |
 |---|---|---|
 | Demo budget (no server, no credentials) | Done | — (JVM + emulator UI tests) |
-| Budget: months, To Budget, assign, move, cover, hold, rollover, add/hide categories | Done | BudgetMonth 85, Holds 14, Tracking 36 |
-| Wide screens: the next two months beside the edited one; a later month's assigned amount edits in place, its balance opens the category there | Done | device test (landscape) |
+| Budget: months (chooser, Today, swipe), To Budget, assign, move, cover, hold, rollover (one category or all), total assigned, carryover badges | Done | BudgetMonth 85, Holds 14, Tracking 36 |
+| Categories and groups: add, rename, hide/unhide (show hidden), reorder, move between groups, delete with transfer | Done | JVM category-management tests; device test |
+| Overspending cover review and uncategorized review from the Budget screen | Done | device test |
+| Wide screens: the next months beside the edited one (months shown is a setting); a later month's assigned amount edits in place, its balance opens the category there | Done | device test (landscape) |
 | Bulk month actions (copy last month, zero, 3-month average, copy to year end, cover overbudgeted) | Done (Actualist has none) | in BudgetMonth |
-| Budget templates: preview, apply, edit with several entries (monthly, up to, by date, schedule, % of income, average, copy, goal) | Done (other kinds and options read-only in the UI) | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
+| Budget templates: preview, apply (Fill Empty or Overwrite), browse, edit every kind and option Actualist authors (periods, repeats, early spending, limits with refill and retain, schedule save-up/cover, adjustments, notes) | Done | TemplateApply 135 ×2; template editor 20 normalizations, 11 transitions, 13 validations |
 | Transactions: create, edit (incl. transfers and account moves), delete, duplicate, merge, make a schedule | Done | Transactions 21, TransactionCommand 39 |
-| Multi-select: clear, unclear, categorize, duplicate, delete together (atomic, one undo) | Done | unit + device tests |
-| Split transactions: create, edit, delete | Done | Splits 23 |
-| Search, Uncleared/Cleared/Reconciled status filters, saved filters, split grouping | Done (single-condition filter creation) | TransactionQuery 38 |
+| Multi-select: clear, unclear, categorize, duplicate, delete, merge, each with a before/after review (atomic, one undo); confirmation before changing reconciled rows | Done | unit + device tests |
+| Split transactions: create, edit, delete, Fill Remaining | Done | Splits 23 |
+| Search, status filters, a filter sheet (match all/any, several values, is not, dates, no payee, uncategorized) applied without saving; saved filters with rename, update and delete | Done | TransactionQuery 38; filter-draft JVM tests; device test |
 | Rules: engine, editor (pre/default/post stages; is, is not, one of, contains, matches, comparisons, approximately, between, plain dates, on/off budget, tags, inflow/outflow amounts; set, add before or after notes), preview in the transaction editor, on import and reconciliation; category learning (Actual's updateCategoryRules) with budget and per-payee switches | Done | Rules 245; learning unit tests |
-| Schedules: recurrence, status, add, edit (name, amount, auto-post, first date, frequency, every-N interval, last day, nth weekday, or several days and weekdays such as "1, 15, 2nd fri", weekend handling, end after N times or on a date), post, skip, complete, delete | Done (rules with several weekdays edited in Actual) | Schedules 136 + 49 + 66 |
-| Accounts: add, rename, notes, close (with balance transfer), reopen, SimpleFIN unlink, account groups | Done | AccountLifecycle 16; account-group tests ported from Actualist |
-| Reconciliation | Done | from Actualist's Reconciliation cases |
+| Schedules: search, status sections, show completed, details, post with scheduled date or today, recurrence, status, add, edit (name, amount, auto-post, first date, frequency, every-N interval, last day, nth weekday, or several days and weekdays such as "1, 15, 2nd fri", weekend handling, end after N times or on a date), post, skip, complete, delete | Done (rules with several weekdays edited in Actual) | Schedules 136 + 49 + 66 |
+| Accounts: add (budget or off budget), rename, notes, reorder, move between groups, close (with balance transfer), reopen, SimpleFIN unlink, account groups; working/cleared/uncleared header | Done | AccountLifecycle 16; account-group tests ported from Actualist |
+| Reconciliation in steps (review, adjustment preview, lock, exit) | Done | from Actualist's Reconciliation cases; device test |
 | CSV export / import (Actual's import reconcile) | Done | BankSync 465 (csv, bank, simplefin candidates) |
-| Payees: rename, merge, category-learning switches | Done | unit tests |
-| Reports: net worth, cash flow, spending, Budget vs Spent; month switcher and drill-down to transactions; Report Explorer (range, accounts, categories, transfers) | Done | explorer totals checked against ledger sums (JVM); device test |
-| Undo / redo of every local edit, History screen | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
-| SimpleFIN bank sync (through the Actual server, or the device bridge when the server does not host it, as Actualist) | Done: link, sync, unlink, connect on device | 5 provider-mapping cases; unit tests; real-server status check |
-| Background sync (WorkManager, hourly, shared session) | Done | device test |
-| Server: OpenID sign-in (browser redirect) | Done | unit + device tests |
+| Payees: search, add, rename, merge, delete unused, favorites, rules per payee, category-learning switches | Done | unit tests; device test |
+| Reports: net worth, cash flow, spending, Budget vs Spent, This Month, 3-Month Average, Transaction Calendar; card order; month switcher and drill-down; Report Explorer with five report types, daily/monthly, presets and custom range, charts and filters | Done | card and series numbers checked against ledger sums (JVM); device tests |
+| Undo / redo of every local edit; History screen with named rows, before/after, and a review before undo | Done (Actual's cell-level undo) | TransactionCommand undo 39, AccountLifecycle undo 5 |
+| SimpleFIN bank sync (through the Actual server, or the device bridge when the server does not host it, as Actualist) | Done: link, sync, unlink, connect on device; Bank Sync screen with Sync All and last result | 5 provider-mapping cases; unit tests; real-server status check |
+| Background sync (WorkManager, hourly, shared session); new-transaction alerts and "new" markers | Done | device test; pending-new JVM tests |
+| Server: only the sign-in methods the server offers (header auth explained, as Actualist); OpenID; re-authentication banner | Done | unit + device tests |
 | Server: password sign-in, (encrypted) download, sync with confirmation, merkle repair | Done | multi-device tests; JVM and on-device loopback server |
 | New budget creation and registration (plain or end-to-end encrypted) | Done | real actual-server 26.10.0 in CI |
 | Budget ZIP export; import a ZIP as a new server budget (Actual's resetSync) | Done | JVM + real actual-server |
 | Custom request headers for servers behind an access proxy | Done | unit tests |
-| Home-screen widget: To Budget and net worth (Glance) | Done | device test |
+| Home-screen widgets (Glance): budget overview, account balances, recent transactions, needs attention; follow the app theme | Done | device test (overview) |
+| Settings: named themes, display size, green income, hide amounts, sample values, app-switcher privacy, budget display options, reimport, default account, custom headers, diagnostics; launcher shortcuts | Done | device tests |
 | Category and account notes | Done (template directives preserved) | unit tests |
 | GoCardless (Actualist has none either), Actual dashboard widgets | Not ported | — |
 
