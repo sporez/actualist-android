@@ -28,7 +28,7 @@ class CurrencyFlowTest {
         compose.waitForTag("onboarding")
         compose.enterDemo()
         compose.waitForTag("to-budget-banner")
-        compose.onNodeWithTag("to-budget-banner", useUnmergedTree = true).assertTextContains("$", substring = true)
+        compose.onNodeWithTag("to-budget-amount", useUnmergedTree = true).assertTextContains("$", substring = true)
 
         val container = (InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as ActualistApplication).container
         val budgetId = container.library.list().first().id
@@ -40,7 +40,7 @@ class CurrencyFlowTest {
                     session.write { database.sql.execute("INSERT OR REPLACE INTO preferences (id, value) VALUES (?, ?)", "defaultCurrencyCode", "EUR") }
                 }
                 compose.waitOrCapture("euro-banner") {
-                    runCatching { compose.onNodeWithTag("to-budget-banner", useUnmergedTree = true).assertTextContains("€", substring = true) }.isSuccess
+                    runCatching { compose.onNodeWithTag("to-budget-amount", useUnmergedTree = true).assertTextContains("€", substring = true) }.isSuccess
                 }
                 assertTrue(runBlocking(Dispatchers.IO) { session.read { BudgetPreferences(database).format().symbol } } == "€")
             } finally {
@@ -52,7 +52,7 @@ class CurrencyFlowTest {
                 }
             }
             compose.waitOrCapture("dollar-banner") {
-                runCatching { compose.onNodeWithTag("to-budget-banner", useUnmergedTree = true).assertTextContains("$", substring = true) }.isSuccess
+                runCatching { compose.onNodeWithTag("to-budget-amount", useUnmergedTree = true).assertTextContains("$", substring = true) }.isSuccess
             }
         } finally {
             container.sessions.release(session)
