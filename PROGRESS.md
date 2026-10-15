@@ -59,9 +59,9 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38677321312 — 3,142 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
-- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38667273955 — 4/4 (last core change).
-- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38677586005 — 71/71, none skipped; process-death relaunch reopened the selected budget. The run starts with a throwaway warm-up instrumentation, after the first test on a freshly booted emulator hung twice; every test class saves `failure-<test>.png` when it fails.
+- Build and unit test: green, https://github.com/sporez/actualist-android/actions/runs/38690838944 — 3,201 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in the next workflow).
+- Real Actual server (`actualbudget/actual-server:26.10.0` service container, synthetic password): green, https://github.com/sporez/actualist-android/actions/runs/38667273955 — 4/4 (last core server change before the third audit's work; rerun pending).
+- Emulator (API 34, Compose v2 test API): https://github.com/sporez/actualist-android/actions/runs/38688475759 — 97/97, none skipped (through the second audit's waves); process-death relaunch reopened the selected budget. The run starts with a throwaway warm-up instrumentation; every test class saves `failure-<test>.png` when it fails.
 
 ## Known limitations
 
