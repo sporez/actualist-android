@@ -2,6 +2,7 @@
 
 package com.sporez.actualist.android.ui.transactions
 
+import com.sporez.actualist.android.ui.components.Dates
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -269,7 +270,7 @@ class TransactionEditorViewModel(
     }
 }
 
-private val dateLabel = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
+private val dateLabel: DateTimeFormatter get() = Dates.dayWithWeekday()
 
 /**
  * One split line as the form holds it. A null [payeeId] with no [payeeName] stays on the transaction's

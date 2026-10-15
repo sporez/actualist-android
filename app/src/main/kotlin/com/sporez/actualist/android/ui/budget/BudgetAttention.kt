@@ -151,8 +151,8 @@ fun CoverReviewSheet(screen: BudgetScreenState, viewModel: BudgetViewModel, onDi
 
 /**
  * Actualist's uncategorized review: the shown month's uncategorized on-budget transactions, each
- * given a category in place. A reconciled transaction is locked, so it asks to be unreconciled
- * first instead of changing a balanced account.
+ * given a category in place. A reconciled transaction asks for Actualist's confirmation first,
+ * then goes through the reconciled-mutation unlock and relock.
  */
 @Composable
 fun UncategorizedReviewSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
@@ -160,7 +160,7 @@ fun UncategorizedReviewSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
     val state by viewModel.uncategorized.collectAsState()
     var options by remember { mutableStateOf<List<PickerOption>>(emptyList()) }
     var picking by remember { mutableStateOf<TransactionRow?>(null) }
-    var reconciled by remember { mutableStateOf<TransactionRow?>(null) }
+    var confirming by remember { mutableStateOf<Pair<TransactionRow, String>?>(null) }
     LaunchedEffect(Unit) { options = viewModel.categoryOptions() }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("uncategorized-review"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -184,9 +184,9 @@ fun UncategorizedReviewSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
                                 MoneyText(row.amount, colored = true)
                                 Spacer(Modifier.width(8.dp))
                                 OutlinedButton(
-                                    onClick = { if (row.reconciled) reconciled = row else picking = row },
+                                    onClick = { picking = row },
                                     modifier = Modifier.testTag("uncategorized-categorize"),
-                                ) { Text(if (row.reconciled) "Reconciled" else "Categorize") }
+                                ) { Text("Categorize") }
                             }
                             HorizontalDivider()
                         }
@@ -201,23 +201,30 @@ fun UncategorizedReviewSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit) 
             options = options,
             onPick = { option ->
                 picking = null
-                option.id?.let { viewModel.categorize(row.id, it) }
+                option.id?.let { categoryId ->
+                    if (row.reconciled) confirming = row to categoryId else viewModel.categorize(row.id, categoryId)
+                }
             },
             onDismiss = { picking = null },
         )
     }
-    reconciled?.let {
+    confirming?.let { (row, categoryId) ->
+        val warning = com.sporez.actualist.core.transactions.ReconciledMutationPresentation.make(
+            com.sporez.actualist.core.transactions.ReconciledIntent.CATEGORIZE,
+            targetReconciledCount = 1,
+            includesPairedTransfer = false,
+        )
         AlertDialog(
-            onDismissRequest = { reconciled = null },
-            title = { Text("Reconciled transaction") },
-            text = {
-                Text(
-                    "This transaction is reconciled, so categorizing it could change an account you already balanced. " +
-                        "Unreconcile it in its account first, then categorize it here.",
-                    modifier = Modifier.testTag("uncategorized-reconciled-warning"),
-                )
+            onDismissRequest = { confirming = null },
+            title = { Text(warning.title) },
+            text = { Text(warning.message, modifier = Modifier.testTag("uncategorized-reconciled-warning")) },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirming = null; viewModel.categorize(row.id, categoryId, unlockReconciled = true) },
+                    modifier = Modifier.testTag("uncategorized-reconciled-confirm"),
+                ) { Text(warning.confirmationTitle) }
             },
-            confirmButton = { TextButton(onClick = { reconciled = null }, modifier = Modifier.testTag("uncategorized-reconciled-ok")) { Text("OK") } },
+            dismissButton = { TextButton(onClick = { confirming = null }, modifier = Modifier.testTag("uncategorized-reconciled-cancel")) { Text("Cancel") } },
         )
     }
 }

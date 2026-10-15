@@ -80,10 +80,16 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
     }
 
     /** Gives one uncategorized transaction a category (the way a batch categorize does, then category learning). */
-    fun categorize(transactionId: String, categoryId: String) = write("Categorized") {
-        val result = TransactionBatch(database, clock).categorize(listOf(transactionId), categoryId)
-        if (result.changed == 0) error("That transaction cannot be categorized here.")
-        CategoryLearning(database).learn(setOf(transactionId), java.time.LocalDate.now())
+    fun categorize(transactionId: String, categoryId: String, unlockReconciled: Boolean = false) = write("Categorized") {
+        val mutations = com.sporez.actualist.core.transactions.ReconciledMutations(database)
+        val locked = if (unlockReconciled) mutations.unlock(listOf(transactionId)) else emptyList()
+        try {
+            val result = TransactionBatch(database, clock).categorize(listOf(transactionId), categoryId)
+            if (result.changed == 0) error("That transaction cannot be categorized here.")
+            CategoryLearning(database).learn(setOf(transactionId), java.time.LocalDate.now())
+        } finally {
+            if (locked.isNotEmpty()) mutations.relock(locked)
+        }
     }
 
     fun previousMonth() {
@@ -128,6 +134,16 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
         val writes = com.sporez.actualist.core.budget.CategoryWrites(database)
         val group = groupId ?: writes.createGroup(newGroupName ?: error("Choose a group")).first
         writes.createCategory(name, group)
+    }
+
+    /** Actualist's visibility guards: an income group cannot be hidden and a hidden group's categories wait for the group. */
+    fun changeVisibility(categoryId: String, hide: Boolean, isIncome: Boolean, groupHidden: Boolean) {
+        when {
+            hide && isIncome -> messages.show("Income groups cannot be hidden.")
+            groupHidden -> messages.show("Show the group before changing a category.")
+            hide -> hideCategory(categoryId)
+            else -> unhideCategory(categoryId)
+        }
     }
 
     fun hideCategory(categoryId: String) = write("Hidden") { com.sporez.actualist.core.budget.CategoryWrites(database).setCategoryHidden(categoryId, true) }

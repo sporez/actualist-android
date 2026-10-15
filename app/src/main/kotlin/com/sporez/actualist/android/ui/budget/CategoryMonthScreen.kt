@@ -1,5 +1,6 @@
 package com.sporez.actualist.android.ui.budget
 
+import com.sporez.actualist.android.ui.components.Dates
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -53,7 +54,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val categoryDayFormat = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
+private val categoryDayFormat: DateTimeFormatter get() = Dates.dayWithWeekday()
 
 /** What the category month screen shows: the month's figures, the category's note and template, and its transactions in the month. */
 data class CategoryMonthState(

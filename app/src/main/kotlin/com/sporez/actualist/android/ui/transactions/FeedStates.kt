@@ -84,3 +84,12 @@ fun SavedFiltersUnavailable(message: String) {
         Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+/** The empty-feed title for the chosen status filter (Actualist's `emptyMessage`): "No reconciled transactions". */
+fun emptyFeedTitle(status: com.sporez.actualist.core.query.StatusFilter): String = when (status) {
+    com.sporez.actualist.core.query.StatusFilter.UNCATEGORIZED -> "No uncategorized transactions"
+    com.sporez.actualist.core.query.StatusFilter.UNCLEARED -> "No uncleared transactions"
+    com.sporez.actualist.core.query.StatusFilter.CLEARED -> "No cleared transactions"
+    com.sporez.actualist.core.query.StatusFilter.RECONCILED -> "No reconciled transactions"
+    com.sporez.actualist.core.query.StatusFilter.ALL -> "No transactions"
+}

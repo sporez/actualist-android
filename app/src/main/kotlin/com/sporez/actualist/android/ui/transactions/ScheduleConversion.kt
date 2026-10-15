@@ -1,5 +1,6 @@
 package com.sporez.actualist.android.ui.transactions
 
+import com.sporez.actualist.android.ui.components.Dates
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,7 +30,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val startFormat = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
+private val startFormat: DateTimeFormatter get() = Dates.dayWithWeekday()
 
 /** The recurrences "Make schedule" offers. */
 val scheduleConversionFrequencies: List<Pair<ScheduleFrequency, String>> = listOf(

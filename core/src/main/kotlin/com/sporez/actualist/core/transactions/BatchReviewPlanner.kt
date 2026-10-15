@@ -53,7 +53,7 @@ data class BatchReview(
 object BatchReviewPlanner {
     const val HISTORY_HINT = "You can undo this in Budget → History."
 
-    private val dayFormat = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US)
+    private val dayFormat: DateTimeFormatter get() = DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM).withLocale(Locale.getDefault())
 
     fun plan(intent: BatchIntent, selectedIds: Collection<String>, rows: List<TransactionRow>, categoryName: String? = null): BatchReview {
         val byId = rows.associateBy { it.id }

@@ -2,6 +2,7 @@
 
 package com.sporez.actualist.android.ui.budget
 
+import com.sporez.actualist.android.ui.components.Dates
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -84,7 +85,17 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val monthFormat = DateTimeFormatter.ofPattern("MMM yyyy", Locale.US)
+/** Actualist's defaults: hidden groups and the envelope Income group start collapsed; the rest start expanded. */
+private fun startsCollapsed(group: BudgetMonthCategoryGroup, table: BudgetTable): Boolean =
+    group.hidden || (group.isIncome && table == BudgetTable.ENVELOPE)
+
+private fun groupToggleKey(group: BudgetMonthCategoryGroup, table: BudgetTable): String =
+    if (startsCollapsed(group, table)) "+${group.id}" else group.id
+
+private fun isGroupCollapsed(group: BudgetMonthCategoryGroup, table: BudgetTable, toggled: Map<String, Boolean>): Boolean =
+    startsCollapsed(group, table) != (toggled[groupToggleKey(group, table)] == true)
+
+private val monthFormat: DateTimeFormatter get() = Dates.monthYear()
 
 fun monthTitle(month: String): String = runCatching { YearMonth.parse(month).format(monthFormat) }.getOrDefault(month)
 
@@ -152,7 +163,10 @@ private fun BudgetScreenContent(
     val showHidden = display.showHiddenCategories
     val budgetId = display.selectedBudgetId
     val collapsed = remember(budgetId) {
-        mutableStateMapOf<String, Boolean>().also { map -> appSettings.collapsedCategoryGroups(budgetId).forEach { map[it] = true } }
+        mutableStateMapOf<String, Boolean>().also { map ->
+            // Entries are groups toggled away from their default: "+id" for a default-collapsed group, the bare id otherwise.
+            appSettings.collapsedCategoryGroups(budgetId).forEach { map[it] = true }
+        }
     }
     val uncategorizedState by viewModel.uncategorized.collectAsState()
     val uncategorizedCount = (uncategorizedState as? Loadable.Ready)?.value?.size ?: 0
@@ -266,11 +280,13 @@ private fun BudgetScreenContent(
                         item(key = "uncategorized") { UncategorizedRow(uncategorizedCount) { reviewingUncategorized = true } }
                     }
                     for (group in screen.month.categoryGroups.filter { showHidden || !it.hidden }) {
-                        val isCollapsed = collapsed[group.id] == true
+                        val toggleKey = groupToggleKey(group, screen.month.table)
+                        val isCollapsed = isGroupCollapsed(group, screen.month.table, collapsed)
                         item(key = "group-${group.id}") {
-                            GroupHeader(group, isCollapsed, onManage = { managingGroup = group.id }) {
-                                collapsed[group.id] = !isCollapsed
-                                appSettings.setCategoryGroupCollapsed(budgetId, group.id, !isCollapsed)
+                            GroupHeader(group, isCollapsed, screen.month.table == BudgetTable.TRACKING, onManage = { managingGroup = group.id }) {
+                                val toggled = collapsed[toggleKey] != true
+                                collapsed[toggleKey] = toggled
+                                appSettings.setCategoryGroupCollapsed(budgetId, toggleKey, toggled)
                             }
                         }
                         if (!isCollapsed) {
@@ -426,18 +442,18 @@ private fun OverspentRow(count: Int, onCover: () -> Unit) {
 }
 
 @Composable
-private fun GroupHeader(group: BudgetMonthCategoryGroup, collapsed: Boolean, onManage: () -> Unit, onToggle: () -> Unit) {
+private fun GroupHeader(group: BudgetMonthCategoryGroup, collapsed: Boolean, tracking: Boolean, onManage: () -> Unit, onToggle: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(top = 6.dp, start = 4.dp, end = 4.dp).testTag("group-${group.id}"), verticalAlignment = Alignment.Bottom) {
         Icon(if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess, contentDescription = if (collapsed) "Expand" else "Collapse", modifier = Modifier.size(20.dp))
         Text(group.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).padding(start = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Column(horizontalAlignment = Alignment.End) {
-            Text(if (group.isIncome) "Received" else "Assigned", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(money(if (group.isIncome) group.spent else group.budgeted), style = MoneyTextStyle)
+            Text(if (group.isIncome && !tracking) "Received" else if (tracking) "Budgeted" else "Assigned", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(money(if (group.isIncome && !tracking) group.spent else group.budgeted), style = MoneyTextStyle)
         }
-        if (!group.isIncome) {
+        if (!group.isIncome || tracking) {
             Column(horizontalAlignment = Alignment.End, modifier = Modifier.width(110.dp)) {
-                Text("Available", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(money(group.balance), style = MoneyTextStyle)
+                Text(if (!tracking) "Available" else if (group.isIncome) "Received" else "Balance", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(money(if (tracking && group.isIncome) group.spent else group.balance), style = MoneyTextStyle)
             }
         }
         IconButton(onClick = onManage, modifier = Modifier.size(32.dp).testTag("group-manage-${group.id}")) {
@@ -476,6 +492,7 @@ private fun CategorySheet(
     var picking by remember { mutableStateOf<String?>(null) }
     var managing by remember { mutableStateOf(false) }
     val envelope = screen.month.table == BudgetTable.ENVELOPE
+    val groupHidden = screen.month.categoryGroups.firstOrNull { it.id == category.groupId }?.hidden == true
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp).testTag("category-sheet"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -487,7 +504,7 @@ private fun CategorySheet(
                 MoneyText(category.spent)
             }
             if (!category.isIncome || !envelope) {
-                AmountField(assignText, { assignText = it }, label = "Assigned in ${monthTitle(screen.month.month)}", tag = "assign-field", expressions = true)
+                AmountField(assignText, { assignText = it }, label = "${if (envelope) "Assigned" else "Budgeted"} in ${monthTitle(screen.month.month)}", tag = "assign-field", expressions = true)
                 Button(
                     onClick = { MoneyExpression.evaluate(assignText)?.let { viewModel.assign(category.id, it); onDismiss() } },
                     enabled = MoneyExpression.evaluate(assignText) != null,
@@ -519,9 +536,9 @@ private fun CategorySheet(
                 TextButton(onClick = onShowTransactions, modifier = Modifier.testTag("category-transactions")) { Text("Show transactions") }
                 if (!category.isIncome) TextButton(onClick = { picking = "template" }, modifier = Modifier.testTag("category-template")) { Text("Template") }
                 if (category.hidden) {
-                    TextButton(onClick = { viewModel.unhideCategory(category.id); onDismiss() }, modifier = Modifier.testTag("unhide-category")) { Text("Unhide") }
-                } else if (!category.isIncome) {
-                    TextButton(onClick = { viewModel.hideCategory(category.id); onDismiss() }, modifier = Modifier.testTag("hide-category")) { Text("Hide category") }
+                    TextButton(onClick = { viewModel.changeVisibility(category.id, false, category.isIncome, groupHidden); onDismiss() }, modifier = Modifier.testTag("unhide-category")) { Text("Unhide") }
+                } else {
+                    TextButton(onClick = { viewModel.changeVisibility(category.id, true, category.isIncome, groupHidden); onDismiss() }, modifier = Modifier.testTag("hide-category")) { Text("Hide category") }
                 }
                 TextButton(onClick = { managing = true }, modifier = Modifier.testTag("category-manage-button")) { Text("Manage") }
             }
@@ -709,7 +726,7 @@ private fun FollowingMonths(
             item(key = "group-${group.id}") {
                 Text(group.name, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
             }
-            if (collapsed[group.id] != true) {
+            if (!isGroupCollapsed(group, screen.month.table, collapsed)) {
                 item(key = "card-${group.id}") {
                     SectionCard {
                         for (category in group.categories.filter { !it.hidden }) {

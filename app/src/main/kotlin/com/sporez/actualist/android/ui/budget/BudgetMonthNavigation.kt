@@ -1,5 +1,6 @@
 package com.sporez.actualist.android.ui.budget
 
+import com.sporez.actualist.android.ui.components.Dates
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -65,7 +66,7 @@ fun MonthChooserDialog(selected: String, onPick: (String) -> Unit, onDismiss: ()
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for (number in rowStart until rowStart + 3) {
                             val id = Months.id(year, number)
-                            val label = Month.of(number).getDisplayName(TextStyle.SHORT, Locale.US)
+                            val label = Dates.shortMonthName(number)
                             val modifier = Modifier.weight(1f).testTag("month-pick-$id")
                             if (id == selected) {
                                 FilledTonalButton(onClick = { onPick(id) }, modifier = modifier, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)) { Text(label, maxLines = 1) }

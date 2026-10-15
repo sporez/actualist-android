@@ -1,5 +1,6 @@
 package com.sporez.actualist.android.ui.transactions
 
+import com.sporez.actualist.android.ui.components.Dates
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -742,7 +743,7 @@ private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
     return out.toByteArray()
 }
 
-private val dayFormat = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
+private val dayFormat: DateTimeFormatter get() = Dates.dayWithWeekday()
 
 @Composable
 fun TransactionsScreen(
@@ -904,7 +905,7 @@ fun TransactionsScreen(
                         list.account?.let { account -> AccountSummary(account) }
                     }
                     if (list.rows.isEmpty()) {
-                        MessageBox("No transactions", if (query.search.isNullOrBlank()) "Add one with the + button." else "Nothing matches that search.")
+                        MessageBox(emptyFeedTitle(query.status), if (query.search.isNullOrBlank()) "Add one with the + button." else "Nothing matches that search.")
                     } else {
                         val selected by viewModel.selection.collectAsState()
                         if (selected.isNotEmpty()) SelectionBar(selected.size, viewModel)
