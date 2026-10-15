@@ -123,7 +123,10 @@ class BudgetNavigationFlowTest {
         }
         assertNull(failure.get())
 
-        compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("uncategorized-row"))
+        // The row appears once the budget reloads after the write.
+        compose.waitOrCapture("uncategorized-row") {
+            runCatching { compose.onNodeWithTag("budget-list").performScrollToNode(hasTestTag("uncategorized-row")) }.isSuccess
+        }
         compose.waitForTag("uncategorized-row")
         compose.onNodeWithTag("uncategorized-row").performClick()
         compose.waitForTag("uncategorized-review")

@@ -228,7 +228,7 @@ fun ExplorerScreen(viewModel: ExplorerViewModel, today: LocalDate = LocalDate.no
                         }
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            LazyRow(Modifier.testTag("explorer-ranges"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(RangePreset.entries.toList(), key = { it.name }) { option ->
                                     FilterChip(
                                         selected = preset == option,

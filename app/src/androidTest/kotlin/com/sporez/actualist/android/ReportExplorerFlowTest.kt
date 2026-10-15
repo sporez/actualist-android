@@ -48,6 +48,8 @@ class ReportExplorerFlowTest {
 
     /** Chips sit in horizontally scrolling rows: bring each into view before tapping it. */
     private fun click(tag: String) {
+        // Range presets live in a LazyRow: scroll the row to the chip so it is placed, not just composed.
+        if (tag.startsWith("explorer-range-")) compose.onNodeWithTag("explorer-ranges").performScrollToNode(hasTestTag(tag))
         runCatching { compose.onNodeWithTag(tag).performScrollTo() }
         compose.onNodeWithTag(tag).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
     }
