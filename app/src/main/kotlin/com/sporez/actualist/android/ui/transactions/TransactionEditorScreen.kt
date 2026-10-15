@@ -2,6 +2,7 @@
 
 package com.sporez.actualist.android.ui.transactions
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
@@ -35,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -308,23 +311,29 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
     val editingSplit = existing?.isChild == true
     var rulesApplied by remember { mutableStateOf<List<String>>(emptyList()) }
 
+    var ruleDeletes by remember { mutableStateOf(false) }
+    var ruleDeleteReview by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var discardPrompt by remember { mutableStateOf(false) }
+    val editorScope = rememberCoroutineScope()
+    fun ruleInput() = com.sporez.actualist.core.rules.RuleTransactionInput(
+        accountId = accountId!!,
+        date = LocalDate.ofEpochDay(dateEpochDay),
+        amount = signed ?: 0,
+        payeeId = payeeId,
+        payeeName = payee?.name ?: newPayeeName,
+        categoryId = categoryId,
+        notes = notes.ifBlank { null },
+        cleared = cleared,
+        importedPayee = newPayeeName.ifBlank { null },
+    )
+
     // New simple transactions get the rule preview whenever the payee or account changes.
     LaunchedEffect(payeeId, newPayeeName, accountId) {
         if (existing != null || splitting || isTransfer || accountId == null) return@LaunchedEffect
         if (payeeId == null && newPayeeName.isBlank()) return@LaunchedEffect
-        val result = viewModel.previewRules(
-            com.sporez.actualist.core.rules.RuleTransactionInput(
-                accountId = accountId!!,
-                date = LocalDate.ofEpochDay(dateEpochDay),
-                amount = signed ?: 0,
-                payeeId = payeeId,
-                payeeName = payee?.name ?: newPayeeName,
-                categoryId = categoryId,
-                notes = notes.ifBlank { null },
-                cleared = cleared,
-                importedPayee = newPayeeName.ifBlank { null },
-            ),
-        ) ?: return@LaunchedEffect
+        val result = viewModel.previewRules(ruleInput()) ?: return@LaunchedEffect
+        ruleDeletes = result.deletesTransaction
         if (result.appliedRuleIds.isEmpty() || result.deletesTransaction) return@LaunchedEffect
         rulesApplied = result.appliedRuleIds
         if (result.splits.isNotEmpty()) {
@@ -346,6 +355,16 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             amountText = Money.format(kotlin.math.abs(result.amount), symbol = "", grouping = false)
         }
     }
+
+    // Unsaved edits: what the form holds now against what it held once it had loaded (and any shared text was applied).
+    fun formSnapshot(): List<Any?> = listOf(
+        outflow, amountText, accountId, payeeId, newPayeeName, categoryId, notes, cleared, dateEpochDay, splitting,
+        splits.map { Triple(it.categoryId, it.amountText, it.id) },
+    )
+    var baseline by remember { mutableStateOf<List<Any?>?>(null) }
+    LaunchedEffect(Unit) { baseline = formSnapshot() }
+    val dirty = baseline.let { it != null && it != formSnapshot() }
+    BackHandler(enabled = dirty) { discardPrompt = true }
 
     var reconciledScope by remember { mutableStateOf<com.sporez.actualist.core.transactions.ReconciledScope?>(null) }
     var reconcileGuard by remember { mutableStateOf<String?>(null) }
@@ -384,11 +403,26 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
 
     Column(Modifier.fillMaxSize().testTag("transaction-editor")) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onDone, modifier = Modifier.testTag("editor-close")) { Icon(Icons.Filled.Close, contentDescription = "Close") }
+            IconButton(onClick = { if (dirty) discardPrompt = true else onDone() }, modifier = Modifier.testTag("editor-close")) { Icon(Icons.Filled.Close, contentDescription = "Close") }
             Text(if (existing == null) "New transaction" else "Edit transaction", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             Button(
                 enabled = canSave && !editingSplit,
-                onClick = { if (reconciledNow) reconcileGuard = "save" else performSave(false) },
+                onClick = {
+                    editorScope.launch {
+                        // Save is blocked while a matching rule would delete the transaction (Actualist asks first).
+                        val deletes = ruleDeletes || (
+                            existing != null && !splitting && !isTransfer && accountId != null &&
+                                viewModel.previewRules(ruleInput())?.deletesTransaction == true
+                            )
+                        if (deletes) {
+                            ruleDeleteReview = true
+                        } else if (reconciledNow) {
+                            reconcileGuard = "save"
+                        } else {
+                            performSave(false)
+                        }
+                    }
+                },
                 modifier = Modifier.testTag("editor-save"),
             ) { Text("Save") }
         }
@@ -470,12 +504,65 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
                     TextButton(onClick = { viewModel.duplicate() }, modifier = Modifier.testTag("editor-duplicate")) { Text("Duplicate") }
                     TextButton(onClick = { picking = "merge" }, modifier = Modifier.testTag("editor-merge")) { Text("Merge with…") }
                     if (!existing.isParent) TextButton(onClick = { picking = "schedule" }, modifier = Modifier.testTag("editor-make-schedule")) { Text("Schedule…") }
-                    TextButton(onClick = { if (reconciledNow) reconcileGuard = "delete" else viewModel.delete() }, modifier = Modifier.testTag("editor-delete")) {
+                    TextButton(onClick = { if (reconciledNow) reconcileGuard = "delete" else confirmDelete = true }, modifier = Modifier.testTag("editor-delete")) {
                         Text("Delete", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
         }
+    }
+
+    if (confirmDelete && existing != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            modifier = Modifier.testTag("delete-transaction-dialog"),
+            title = { Text("Delete Transaction?") },
+            text = { Text("Delete ${existing.displayPayee.ifBlank { "this transaction" }}?") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; viewModel.delete() }, modifier = Modifier.testTag("delete-transaction-confirm")) {
+                    Text("Delete Transaction", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }, modifier = Modifier.testTag("delete-transaction-cancel")) { Text("Cancel") } },
+        )
+    }
+    if (discardPrompt) {
+        AlertDialog(
+            onDismissRequest = { discardPrompt = false },
+            modifier = Modifier.testTag("discard-dialog"),
+            title = { Text("Discard Changes") },
+            text = { Text("Your edits to this transaction have not been saved.") },
+            confirmButton = {
+                TextButton(onClick = { discardPrompt = false; onDone() }, modifier = Modifier.testTag("discard-confirm")) {
+                    Text("Discard Changes", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { discardPrompt = false }, modifier = Modifier.testTag("discard-keep")) { Text("Keep Editing") } },
+        )
+    }
+    if (ruleDeleteReview) {
+        AlertDialog(
+            onDismissRequest = { ruleDeleteReview = false },
+            modifier = Modifier.testTag("rule-delete-dialog"),
+            title = { Text("A Rule Would Delete This Transaction") },
+            text = {
+                Text(
+                    if (existing != null) {
+                        "A matching rule wants to delete this transaction. Delete it, or keep the existing row and leave it unsaved."
+                    } else {
+                        "A matching rule would delete this transaction, so it will not be saved."
+                    },
+                )
+            },
+            confirmButton = {
+                if (existing != null) {
+                    TextButton(onClick = { ruleDeleteReview = false; viewModel.delete() }, modifier = Modifier.testTag("rule-delete-confirm")) {
+                        Text("Delete Transaction", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { ruleDeleteReview = false }, modifier = Modifier.testTag("rule-delete-keep")) { Text("Keep Editing") } },
+        )
     }
 
     reconcileGuard?.let { action ->
@@ -521,12 +608,11 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
             },
             onDismiss = { picking = null },
         )
-        "category" -> PickerDialog(
+        "category" -> CategoryPickerDialog(
             title = "Category",
-            options = listOf(PickerOption(null, "Uncategorized")) + loaded.categories.map { PickerOption(it.id, it.name, it.groupName) },
-            searchable = true,
+            categories = loaded.categories,
             onPick = {
-                categoryId = it.id
+                categoryId = it
                 picking = null
             },
             onDismiss = { picking = null },
@@ -596,12 +682,11 @@ fun TransactionEditorScreen(viewModel: TransactionEditorViewModel, onDone: () ->
         null -> {}
         else -> if (target.startsWith("split-")) {
             val index = target.removePrefix("split-").toInt()
-            PickerDialog(
+            CategoryPickerDialog(
                 title = "Split category",
-                options = listOf(PickerOption(null, "Uncategorized")) + loaded.categories.map { PickerOption(it.id, it.name, it.groupName) },
-                searchable = true,
-                onPick = { option ->
-                    splits = splits.toMutableList().also { it[index] = SplitLine(option.id, it[index].amountText, it[index].id) }
+                categories = loaded.categories,
+                onPick = { id ->
+                    splits = splits.toMutableList().also { it[index] = SplitLine(id, it[index].amountText, it[index].id) }
                     picking = null
                 },
                 onDismiss = { picking = null },

@@ -73,6 +73,8 @@ data class TransactionListState(
     val pendingNewIds: Set<String> = emptySet(),
     /** True when older transactions exist beyond the loaded page ("Load older transactions"). */
     val hasMore: Boolean = false,
+    /** Why the saved filters could not be read, when they could not ("Saved Filters Unavailable"). */
+    val filtersUnavailable: String? = null,
 )
 
 /** Conditions applied to the feed, saved or not. */
@@ -107,6 +109,13 @@ class TransactionsViewModel(
         _limit.value = com.sporez.actualist.core.transactions.FeedPaging.grown(_limit.value, pageSize)
     }
 
+    /** Bumped by Retry and pull-to-refresh to re-read the feed from the local database. */
+    private val _reload = MutableStateFlow(0)
+
+    fun reload() {
+        _reload.value += 1
+    }
+
     private fun resetPaging() {
         _limit.value = pageSize
     }
@@ -116,11 +125,13 @@ class TransactionsViewModel(
         kotlinx.coroutines.flow.combine(
             kotlinx.coroutines.flow.combine(_query, _filterId, _adhoc) { q, f, a -> Triple(q, f, a) },
             _limit,
-        ) { inputs, limit -> Pair(inputs, limit) },
+            _reload,
+        ) { inputs, limit, _ -> Pair(inputs, limit) },
     ) { (inputs, limit) ->
         val (q, filterId, applied) = inputs
         val queries = com.sporez.actualist.core.query.TransactionQueries(database)
-        val filters = runCatching { queries.savedFilters() }.getOrDefault(emptyList())
+        val filtersResult = runCatching { queries.savedFilters() }
+        val filters = filtersResult.getOrDefault(emptyList())
         val filter = filterId?.let { id -> filters.firstOrNull { it.id == id } }
         var problem: String? = null
         var window: com.sporez.actualist.core.transactions.FeedWindow<TransactionRow>
@@ -154,6 +165,7 @@ class TransactionsViewModel(
             uncategorizedCount = if (q.accountId == null && q.categoryId == null) ledger.uncategorizedCount() else 0,
             savedFilters = filters,
             filterProblem = problem,
+            filtersUnavailable = filtersResult.exceptionOrNull()?.let { it.message ?: "Saved filters could not be loaded." },
             pendingNewIds = runCatching { com.sporez.actualist.core.notifications.PendingNewTransactions(database).pendingIds(q.accountId) }.getOrDefault(emptySet()),
         )
     }
@@ -332,6 +344,66 @@ class TransactionsViewModel(
 
     fun deleteSelected(unlockReconciled: Boolean = false) = batch(unlockReconciled, { "Deleted ${it.changed}" }) {
         com.sporez.actualist.core.transactions.TransactionBatch(database, clock).delete(it)
+    }
+
+    /** The reconciled rows a delete of [id] would touch (for the reconciled warning). */
+    suspend fun reconciledScope(id: String): com.sporez.actualist.core.transactions.ReconciledScope? =
+        session.read { com.sporez.actualist.core.transactions.ReconciledMutations(database).scope(id) }
+
+    /** Deletes one row after its confirmation (Actualist's swipe Delete), unlocking reconciled rows only when the user confirmed that. */
+    fun deleteRow(id: String, unlockReconciled: Boolean) {
+        viewModelScope.launch {
+            try {
+                session.write {
+                    val mutations = com.sporez.actualist.core.transactions.ReconciledMutations(database)
+                    val locked = if (unlockReconciled) mutations.unlock(listOf(id)) else emptyList()
+                    try {
+                        com.sporez.actualist.core.transactions.TransactionBatch(database, clock).delete(listOf(id))
+                    } finally {
+                        if (locked.isNotEmpty()) mutations.relock(locked)
+                    }
+                }
+                _selection.value = _selection.value - id
+                messages.show("Transaction deleted")
+            } catch (error: Exception) {
+                messages.show(failure(error, "The transaction could not be deleted."))
+            }
+        }
+    }
+
+    /** Turns a feed row into a schedule (Actualist's "Convert to Schedule…"): same account, payee and approximate amount. */
+    fun convertToSchedule(row: TransactionRow, frequency: com.sporez.actualist.core.rules.ScheduleFrequency, name: String) {
+        val start = row.date ?: run {
+            messages.show("This transaction has no date.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                session.write {
+                    com.sporez.actualist.core.schedules.Schedules(database, clock).create(
+                        com.sporez.actualist.core.schedules.ScheduleCreateCommand(
+                            identity = com.sporez.actualist.core.schedules.ScheduleCreateIdentity.make(),
+                            name = name.ifBlank { row.displayPayee }.ifBlank { null },
+                            definition = com.sporez.actualist.core.schedules.ScheduleDefinitionDraft(
+                                accountId = row.accountId,
+                                payeeMappingId = row.payeeId,
+                                amount = com.sporez.actualist.core.schedules.ScheduleAmountDraft.Approximate(row.amount),
+                                dateRule = com.sporez.actualist.core.schedules.ScheduleDateRule.Recurring(
+                                    com.sporez.actualist.core.rules.ScheduleRecurrence(start.toString(), frequency),
+                                    "isapprox",
+                                ),
+                            ),
+                            postsTransaction = false,
+                            customUpcomingLength = null,
+                            asOfDayId = java.time.LocalDate.now().toString(),
+                        ),
+                    )
+                }
+                messages.show("Schedule created")
+            } catch (error: Exception) {
+                messages.show(failure(error, "The schedule could not be created."))
+            }
+        }
     }
 
     fun duplicateSelected() = batch(false, { "Duplicated ${it.changed}" }) { ids ->
@@ -672,7 +744,15 @@ private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
 private val dayFormat = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy", Locale.US)
 
 @Composable
-fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow) -> Unit, onAdd: () -> Unit) {
+fun TransactionsScreen(
+    viewModel: TransactionsViewModel,
+    onOpen: (TransactionRow) -> Unit,
+    onAdd: () -> Unit,
+    /** Pull-to-refresh: syncs with the server when signed in (the demo and local budgets have nothing to sync). */
+    onRefresh: suspend () -> Unit = {},
+) {
+    var deleting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<TransactionRow?>(null) }
+    var converting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<TransactionRow?>(null) }
     val state by viewModel.state.collectAsState()
     val query by viewModel.query.collectAsState()
     val message by viewModel.messages.message.collectAsState()
@@ -720,6 +800,34 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
         val current = (state as? Loadable.Ready)?.value?.account
         if (current != null) AccountDialog(current, viewModel) { managing = false }
     }
+    deleting?.let { row ->
+        DeleteTransactionDialog(
+            payee = row.displayPayee.ifBlank { "No payee" },
+            reconciled = row.reconciled,
+            loadScope = { viewModel.reconciledScope(row.id) },
+            onConfirm = { unlock ->
+                deleting = null
+                viewModel.deleteRow(row.id, unlock)
+            },
+            onDismiss = { deleting = null },
+        )
+    }
+    converting?.let { row ->
+        ScheduleConversionReviewDialog(
+            defaultName = row.displayPayee,
+            amount = row.amount,
+            accountName = row.accountName,
+            payeeName = row.displayPayee,
+            start = row.date ?: java.time.LocalDate.now(),
+            onConfirm = { name, frequency ->
+                converting = null
+                // The projected (sample-value) row only names things; the write uses the real one.
+                val real = (state as? Loadable.Ready)?.value?.rows?.firstOrNull { it.id == row.id } ?: row
+                viewModel.convertToSchedule(real, frequency, name)
+            },
+            onDismiss = { converting = null },
+        )
+    }
     Box(Modifier.fillMaxSize().testTag("transactions-screen")) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -739,10 +847,24 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp).testTag("transaction-search"),
             )
+            FeedPullToRefresh(
+                onRefresh = {
+                    try {
+                        onRefresh()
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        viewModel.messages.show(error.message ?: "Refresh failed.")
+                    }
+                    viewModel.reload()
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            ) {
             when (val current = state) {
                 Loadable.Loading -> LoadingBox()
-                is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
+                is Loadable.Failed -> FeedLoadError(current.message, !query.search.isNullOrBlank(), viewModel::reload)
                 is Loadable.Ready -> {
+                  Column(Modifier.fillMaxSize()) {
                     val real = current.value
                     val sample = com.sporez.actualist.android.ui.components.LocalSampleValues.current
                     // Names, amounts and notes are projected to sample values; ids stay real so every action still targets the right row.
@@ -774,6 +896,7 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                             )
                         }
                     }
+                    list.filtersUnavailable?.let { SavedFiltersUnavailable(it) }
                     FilterChipsRow(list, viewModel)
                     list.filterProblem?.let { ErrorBanner(it, Modifier.padding(horizontal = 14.dp)) }
                     androidx.compose.runtime.CompositionLocalProvider(com.sporez.actualist.android.ui.components.LocalValuesProjected provides sample) {
@@ -794,10 +917,14 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                             onLongPress = { row -> viewModel.toggleSelected(row.id) },
                             hasMore = list.hasMore,
                             onLoadOlder = viewModel::loadOlder,
+                            onDelete = { row -> deleting = row },
+                            onConvert = { row -> converting = row },
                         )
                         }
                     }
+                  }
                 }
+            }
             }
         }
         FloatingActionButton(onClick = onAdd, modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp).testTag("add-transaction")) {
@@ -816,6 +943,8 @@ private fun TransactionList(
     onLongPress: (TransactionRow) -> Unit,
     hasMore: Boolean,
     onLoadOlder: () -> Unit,
+    onDelete: (TransactionRow) -> Unit,
+    onConvert: (TransactionRow) -> Unit,
 ) {
     val byDay = rows.groupBy { it.date }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -832,13 +961,21 @@ private fun TransactionList(
             item(key = "rows-$day") {
                 SectionCard {
                     dayRows.forEachIndexed { index, row ->
-                        TransactionItem(row, showAccount, row.id in selected, row.id in pendingNew, onOpen, onLongPress)
+                        val canConvert = !row.isParent && !row.startingBalance && row.date != null
+                        SwipeToDeleteRow(row.id, enabled = selected.isEmpty(), onRequestDelete = { onDelete(row) }) {
+                            val menu: (@Composable () -> Unit)? = if (selected.isEmpty()) {
+                                @Composable { RowActionsMenu(row.id, canConvert, onConvertToSchedule = { onConvert(row) }, onDelete = { onDelete(row) }) }
+                            } else {
+                                null
+                            }
+                            TransactionItem(row, showAccount, row.id in selected, row.id in pendingNew, onOpen, onLongPress, menu)
+                        }
                         if (index < dayRows.lastIndex) HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
             }
         }
-        if (hasMore) item(key = "load-older") { LoadOlderRow(onLoadOlder) }
+        if (hasMore) item(key = "load-older") { LoadOlderRow(onLoadOlder) } else item(key = "feed-end") { FeedEndMarker() }
     }
 }
 
@@ -850,6 +987,7 @@ private fun TransactionItem(
     isNew: Boolean,
     onOpen: (TransactionRow) -> Unit,
     onLongPress: (TransactionRow) -> Unit,
+    menu: (@Composable () -> Unit)? = null,
 ) {
     val background = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent
     Column(
@@ -869,6 +1007,7 @@ private fun TransactionItem(
                 Text("New", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp).testTag("new-marker-${row.id}"))
             }
             MoneyText(row.amount, colored = true)
+            menu?.invoke()
         }
         val detail = buildList {
             when {
