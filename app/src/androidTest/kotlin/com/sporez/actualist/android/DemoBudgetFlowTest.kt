@@ -40,7 +40,7 @@ class DemoBudgetFlowTest {
     private fun openDemo() {
         compose.waitForTag("onboarding")
         compose.screenshot("00-onboarding")
-        compose.onNodeWithTag("open-demo").performClick()
+        compose.enterDemo()
         compose.waitForTag("to-budget-banner")
     }
 

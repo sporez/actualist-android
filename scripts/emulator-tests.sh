@@ -75,11 +75,20 @@ adb shell am start -W -n "${APP_ID}/com.sporez.actualist.android.MainActivity" >
 sleep 8
 # If the last test left no budget selected, open the demo through the UI first.
 adb shell uiautomator dump /sdcard/window.xml > /dev/null 2>&1 && adb pull /sdcard/window.xml "$OUT/before-process-death-window.xml" > /dev/null 2>&1 || true
-bounds=$(grep -o 'text="Explore the demo budget"[^>]*bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' "$OUT/before-process-death-window.xml" 2>/dev/null | grep -o 'bounds="[^"]*"' | head -1)
-if [ -n "$bounds" ]; then
-  nums=$(echo "$bounds" | grep -o '[0-9]*')
-  set -- $nums
+# Taps the centre of the first on-screen element whose text is $1 (from a fresh window dump).
+tap_text() {
+  adb shell uiautomator dump /sdcard/window.xml > /dev/null 2>&1 && adb pull /sdcard/window.xml "$OUT/tap-window.xml" > /dev/null 2>&1 || return 1
+  local found
+  found=$(grep -o "text=\"$1\"[^>]*bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" "$OUT/tap-window.xml" 2>/dev/null | grep -o 'bounds="[^"]*"' | head -1)
+  [ -n "$found" ] || return 1
+  set -- $(echo "$found" | grep -o '[0-9]*')
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+}
+if grep -q 'text="Explore the demo budget"' "$OUT/before-process-death-window.xml" 2>/dev/null; then
+  tap_text "Explore the demo budget"
+  sleep 3
+  # Demo mode asks for confirmation first.
+  tap_text "Enter Demo" || true
   sleep 25
 fi
 adb exec-out screencap -p > "$OUT/screenshots/30-before-process-death.png"

@@ -25,7 +25,7 @@ class AccountsFlowTest {
 
     private fun openAccounts() {
         compose.waitForTag("onboarding")
-        compose.onNodeWithTag("open-demo").performClick()
+        compose.enterDemo()
         compose.waitForTag("to-budget-banner")
         compose.onNodeWithTag("tab-accounts").performClick()
         compose.waitForTag("budget-accounts")

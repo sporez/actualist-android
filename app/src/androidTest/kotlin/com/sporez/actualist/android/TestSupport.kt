@@ -1,5 +1,7 @@
 package com.sporez.actualist.android
 
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithTag
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
@@ -95,4 +97,11 @@ class FailureScreenshot : org.junit.rules.TestWatcher() {
             InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()?.let { save("failure-${description.methodName}", it) }
         }
     }
+}
+
+/** Onboarding's demo button, then its confirmation (Actualist asks before entering demo mode). */
+fun ComposeTestRule.enterDemo() {
+    onNodeWithTag("open-demo").performClick()
+    waitForTag("demo-confirm")
+    onNodeWithTag("demo-confirm").performClick()
 }

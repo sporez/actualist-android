@@ -55,7 +55,20 @@ fun OnboardingScreen(
         Text("Actualist", style = MaterialTheme.typography.displaySmall)
         Text("A fast, local-first client for Actual Budget. Experimental Android build.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(12.dp))
-        Button(onClick = onDemo, modifier = Modifier.fillMaxWidth().testTag("open-demo")) { Text("Explore the demo budget") }
+        // As Actualist: entering demo mode asks first.
+        var confirmingDemo by remember { mutableStateOf(false) }
+        Button(onClick = { confirmingDemo = true }, modifier = Modifier.fillMaxWidth().testTag("open-demo")) { Text("Explore the demo budget") }
+        if (confirmingDemo) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirmingDemo = false },
+                title = { Text("Do you want to enter demo mode?") },
+                text = { Text("The app will load sample budget data. Nothing is sent to a server.") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { confirmingDemo = false; onDemo() }, modifier = Modifier.testTag("demo-confirm")) { Text("Enter Demo") }
+                },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmingDemo = false }) { Text("Cancel") } },
+            )
+        }
         Text("No account or server needed. All demo data is synthetic.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         OutlinedButton(onClick = onConnect, modifier = Modifier.fillMaxWidth().testTag("onboarding-connect")) { Text("Connect to an Actual server") }
         val downloaded = localBudgets.filter { !it.isDemo }

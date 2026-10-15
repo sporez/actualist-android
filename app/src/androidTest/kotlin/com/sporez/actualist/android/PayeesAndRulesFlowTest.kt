@@ -34,7 +34,7 @@ class PayeesAndRulesFlowTest {
 
     private fun openDemo() {
         compose.waitForTag("onboarding")
-        compose.onNodeWithTag("open-demo").performClick()
+        compose.enterDemo()
         compose.waitForTag("to-budget-banner")
     }
 
