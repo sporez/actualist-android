@@ -58,7 +58,8 @@ class PolishFlowTest {
         click("explorer-custom-start")
         compose.waitForTag("explorer-date-ok")
         compose.onNode(hasContentDescription("text input", substring = true)).performClick()
-        compose.onNode(hasSetTextAction()).performTextReplacement("01/01/2020")
+        // Material 3's date input takes digits only and adds the separators itself (en-US MMDDYYYY).
+        compose.onNode(hasSetTextAction()).performTextReplacement("01012020")
         click("explorer-date-ok")
         compose.waitForGone("explorer-date-ok")
         compose.waitForTag("explorer-error")
