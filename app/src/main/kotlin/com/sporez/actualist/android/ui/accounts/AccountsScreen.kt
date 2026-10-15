@@ -251,7 +251,7 @@ private fun AccountsScreenContent(viewModel: AccountsViewModel, onOpenAccount: (
                 val onBudget = accounts.filter { !it.offBudget && !it.closed && it.id !in groupedIds }
                 val offBudget = accounts.filter { it.offBudget && !it.closed && it.id !in groupedIds }
                 val closed = accounts.filter { it.closed }
-                LazyColumn(Modifier.testTag("accounts-list"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyColumn(Modifier.testTag("accounts-list"), contentPadding = PaddingValues(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     message?.let { item { Text(it, Modifier.testTag("accounts-message").clickable { viewModel.messages.clear() }, color = MaterialTheme.colorScheme.primary) } }
                     item { NetWorthHeader(accounts.filter { !it.closed }.sumOf { it.balance }) }
                     // Account groups (Actual 26.10) come first, each with its open member accounts; an empty group still shows.

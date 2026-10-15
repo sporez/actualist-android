@@ -39,7 +39,8 @@ class HistoryPersistenceFlowTest {
 
         compose.activityRule.scenario.recreate()
         compose.waitForTag("bottom-bar")
-        compose.waitForTag("to-budget-banner")
+        // The list comes back at its scrolled position, so the banner may not be composed.
+        compose.waitForTag("budget-list")
 
         compose.onNodeWithTag("open-settings").performClick()
         compose.waitForTag("show-history")

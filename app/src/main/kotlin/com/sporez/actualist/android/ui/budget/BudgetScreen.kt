@@ -227,7 +227,8 @@ private fun BudgetScreenContent(
                 Row(Modifier.fillMaxSize()) {
                 LazyColumn(
                     Modifier.weight(1.3f).fillMaxHeight().testTag("budget-list"),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 14.dp, end = 14.dp, bottom = 24.dp),
+                    // Room at the end so the last rows scroll clear of the add-transaction button.
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 14.dp, end = 14.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     message?.let { text ->
