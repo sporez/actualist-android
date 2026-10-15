@@ -1,5 +1,6 @@
 package com.sporez.actualist.android.ui.settings
 
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
