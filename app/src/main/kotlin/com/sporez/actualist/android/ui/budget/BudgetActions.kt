@@ -30,6 +30,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.sync.ServerConnection
+import com.sporez.actualist.android.ui.components.LocalSampleValues
+import com.sporez.actualist.android.ui.components.NotesHiddenMessage
 import kotlinx.coroutines.launch
 
 /** Actualist's "Budget Actions" menu: History, Schedules, Notes, Templates and Settings. */
@@ -65,13 +67,17 @@ internal fun MonthNoteDialog(month: String, note: String?, viewModel: BudgetView
         title = { Text("Notes · ${monthTitle(month)}") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()).testTag("month-note-dialog"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MarkdownHelp()
-                OutlinedTextField(text, { text = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("month-note-field"))
-                if (text.isNotBlank()) MarkdownText(text, Modifier.testTag("month-note-preview"))
+                if (LocalSampleValues.current) {
+                    NotesHiddenMessage()
+                } else {
+                    MarkdownHelp()
+                    OutlinedTextField(text, { text = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("month-note-field"))
+                    if (text.isNotBlank()) MarkdownText(text, Modifier.testTag("month-note-preview"))
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { viewModel.saveMonthNote(month, text); onDismiss() }, modifier = Modifier.testTag("month-note-save")) { Text("Save") }
+            TextButton(onClick = { viewModel.saveMonthNote(month, text); onDismiss() }, enabled = !LocalSampleValues.current, modifier = Modifier.testTag("month-note-save")) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

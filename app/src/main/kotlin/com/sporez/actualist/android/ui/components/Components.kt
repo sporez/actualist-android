@@ -22,17 +22,26 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.ui.theme.LocalMoneyColors
 import com.sporez.actualist.android.ui.theme.MoneyTextStyle
+import com.sporez.actualist.android.ui.theme.spacing
 import com.sporez.actualist.core.money.Money
+import com.sporez.actualist.core.privacy.SampleValues
 
 /** When true, amounts render as bullets (Actualist's privacy mode). */
 val LocalHideAmounts = compositionLocalOf { false }
 
 /** When true, amounts are replaced by made-up ones, on screen only (Actualist's "Use Sample Values"). */
 val LocalSampleValues = compositionLocalOf { false }
+
+/**
+ * True where the content below was already projected to sample values by [com.sporez.actualist.core.privacy.SampleValues]
+ * (so totals add up); [money] then prints the amount as it is instead of hashing it a second time.
+ */
+val LocalValuesProjected = compositionLocalOf { false }
 
 /** When false, positive amounts in [MoneyText] use the normal text colour instead of green. */
 val LocalGreenIncomeAmounts = compositionLocalOf { true }
@@ -54,7 +63,7 @@ fun sampleMinorUnits(minorUnits: Long): Long {
 @Composable
 fun money(minorUnits: Long): String = when {
     LocalHideAmounts.current -> "•••••"
-    LocalSampleValues.current -> Money.format(sampleMinorUnits(minorUnits))
+    LocalSampleValues.current && !LocalValuesProjected.current -> Money.format(sampleMinorUnits(minorUnits))
     else -> Money.format(minorUnits)
 }
 
@@ -84,7 +93,7 @@ fun BalancePill(minorUnits: Long, modifier: Modifier = Modifier, carryover: Bool
         Box(
             modifier = Modifier
                 .background(background, RoundedCornerShape(10.dp))
-                .padding(horizontal = 8.dp, vertical = 3.dp),
+                .padding(horizontal = spacing(8.dp), vertical = spacing(3.dp)),
         ) {
             Text(money(minorUnits), color = foreground, style = MoneyTextStyle, maxLines = 1)
         }
@@ -128,7 +137,7 @@ fun LoadingBox(modifier: Modifier = Modifier) {
 @Composable
 fun MessageBox(title: String, message: String, modifier: Modifier = Modifier, action: Pair<String, () -> Unit>? = null) {
     Column(
-        modifier.fillMaxSize().padding(32.dp),
+        modifier.fillMaxSize().padding(spacing(32.dp)),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -141,15 +150,24 @@ fun MessageBox(title: String, message: String, modifier: Modifier = Modifier, ac
 @Composable
 fun ErrorBanner(message: String, modifier: Modifier = Modifier) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp), modifier = modifier.fillMaxWidth()) {
-        Text(message, color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+        Text(message, color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(spacing(12.dp)), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
 fun LabeledRow(label: String, modifier: Modifier = Modifier, trailing: @Composable () -> Unit) {
-    Row(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(horizontal = spacing(16.dp), vertical = spacing(12.dp)), verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
         trailing()
+    }
+}
+
+/** Actualist's note placeholder while Sample Values is on (`EntityNotesView` privacy content). */
+@Composable
+fun NotesHiddenMessage(modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().padding(spacing(16.dp)).testTag("notes-hidden"), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(SampleValues.NOTES_HIDDEN_TITLE, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
+        Text(SampleValues.NOTES_HIDDEN_DETAIL, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = spacing(6.dp)))
     }
 }
 

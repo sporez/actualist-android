@@ -61,6 +61,9 @@ import com.sporez.actualist.android.ui.components.AmountField
 import com.sporez.actualist.android.ui.components.BalancePill
 import com.sporez.actualist.android.ui.components.ErrorBanner
 import com.sporez.actualist.android.ui.components.LoadingBox
+import com.sporez.actualist.android.ui.components.LocalSampleValues
+import com.sporez.actualist.android.ui.components.LocalValuesProjected
+import com.sporez.actualist.android.ui.components.NotesHiddenMessage
 import com.sporez.actualist.android.ui.components.MoneyText
 import com.sporez.actualist.android.ui.components.PickerDialog
 import com.sporez.actualist.android.ui.components.PickerOption
@@ -72,6 +75,7 @@ import com.sporez.actualist.core.budget.BudgetMonthCategory
 import com.sporez.actualist.core.budget.BudgetMonthCategoryGroup
 import com.sporez.actualist.core.budget.BudgetTable
 import com.sporez.actualist.core.budget.Months
+import com.sporez.actualist.core.privacy.SampleValues
 import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.money.MoneyExpression
 import java.time.YearMonth
@@ -89,6 +93,20 @@ fun BudgetScreen(
     onOpenHistory: () -> Unit = {},
     onOpenSchedules: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+) {
+    // The month shown is projected to sample values as a whole (totals add up), so money() must not hash it again.
+    androidx.compose.runtime.CompositionLocalProvider(LocalValuesProjected provides LocalSampleValues.current) {
+        BudgetScreenContent(viewModel, onShowCategoryTransactions, onOpenHistory, onOpenSchedules, onOpenSettings)
+    }
+}
+
+@Composable
+private fun BudgetScreenContent(
+    viewModel: BudgetViewModel,
+    onShowCategoryTransactions: (String, String) -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenSchedules: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val month by viewModel.month.collectAsState()
@@ -139,7 +157,10 @@ fun BudgetScreen(
             Loadable.Loading -> LoadingBox()
             is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
             is Loadable.Ready -> {
-                val screen = current.value
+                val sample = LocalSampleValues.current
+                val screen = remember(current.value, sample) {
+                    if (sample) current.value.copy(month = SampleValues.project(current.value.month), note = null) else current.value
+                }
                 // Wide windows (tablets, landscape) show the next months beside this one, as Actualist's iPad layout.
                 androidx.compose.foundation.layout.BoxWithConstraints(
                     Modifier.fillMaxSize().monthSwipe(display.swipeBetweenMonths, onPrevious = viewModel::previousMonth, onNext = viewModel::nextMonth),
@@ -570,6 +591,10 @@ private fun CategoryNoteField(categoryId: String, viewModel: BudgetViewModel) {
     var original by remember(categoryId) { mutableStateOf<String?>(null) }
     var text by remember(categoryId) { mutableStateOf("") }
     var loaded by remember(categoryId) { mutableStateOf(false) }
+    if (LocalSampleValues.current) {
+        NotesHiddenMessage()
+        return
+    }
     androidx.compose.runtime.LaunchedEffect(categoryId) {
         original = runCatching { viewModel.categoryNote(categoryId) }.getOrNull()
         text = original.orEmpty()
@@ -595,7 +620,8 @@ private fun FollowingMonths(
     onEdit: (month: String, categoryId: String) -> Unit,
 ) {
     val state by viewModel.following.collectAsState()
-    val months = (state as? Loadable.Ready)?.value ?: return
+    val sample = LocalSampleValues.current
+    val months = (state as? Loadable.Ready)?.value?.let { real -> if (sample) real.map { SampleValues.project(it) } else real } ?: return
     var assigning by remember { mutableStateOf<Pair<String, String>?>(null) }
     LazyColumn(
         modifier.testTag("budget-following"),

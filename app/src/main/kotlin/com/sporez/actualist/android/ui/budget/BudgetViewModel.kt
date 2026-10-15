@@ -8,6 +8,7 @@ import com.sporez.actualist.core.budget.BudgetMonth
 import com.sporez.actualist.core.budget.HoldCommand
 import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.budget.MoveMoneyCommand
+import com.sporez.actualist.core.privacy.SampleValues
 import com.sporez.actualist.core.rules.CategoryLearning
 import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.transactions.TransactionBatch
@@ -113,19 +114,19 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
 
     fun unhideCategory(categoryId: String) = write("Shown") { com.sporez.actualist.core.budget.CategoryWrites(database).setCategoryHidden(categoryId, false) }
 
-    fun renameCategory(categoryId: String, name: String) = write("Renamed") { com.sporez.actualist.core.budget.CategoryWrites(database).renameCategory(categoryId, name) }
+    fun renameCategory(categoryId: String, name: String) = guardedWrite("Renamed") { com.sporez.actualist.core.budget.CategoryWrites(database).renameCategory(categoryId, name) }
 
-    fun renameGroup(groupId: String, name: String) = write("Renamed") { com.sporez.actualist.core.budget.CategoryWrites(database).renameGroup(groupId, name) }
+    fun renameGroup(groupId: String, name: String) = guardedWrite("Renamed") { com.sporez.actualist.core.budget.CategoryWrites(database).renameGroup(groupId, name) }
 
     /** One step up (-1) or down (+1) inside the category's group. */
-    fun moveCategoryBy(categoryId: String, delta: Int) = write("Moved") { com.sporez.actualist.core.budget.CategoryWrites(database).moveCategoryBy(categoryId, delta) }
+    fun moveCategoryBy(categoryId: String, delta: Int) = guardedWrite("Moved") { com.sporez.actualist.core.budget.CategoryWrites(database).moveCategoryBy(categoryId, delta) }
 
     /** Moves a category to the end of another group. */
-    fun moveCategoryToGroup(categoryId: String, groupId: String) = write("Moved") {
+    fun moveCategoryToGroup(categoryId: String, groupId: String) = guardedWrite("Moved") {
         com.sporez.actualist.core.budget.CategoryWrites(database).moveCategory(categoryId, groupId, null)
     }
 
-    fun moveGroupBy(groupId: String, delta: Int) = write("Moved") { com.sporez.actualist.core.budget.CategoryWrites(database).moveGroupBy(groupId, delta) }
+    fun moveGroupBy(groupId: String, delta: Int) = guardedWrite("Moved") { com.sporez.actualist.core.budget.CategoryWrites(database).moveGroupBy(groupId, delta) }
 
     /** Whether deleting the category (or, for a group, any of its categories) needs a transfer destination; null when unreadable. */
     suspend fun needsTransfer(id: String, isGroup: Boolean): Boolean? = try {
@@ -193,11 +194,11 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
     suspend fun categoryNote(categoryId: String): String? =
         session.read { com.sporez.actualist.core.notes.EntityNotes(database).read(com.sporez.actualist.core.notes.NoteTarget.Category(categoryId)) }
 
-    fun saveCategoryNote(categoryId: String, text: String) = write("Notes saved") {
+    fun saveCategoryNote(categoryId: String, text: String) = guardedWrite("Notes saved") {
         com.sporez.actualist.core.notes.EntityNotes(database).write(com.sporez.actualist.core.notes.NoteTarget.Category(categoryId), text)
     }
 
-    fun saveMonthNote(month: String, text: String) = write("Notes saved") {
+    fun saveMonthNote(month: String, text: String) = guardedWrite("Notes saved") {
         com.sporez.actualist.core.notes.EntityNotes(database).write(com.sporez.actualist.core.notes.NoteTarget.BudgetMonth(month), text)
     }
 
@@ -235,6 +236,11 @@ class BudgetViewModel(private val session: BudgetSession, initialMonth: String) 
         write(if (draft.entries.isEmpty()) "Template removed" else "Template saved") {
             com.sporez.actualist.core.templates.editor.TemplateEditorWrites(database, clock).save(categoryId, draft)
         }
+
+    /** A write Actualist disables while Sample Values is on (rename, reorder, notes): refused with a message instead. */
+    private fun guardedWrite(done: String, block: BudgetSession.() -> Any?) {
+        if (SampleValues.active) messages.show(if (done == "Notes saved") SampleValues.NOTES_HIDDEN_TITLE else SampleValues.CATEGORY_WRITE_BLOCKED) else write(done, block)
+    }
 
     private fun write(done: String, block: BudgetSession.() -> Any?) {
         viewModelScope.launch {

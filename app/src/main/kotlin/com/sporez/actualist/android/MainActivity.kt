@@ -87,6 +87,7 @@ fun ActualistApp(app: AppViewModel = viewModel()) {
     val container = app.container
     val settings by container.settings.settings.collectAsState()
     val state by app.state.collectAsState()
+    androidx.compose.runtime.SideEffect { com.sporez.actualist.core.privacy.SampleValues.active = settings.sampleValues }
     ActualistTheme(settings.themeMode, settings.namedTheme, settings.displaySize) {
         CompositionLocalProvider(
             LocalHideAmounts provides settings.hideAmounts,

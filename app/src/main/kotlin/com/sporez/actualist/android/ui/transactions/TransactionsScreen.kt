@@ -743,7 +743,10 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                 Loadable.Loading -> LoadingBox()
                 is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
                 is Loadable.Ready -> {
-                    val list = current.value
+                    val real = current.value
+                    val sample = com.sporez.actualist.android.ui.components.LocalSampleValues.current
+                    // Names, amounts and notes are projected to sample values; ids stay real so every action still targets the right row.
+                    val list = if (sample) real.copy(rows = com.sporez.actualist.core.privacy.SampleValues.transactions(real.rows), account = real.account?.let { com.sporez.actualist.core.privacy.SampleValues.account(it) }) else real
                     if (query.accountId == null && query.categoryId == null && (list.uncategorizedCount > 0 || query.uncategorizedOnly)) {
                         FilterChip(
                             selected = query.uncategorizedOnly,
@@ -773,22 +776,26 @@ fun TransactionsScreen(viewModel: TransactionsViewModel, onOpen: (TransactionRow
                     }
                     FilterChipsRow(list, viewModel)
                     list.filterProblem?.let { ErrorBanner(it, Modifier.padding(horizontal = 14.dp)) }
-                    list.account?.let { account -> AccountSummary(account) }
+                    androidx.compose.runtime.CompositionLocalProvider(com.sporez.actualist.android.ui.components.LocalValuesProjected provides sample) {
+                        list.account?.let { account -> AccountSummary(account) }
+                    }
                     if (list.rows.isEmpty()) {
                         MessageBox("No transactions", if (query.search.isNullOrBlank()) "Add one with the + button." else "Nothing matches that search.")
                     } else {
                         val selected by viewModel.selection.collectAsState()
                         if (selected.isNotEmpty()) SelectionBar(selected.size, viewModel)
+                        androidx.compose.runtime.CompositionLocalProvider(com.sporez.actualist.android.ui.components.LocalValuesProjected provides sample) {
                         TransactionList(
                             list.rows,
                             showAccount = query.accountId == null,
                             selected = selected,
                             pendingNew = list.pendingNewIds,
-                            onOpen = { row -> if (selected.isNotEmpty()) viewModel.toggleSelected(row.id) else onOpen(row) },
+                            onOpen = { row -> if (selected.isNotEmpty()) viewModel.toggleSelected(row.id) else onOpen(real.rows.firstOrNull { it.id == row.id } ?: row) },
                             onLongPress = { row -> viewModel.toggleSelected(row.id) },
                             hasMore = list.hasMore,
                             onLoadOlder = viewModel::loadOlder,
                         )
+                        }
                     }
                 }
             }

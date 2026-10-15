@@ -11,6 +11,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -99,6 +100,20 @@ private val AppTypography = Typography().let { base ->
     )
 }
 
+/** Row and padding density for the current display size (1 is Comfortable); shared components multiply their spacing by it. */
+val LocalSpacingScale = staticCompositionLocalOf { 1f }
+
+private fun DisplaySize.spacingScale(): Float = when (this) {
+    DisplaySize.DENSE -> 0.75f
+    DisplaySize.COMPACT -> 0.88f
+    DisplaySize.COMFORTABLE -> 1f
+    DisplaySize.LARGE -> 1.15f
+}
+
+/** [value] scaled by the display size's density. */
+@Composable
+fun spacing(value: Dp): Dp = value * LocalSpacingScale.current
+
 /** Tabular-figure style for amounts so columns of money line up. */
 val MoneyTextStyle = TextStyle(fontFeatureSettings = "tnum", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
 
@@ -125,6 +140,7 @@ fun ActualistTheme(
     androidx.compose.runtime.CompositionLocalProvider(
         LocalMoneyColors provides if (dark) DarkMoney else LightMoney,
         LocalDensity provides scaled,
+        LocalSpacingScale provides displaySize.spacingScale(),
     ) {
         MaterialTheme(colorScheme = scheme, typography = AppTypography, content = content)
     }

@@ -124,6 +124,15 @@ class AccountsViewModel(private val session: BudgetSession) : ViewModel() {
 
 @Composable
 fun AccountsScreen(viewModel: AccountsViewModel, onOpenAccount: (Account) -> Unit) {
+    // Balances are projected to sample values together (the net worth adds up), so money() must not hash them again.
+    androidx.compose.runtime.CompositionLocalProvider(com.sporez.actualist.android.ui.components.LocalValuesProjected provides com.sporez.actualist.android.ui.components.LocalSampleValues.current) {
+        AccountsScreenContent(viewModel, onOpenAccount)
+    }
+}
+
+@Composable
+private fun AccountsScreenContent(viewModel: AccountsViewModel, onOpenAccount: (Account) -> Unit) {
+    val sample = com.sporez.actualist.android.ui.components.LocalSampleValues.current
     val state by viewModel.accounts.collectAsState()
     val message by viewModel.messages.message.collectAsState()
     var adding by rememberSaveable { mutableStateOf(false) }
@@ -134,7 +143,7 @@ fun AccountsScreen(viewModel: AccountsViewModel, onOpenAccount: (Account) -> Uni
             Loadable.Loading -> LoadingBox()
             is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
             is Loadable.Ready -> {
-                val accounts = current.value.accounts
+                val accounts = current.value.accounts.let { real -> if (sample) com.sporez.actualist.core.privacy.SampleValues.accounts(real) else real }
                 val groupOf = current.value.groupOf
                 val grouped = current.value.groups.map { group -> group to accounts.filter { !it.closed && groupOf[it.id] == group.id } }
                 val groupedIds = grouped.flatMap { (_, members) -> members.map { it.id } }.toSet()
