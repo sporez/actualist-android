@@ -167,6 +167,8 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                             route == "history" -> "History"
                             route == "bank-sync" -> "Bank sync"
                             route.startsWith("explorer") -> "Explorer"
+                            route.startsWith("drilldown") -> entry?.arguments?.getString("title")?.takeIf { it.isNotBlank() } ?: "Transactions"
+                            route == "spending-uncategorized" -> "Uncategorized"
                             route.startsWith("account/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Account"
                             route.startsWith("category/") || route.startsWith("category-month/") -> entry?.arguments?.getString("name")?.let(::decode) ?: "Category"
                             route == "server" -> "Server"
@@ -255,15 +257,22 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                     onOpenHistory = { navController.navigate("history") },
                     onOpenSchedules = { navController.navigate("schedules") },
                     onOpenSettings = { navController.navigate("settings") },
+                    onRefresh = { syncNow() },
                 )
             }
             composable("spending") {
                 val vm = viewModel(key = "spending-$key") { TransactionsViewModel(session, null, null) }
                 TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new") }, onRefresh = { syncNow() })
             }
+            // The uncategorized feed (Actualist's uncategorized route), from links and quick actions.
+            composable("spending-uncategorized") {
+                val vm = viewModel(key = "spending-uncat-$key") { TransactionsViewModel(session, null, null) }
+                androidx.compose.runtime.LaunchedEffect(Unit) { if (!vm.query.value.uncategorizedOnly) vm.toggleUncategorized() }
+                TransactionsScreen(vm, onOpen = { navController.navigate("transaction/${encode(it.parentId ?: it.id)}") }, onAdd = { navController.navigate("transaction-new") }, onRefresh = { syncNow() })
+            }
             composable("accounts") {
                 val vm = viewModel(key = "accounts-$key") { AccountsViewModel(session) }
-                AccountsScreen(vm) { navController.navigate("account/${encode(it.id)}?name=${encode(it.name)}") }
+                AccountsScreen(vm, onRefresh = { syncNow() }) { navController.navigate("account/${encode(it.id)}?name=${encode(it.name)}") }
             }
             composable("reports") {
                 val vm = viewModel(key = "reports-$key") { ReportsViewModel(session) }
@@ -271,6 +280,7 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                     vm,
                     onExplore = { navController.navigate("explorer") },
                     onOpenCard = { card -> navController.navigate("explorer?card=${encode(card)}") },
+                    onRefresh = { syncNow() },
                 ) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
             }
             composable(
@@ -281,7 +291,18 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 val vm = viewModel(key = "explorer-$key-$card") {
                     com.sporez.actualist.android.ui.reports.ExplorerViewModel(session, preset = com.sporez.actualist.core.reports.ReportExplorerPresets.forCard(card))
                 }
-                com.sporez.actualist.android.ui.reports.ExplorerScreen(vm) { id -> navController.navigate("transaction/${encode(id)}") }
+                com.sporez.actualist.android.ui.reports.ExplorerScreen(vm, onViewTransactions = { navController.navigate(it) }) { id -> navController.navigate("transaction/${encode(id)}") }
+            }
+            composable(
+                com.sporez.actualist.android.ui.reports.DRILLDOWN_ROUTE_PATTERN,
+                arguments = listOf("start", "end", "accounts", "categories", "title").map {
+                    navArgument(it) { type = NavType.StringType; defaultValue = "" }
+                },
+            ) { entry ->
+                fun arg(name: String) = entry.arguments?.getString(name).orEmpty()
+                com.sporez.actualist.android.ui.reports.DrilldownScreen(session, arg("start"), arg("end"), arg("accounts"), arg("categories")) { id ->
+                    navController.navigate("transaction/${encode(id)}")
+                }
             }
             composable("settings") {
                 SettingsScreen(
@@ -302,11 +323,11 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 com.sporez.actualist.android.ui.banksync.BankSyncScreen(session, container.server)
             }
             composable("history") {
-                com.sporez.actualist.android.ui.settings.HistoryScreen(session)
+                com.sporez.actualist.android.ui.settings.HistoryScreen(session, onRefresh = { syncNow() })
             }
             composable("schedules") {
                 val vm = viewModel(key = "schedules-$key") { com.sporez.actualist.android.ui.settings.SchedulesViewModel(session) }
-                com.sporez.actualist.android.ui.settings.SchedulesScreen(vm)
+                com.sporez.actualist.android.ui.settings.SchedulesScreen(vm, onRefresh = { syncNow() })
             }
             composable("payees") {
                 val vm = viewModel(key = "payees-$key") { com.sporez.actualist.android.ui.settings.PayeesViewModel(session) }
