@@ -9,10 +9,15 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sporez.actualist.android.automation.Automation
+import com.sporez.actualist.android.automation.AutomationActions
 import com.sporez.actualist.android.automation.AutomationPrefs
 import com.sporez.actualist.android.automation.LogRequest
+import com.sporez.actualist.core.budget.Months
+import com.sporez.actualist.core.money.Money
 import com.sporez.actualist.core.privacy.SampleValues
+import com.sporez.actualist.core.store.BudgetSession
 import com.sporez.actualist.core.transactions.TransactionQuery
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -54,6 +59,106 @@ class AutomationFlowTest {
         } finally {
             container.sessions.release(session)
         }
+    }
+
+    private fun <T> readBudget(block: BudgetSession.() -> T): T {
+        val id = container.settings.settings.value.selectedBudgetId ?: error("No budget is selected.")
+        val session = container.sessions.acquire(id) { container.library.open(id) ?: error("The budget is not on this device.") }
+        try {
+            return runBlocking(Dispatchers.IO) { session.read(block) }
+        } finally {
+            container.sessions.release(session)
+        }
+    }
+
+    private fun act(action: String, vararg extras: Pair<String, String>) =
+        runBlocking(Dispatchers.IO) { AutomationActions.perform(context, container, action, extras.toMap()) }
+
+    private fun budgeted(categoryId: String, month: String): Long =
+        readBudget { budget.fetchBudgetMonth(month).category(categoryId)?.budgeted ?: 0L }
+
+    @Test
+    fun assignAndMoveMoneyChangeTheBudgetedAmounts() {
+        openDemo()
+        AutomationPrefs.setAllowed(context, true)
+        val month = Months.current()
+        val categories = readBudget { ledger.categories(includeHidden = false).filter { !it.isIncome }.take(2) }
+        val from = categories[0]
+        val to = categories[1]
+
+        val assigned = act(AutomationActions.ACTION_ASSIGN_BUDGET, "category" to from.id, "amount" to "50.00", "month" to month)
+        assertTrue(assigned.message, assigned.ok)
+        assertEquals(Money.parse("50.00")!!, budgeted(from.id, month))
+        assertEquals(Money.parse("50.00").toString(), assigned.values["budgeted"])
+
+        val toBefore = budgeted(to.id, month)
+        val moved = act(
+            AutomationActions.ACTION_MOVE_MONEY,
+            "from_category" to from.id,
+            "to_category" to to.id,
+            "amount" to "10.00",
+            "month" to month,
+        )
+        assertTrue(moved.message, moved.ok)
+        assertEquals(Money.parse("40.00")!!, budgeted(from.id, month))
+        assertEquals(toBefore + Money.parse("10.00")!!, budgeted(to.id, month))
+
+        val same = act(AutomationActions.ACTION_MOVE_MONEY, "from_category" to from.id, "to_category" to from.id, "amount" to "1.00")
+        assertFalse(same.ok)
+        assertEquals(AutomationActions.MOVE_SAME_CATEGORY, same.message)
+
+        AutomationPrefs.setAllowed(context, false)
+        val refused = act(AutomationActions.ACTION_ASSIGN_BUDGET, "category" to from.id, "amount" to "1.00", "month" to month)
+        assertEquals(Automation.DISABLED, refused.message)
+        assertEquals(Money.parse("40.00")!!, budgeted(from.id, month))
+    }
+
+    @Test
+    fun categorizeAndSetClearedChangeATransaction() {
+        openDemo()
+        AutomationPrefs.setAllowed(context, true)
+        val account = readBudget { ledger.accounts(includeClosed = false).first { !it.offBudget }.name }
+        val category = readBudget { ledger.categories(includeHidden = false).first { !it.isIncome } }
+        val logged = runBlocking(Dispatchers.IO) {
+            Automation.logTransaction(context, container, LogRequest(amount = "3.21", payee = "Categorize Cafe", account = account))
+        }
+        assertTrue(logged.message, logged.ok)
+        val id = readBudget { ledger.transactions(TransactionQuery(limit = 500)).first { it.displayPayee == "Categorize Cafe" }.id }
+
+        val categorized = act(AutomationActions.ACTION_CATEGORIZE_TRANSACTION, "id" to id, "category" to category.id)
+        assertTrue(categorized.message, categorized.ok)
+        assertEquals(category.id, readBudget { ledger.transaction(id)?.categoryId })
+
+        val cleared = act(AutomationActions.ACTION_SET_CLEARED, "id" to id, "cleared" to "true")
+        assertTrue(cleared.message, cleared.ok)
+        assertEquals(true, readBudget { ledger.transaction(id)?.cleared })
+
+        val bad = act(AutomationActions.ACTION_SET_CLEARED, "id" to id, "cleared" to "maybe")
+        assertEquals(AutomationActions.FLAG_INVALID, bad.message)
+
+        val missing = act(AutomationActions.ACTION_CATEGORIZE_TRANSACTION, "id" to "no-such-id", "category" to category.id)
+        assertEquals(AutomationActions.TRANSACTION_NOT_FOUND, missing.message)
+    }
+
+    @Test
+    fun budgetSummaryReadReturnsToBudgetAndIsGated() {
+        openDemo()
+        AutomationPrefs.setAllowed(context, true)
+        val month = Months.current()
+        val summary = act(AutomationActions.ACTION_GET_BUDGET_SUMMARY, "month" to month)
+        assertTrue(summary.message, summary.ok)
+        val expected = readBudget { budget.fetchBudgetMonth(month).toBudget }
+        assertEquals(expected.toString(), summary.values["to_budget"])
+        assertEquals(month, summary.values["month"])
+
+        val invalid = act(AutomationActions.ACTION_GET_BUDGET_SUMMARY, "month" to "March")
+        assertEquals(AutomationActions.MONTH_INVALID, invalid.message)
+
+        SampleValues.active = true
+        assertFalse(act(AutomationActions.ACTION_GET_BUDGET_SUMMARY).ok)
+        SampleValues.active = false
+        AutomationPrefs.setAllowed(context, false)
+        assertEquals(Automation.DISABLED, act(AutomationActions.ACTION_GET_BUDGET_SUMMARY).message)
     }
 
     @Test

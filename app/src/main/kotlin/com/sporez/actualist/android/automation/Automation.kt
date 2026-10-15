@@ -28,12 +28,19 @@ data class AutomationResult(
     val ok: Boolean,
     val message: String,
     val balances: List<Pair<String, Long>> = emptyList(),
+    /** Named results of the newer actions (see [AutomationActions]); amounts are minor units as text. */
+    val values: Map<String, String> = emptyMap(),
+    /** One line per row for list reads (recent transactions, schedules, overspent categories). */
+    val items: List<String> = emptyList(),
 )
 
 /**
  * The Android analogue of Actualist's Shortcuts and Siri access (`ShortcutTransactionCommand`,
  * `ShortcutsBudgetSession`): other apps can log a transaction and read balances in the selected
  * budget, but only while "Allow automation" is on. Wording follows `ShortcutsError`.
+ *
+ * The wider set of Shortcuts operations (transfers, edits, budget moves, summaries) lives in
+ * [AutomationActions]; its KDoc documents every action and extra.
  *
  * Writes go through the open session's write path (shared with the UI through the session hub),
  * so they are recorded for undo and wait in the outbox for sync.
@@ -71,9 +78,42 @@ object Automation {
     const val ACCOUNT_CLOSED = "That account is closed. Choose an open account."
     const val DIRECTION_INVALID = "Direction must be spend or inflow."
     const val WRITE_FAILED = "Actualist could not apply that change."
+    const val READ_BLOCKED = "Turn off Sample Values before reading budget data."
     const val BALANCES_BLOCKED = "Turn off Sample Values before reading balances."
 
-    private class Refusal(message: String) : Exception(message)
+    internal class Refusal(message: String) : Exception(message)
+
+    /**
+     * The shared gate for the actions in [AutomationActions]: refuses when automation is off or Sample
+     * Values is on, runs [block] on the selected budget, and after a successful write syncs (when signed
+     * in) and refreshes the widgets, as [logTransaction] does.
+     */
+    internal suspend fun guarded(
+        context: Context,
+        container: AppContainer,
+        write: Boolean,
+        block: suspend (BudgetSession) -> AutomationResult,
+    ): AutomationResult {
+        val app = context.applicationContext
+        return try {
+            if (!AutomationPrefs.isAllowed(app)) throw Refusal(DISABLED)
+            if (SampleValues.active) throw Refusal(if (write) SampleValues.PAYEE_WRITE_BLOCKED else READ_BLOCKED)
+            withBudget(container) { session ->
+                val result = block(session)
+                if (write && result.ok) {
+                    if (!session.isDemo && container.server.isSignedIn) runCatching { container.server.sync(session) }
+                    runCatching { com.sporez.actualist.android.widget.WidgetData.refresh(app) }
+                }
+                result
+            }
+        } catch (error: Refusal) {
+            AutomationResult(false, error.message ?: WRITE_FAILED)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            AutomationResult(false, WRITE_FAILED)
+        }
+    }
 
     /** Records one transaction in the selected budget; refused when automation is off or Sample Values is on. */
     suspend fun logTransaction(context: Context, container: AppContainer, request: LogRequest): AutomationResult {
@@ -156,7 +196,7 @@ object Automation {
     }
 
     /** Runs [block] on the selected budget's session, shared with the UI through the hub. */
-    private suspend fun <T> withBudget(container: AppContainer, block: suspend (BudgetSession) -> T): T {
+    internal suspend fun <T> withBudget(container: AppContainer, block: suspend (BudgetSession) -> T): T {
         val id = container.settings.settings.value.selectedBudgetId ?: throw Refusal(NO_BUDGET)
         val session = withContext(Dispatchers.IO) {
             container.sessions.acquire(id) { container.library.open(id) ?: throw Refusal(FILE_MISSING) }
@@ -169,7 +209,7 @@ object Automation {
     }
 
     /** An id, else a unique exact name (ignoring case), else a unique name prefix, as Actualist's `uniqueMatch`. */
-    private fun <T> uniqueMatch(items: List<T>, id: (T) -> String, name: (T) -> String, query: String, notFound: String): T {
+    internal fun <T> uniqueMatch(items: List<T>, id: (T) -> String, name: (T) -> String, query: String, notFound: String): T {
         val needle = query.trim()
         if (needle.isEmpty()) throw Refusal(notFound)
         items.firstOrNull { id(it) == needle }?.let { return it }

@@ -64,7 +64,7 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
-        <!-- Automation API (Tasker, Routines): LOG_TRANSACTION and GET_BALANCES, guarded by a permission and the Allow Automation setting. -->
+        <!-- Automation API (Tasker, Routines): LOG_TRANSACTION, GET_BALANCES and the other actions in AutomationActions, guarded by a permission and the Allow Automation setting. -->
         <receiver
             android:name=".automation.AutomationReceiver"
             android:exported="true"
@@ -72,6 +72,26 @@
             <intent-filter>
                 <action android:name="com.sporez.actualist.android.automation.LOG_TRANSACTION" />
                 <action android:name="com.sporez.actualist.android.automation.GET_BALANCES" />
+                <action android:name="com.sporez.actualist.android.automation.LOG_TRANSFER" />
+                <action android:name="com.sporez.actualist.android.automation.UPDATE_TRANSACTION" />
+                <action android:name="com.sporez.actualist.android.automation.CATEGORIZE_TRANSACTION" />
+                <action android:name="com.sporez.actualist.android.automation.SET_CLEARED" />
+                <action android:name="com.sporez.actualist.android.automation.DELETE_TRANSACTION" />
+                <action android:name="com.sporez.actualist.android.automation.ASSIGN_BUDGET" />
+                <action android:name="com.sporez.actualist.android.automation.ADD_TO_BUDGET" />
+                <action android:name="com.sporez.actualist.android.automation.MOVE_MONEY" />
+                <action android:name="com.sporez.actualist.android.automation.APPLY_TEMPLATES" />
+                <action android:name="com.sporez.actualist.android.automation.SET_CARRYOVER" />
+                <action android:name="com.sporez.actualist.android.automation.CREATE_PAYEE" />
+                <action android:name="com.sporez.actualist.android.automation.CREATE_ACCOUNT" />
+                <action android:name="com.sporez.actualist.android.automation.GET_BUDGET_SUMMARY" />
+                <action android:name="com.sporez.actualist.android.automation.GET_CATEGORY_BALANCE" />
+                <action android:name="com.sporez.actualist.android.automation.GET_OVERSPENT" />
+                <action android:name="com.sporez.actualist.android.automation.GET_UNCATEGORIZED_COUNT" />
+                <action android:name="com.sporez.actualist.android.automation.GET_NET_WORTH" />
+                <action android:name="com.sporez.actualist.android.automation.GET_CASH_FLOW" />
+                <action android:name="com.sporez.actualist.android.automation.GET_RECENT_TRANSACTIONS" />
+                <action android:name="com.sporez.actualist.android.automation.GET_UPCOMING_SCHEDULES" />
             </intent-filter>
         </receiver>
         <!-- Budget overview home-screen widget (Jetpack Glance). -->

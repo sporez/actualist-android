@@ -58,6 +58,28 @@ running Actual v26.10.0 itself on synthetic data. Every Actualist oracle domain 
 | Category and account notes | Done (template directives preserved) | unit tests |
 | GoCardless (Actualist has none either), Actual dashboard widgets | Not ported | — |
 
+## Automation intents
+
+With **Settings > Allow Automation** on, Tasker, Samsung Routines and other apps can send broadcasts
+(permission `com.sporez.actualist.android.permission.AUTOMATION`) to `com.sporez.actualist.android` /
+`.automation.AutomationReceiver`. Actions are prefixed `com.sporez.actualist.android.automation.`; extras are
+strings. Everything is refused when automation is off or Sample Values is on. Writes are undoable, sync
+when signed in, and refresh the widgets.
+
+- Writes: `LOG_TRANSACTION`, `LOG_TRANSFER`, `UPDATE_TRANSACTION`, `CATEGORIZE_TRANSACTION`, `SET_CLEARED`,
+  `DELETE_TRANSACTION`, `ASSIGN_BUDGET`, `ADD_TO_BUDGET`, `MOVE_MONEY`, `APPLY_TEMPLATES`, `SET_CARRYOVER`,
+  `CREATE_PAYEE`, `CREATE_ACCOUNT`.
+- Reads: `GET_BALANCES`, `GET_BUDGET_SUMMARY`, `GET_CATEGORY_BALANCE`, `GET_OVERSPENT`,
+  `GET_UNCATEGORIZED_COUNT`, `GET_NET_WORTH`, `GET_CASH_FLOW`, `GET_RECENT_TRANSACTIONS`,
+  `GET_UPCOMING_SCHEDULES`.
+- Common extras: `amount` ("12.50"), `account`, `category`, `payee`, `notes`, `id` (a transaction id from
+  `GET_RECENT_TRANSACTIONS`), `month` (`YYYY-MM`), `date` (`YYYY-MM-DD`).
+- Result: an ordered broadcast's result code (OK or CANCELED) and data (the message), extras `ok`,
+  `message`, the action's named values (amounts in minor units) and, for lists, `items`; or send
+  `reply_package` to get the same extras back as a `...automation.RESULT` broadcast.
+
+The full extras for every action are in the KDoc of `AutomationActions.kt`.
+
 ## Building
 
 All builds and tests run in GitHub Actions; nothing Android-specific needs to be

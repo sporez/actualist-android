@@ -16,29 +16,32 @@ import kotlinx.coroutines.launch
  * "Allow Automation"; otherwise the call is refused with Actualist's wording.
  *
  * LOG_TRANSACTION takes string extras amount, payee, account, category, notes, direction
- * (spend or inflow). GET_BALANCES takes an optional account. The outcome comes back as the
+ * (spend or inflow). GET_BALANCES takes an optional account. The other actions and their extras
+ * are documented on [AutomationActions]. The outcome comes back as the
  * result code, data and extras of an ordered broadcast, and, when reply_package is set, as an
  * ACTION_RESULT broadcast to that package.
  */
 class AutomationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
-        if (action != Automation.ACTION_LOG_TRANSACTION && action != Automation.ACTION_GET_BALANCES) return
+        if (action != Automation.ACTION_LOG_TRANSACTION && action != Automation.ACTION_GET_BALANCES && action !in AutomationActions.ACTIONS) return
         val pending = goAsync()
         val app = context.applicationContext
         val ordered = isOrderedBroadcast
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val container = (app as ActualistApplication).container
-                val result = if (action == Automation.ACTION_LOG_TRANSACTION) {
-                    Automation.logTransaction(app, container, requestFrom(intent))
-                } else {
-                    Automation.getBalances(app, container, text(intent, Automation.EXTRA_ACCOUNT))
+                val result = when (action) {
+                    Automation.ACTION_LOG_TRANSACTION -> Automation.logTransaction(app, container, requestFrom(intent))
+                    Automation.ACTION_GET_BALANCES -> Automation.getBalances(app, container, text(intent, Automation.EXTRA_ACCOUNT))
+                    else -> AutomationActions.perform(app, container, action.orEmpty(), allExtras(intent))
                 }
                 val extras = Bundle().apply {
                     putBoolean(Automation.EXTRA_OK, result.ok)
                     putString(Automation.EXTRA_MESSAGE, result.message)
                     putStringArray(Automation.EXTRA_BALANCES, result.balances.map { (name, minor) -> "$name=$minor" }.toTypedArray())
+                    result.values.forEach { (key, value) -> putString(key, value) }
+                    if (result.items.isNotEmpty()) putStringArray(AutomationActions.EXTRA_ITEMS, result.items.toTypedArray())
                 }
                 if (ordered) {
                     pending.resultCode = if (result.ok) Activity.RESULT_OK else Activity.RESULT_CANCELED
@@ -62,6 +65,17 @@ class AutomationReceiver : BroadcastReceiver() {
         notes = text(intent, Automation.EXTRA_NOTES),
         direction = text(intent, Automation.EXTRA_DIRECTION),
     )
+
+    /** Every extra as text, for the actions that take several. */
+    @Suppress("DEPRECATION")
+    private fun allExtras(intent: Intent): Map<String, String> {
+        val extras = intent.extras ?: return emptyMap()
+        val out = HashMap<String, String>()
+        for (key in extras.keySet()) {
+            extras.get(key)?.let { out[key] = it.toString() }
+        }
+        return out
+    }
 
     /** An extra as text, whatever type the sender used (Tasker often sends numbers). */
     @Suppress("DEPRECATION")
