@@ -40,6 +40,7 @@ Details: `KNOWN_DIVERGENCES.md`.
   - Third audit (screen by screen, about 92% fully at parity before it): local-network http with Actualist's warning, Save Connection and per-row headers, split lines with their own payee/notes/sign, category balances in the picker, row markers, Use bank balance, rule actions and conditions Actualist authors, rule delete confirmation and swipe, schedule ranges and one-time date match, payee batches, bank sync detail and status, View Contributing Transactions, pull to refresh on every main screen; the budget's currency and number format (Actual's defaultCurrencyCode, numberFormat, hideFraction) everywhere money is shown or typed; Actualist's Shortcuts operations as Android automation intents (12 writes, 9 reads).
   - Fourth and fifth audits (used Actualist's own tests as the checklist; estimated about 94% then about 97% fully at parity, about 99.5% counting partial): history and undo persisted across restarts (local-only table, same guards); locale-aware dates and month names; account close consequences; add transaction from Budget; categories on transfers across the budget boundary; split collapse; CSV counts; template preview detail; login error categories; schedule validation; redacted diagnostics with background history; credential recovery at launch and in Settings; Move Money slider; status-aware empty states; tracking wording; group expansion defaults and visibility guards; editor state across rotation; To Budget in the picker; History explanations; rollover through the current month plus 12; schedule availability labels; Account Order and Chart order in Settings.
   - Bugs the emulator found in this sweep: the add-transaction button covering the last budget row, text search without digits matched every transaction (a NUL pattern SQLite cut short on the device), a filter option row whose name did not toggle it, Delete pushed out of view in the saved-filters list, and history naming every budget assignment "Deleted category" (budget row ids were sliced wrongly).
+  - Actualist through `89a863e`: report filter rows show real inclusion, filters start from each report's defaults (Net Worth counts every account), Cash Flow's Include transfers filter, card details open with the card's own filters; Reports cards, the Explorer and its drilldown projected under Sample Values with Actualist's seeds and maxima (totals recomputed from the projected parts); an empty account selection lists no contributing transactions.
 - Reference pinned (Actualist `89a863e`, Actual `v26.10.0` `2bebdbaa`), public repo (experiment), Gradle 9.6.0 / AGP 9.4.1 / Kotlin 2.4.21, CI for JVM tests and an API 34 emulator.
 - Rule editor: pre/default/post stages, "add before/after notes" actions, "is not" on text, "is between" on amounts, plain date conditions (a day, month or year), on/off-budget accounts, tags, and inflow/outflow amounts (stored as Actual stores them; JVM round trips; device test for stages, notes actions and "is between").
 - Report Explorer over the ported query engine (date range, accounts, categories, transfers; totals, per-category, matching transactions). Its JVM test checks totals against ledger sums; its device steps (part of the reports test) passed on the emulator in https://github.com/sporez/actualist-android/actions/runs/38591078296.
@@ -62,9 +63,9 @@ Details: `KNOWN_DIVERGENCES.md`.
 ## Latest CI
 
 - The repository is public (still an experiment, see the README), so Actions minutes are no longer billed; the billing block of 2026-10-15 is gone.
-- Build and unit test: green on `2de1885` (the last core/app change), https://github.com/sporez/actualist-android/actions/runs/38918798823 — 3,265 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in their own workflow).
-- Real Actual server: green on `2de1885`, https://github.com/sporez/actualist-android/actions/runs/38918799091 — 4/4.
-- Emulator (API 34): 131/131 on `2de1885`, https://github.com/sporez/actualist-android/actions/runs/38919207708; process-death relaunch reopened the selected budget. The Report Explorer class with the new transfers-switch step: 2/2, https://github.com/sporez/actualist-android/actions/runs/38922035373.
+- Build and unit test: green on `90f3341`, https://github.com/sporez/actualist-android/actions/runs/38926904919 — 3,274 JVM tests on the last core change (`0f0bc5c`, https://github.com/sporez/actualist-android/actions/runs/38923404033), 0 failures; 4 skipped by design (the real-server tests, which run in their own workflow).
+- Real Actual server: green on `0f0bc5c`, https://github.com/sporez/actualist-android/actions/runs/38923403943 — 4/4.
+- Emulator (API 34): 132/132 on `90f3341`, https://github.com/sporez/actualist-android/actions/runs/38927653366; process-death relaunch reopened the selected budget. The round before it (131/132 on `0f0bc5c`) failed only the new Sample Values test, which looked for an amount merged into its card; it now scrolls to the card by key.
 
 Parity: six audits against Actualist's source and its own tests; the last estimates about 99% of user-visible features matching, with the copy-level remainder since implemented.
 
@@ -77,6 +78,5 @@ Parity: six audits against Actualist's source and its own tests; the last estima
 
 ## Next recommended work
 
-1. Reports and widgets are not projected under Sample Values (Actualist projects reports; its widgets have none).
-2. Split actions in the rule editor (`set-split-amount`), beyond Actualist (it cannot author them either).
+1. Split actions in the rule editor (`set-split-amount`), beyond Actualist (it cannot author them either).
 
