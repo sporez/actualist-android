@@ -16,6 +16,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,6 +28,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.sporez.actualist.android.ui.Loadable
 import com.sporez.actualist.android.ui.components.LoadingBox
+import com.sporez.actualist.android.ui.components.LocalSampleValues
+import com.sporez.actualist.android.ui.components.LocalValuesProjected
 import com.sporez.actualist.android.ui.components.MoneyText
 import com.sporez.actualist.core.reports.DrilldownGroup
 import com.sporez.actualist.core.reports.DrilldownKind
@@ -35,6 +38,7 @@ import com.sporez.actualist.core.reports.DrilldownRole
 import com.sporez.actualist.core.reports.DrilldownRow
 import com.sporez.actualist.core.reports.ExplorerFilter
 import com.sporez.actualist.core.reports.ReportDrilldown
+import com.sporez.actualist.core.reports.ReportSampleValues
 import com.sporez.actualist.core.reports.ReportSeries
 import com.sporez.actualist.core.reports.ReportTransferFilter
 import com.sporez.actualist.core.store.BudgetSession
@@ -122,15 +126,29 @@ fun DrilldownScreen(
             Text(current.message)
             TextButton(onClick = { state = Loadable.Loading; attempt += 1 }, modifier = Modifier.testTag("drilldown-retry")) { Text("Retry") }
         }
-        is Loadable.Ready -> DrilldownList(current.value, onOpenTransaction)
+        is Loadable.Ready -> {
+            val sample = LocalSampleValues.current
+            // Projected to sample values as a whole, so money() must not hash the amounts again.
+            CompositionLocalProvider(LocalValuesProjected provides sample) {
+                DrilldownList(if (sample) current.value.projected() else current.value, sample, onOpenTransaction)
+            }
+        }
     }
 }
+
+/** Actualist's sample names for the accounts; categories are seeded per row, see [DrilldownRowItem]. */
+private fun DrilldownData.projected() = DrilldownData(
+    ReportSampleValues.project(result),
+    names.mapValues { (id, name) -> if (id in result.accountIds()) ReportSampleValues.accountName(id) else name },
+)
+
+private fun DrilldownResult.accountIds(): Set<String> = groups.flatMap { group -> group.rows.map { it.transaction.accountId } }.toSet()
 
 private fun dayTitle(date: String): String =
     runCatching { LocalDate.parse(date).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)) }.getOrDefault(date)
 
 @Composable
-private fun DrilldownList(data: DrilldownData, onOpenTransaction: (String) -> Unit) {
+private fun DrilldownList(data: DrilldownData, sample: Boolean, onOpenTransaction: (String) -> Unit) {
     val count = data.result.countedCount
     LazyColumn(Modifier.fillMaxSize().testTag("drilldown-screen")) {
         item {
@@ -146,7 +164,7 @@ private fun DrilldownList(data: DrilldownData, onOpenTransaction: (String) -> Un
         }
         for (group in data.result.groups) {
             item(key = "day-${group.date}") { DayHeader(group) }
-            items(group.rows, key = { "row-${it.id}" }) { row -> DrilldownRowItem(row, data.names, onOpenTransaction) }
+            items(group.rows, key = { "row-${it.id}" }) { row -> DrilldownRowItem(row, data.names, sample, onOpenTransaction) }
         }
         item { Row(Modifier.padding(bottom = 28.dp)) {} }
     }
@@ -163,7 +181,7 @@ private fun DayHeader(group: DrilldownGroup) {
 }
 
 @Composable
-private fun DrilldownRowItem(row: DrilldownRow, names: Map<String, String>, onOpenTransaction: (String) -> Unit) {
+private fun DrilldownRowItem(row: DrilldownRow, names: Map<String, String>, sample: Boolean, onOpenTransaction: (String) -> Unit) {
     val transaction = row.transaction
     val target = transaction.parentId ?: transaction.id
     val counted = row.role == DrilldownRole.COUNTED
@@ -195,7 +213,7 @@ private fun DrilldownRowItem(row: DrilldownRow, names: Map<String, String>, onOp
         Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(transaction.payeeName ?: transaction.importedPayee ?: "No payee", maxLines = 1)
-                val category = transaction.categoryId?.let { names[it] } ?: if (row.kind == DrilldownKind.SPLIT_PARENT) "Split" else "Uncategorized"
+                val category = transaction.categoryId?.let { if (sample) ReportSampleValues.categoryName(transaction) else names[it] } ?: if (row.kind == DrilldownKind.SPLIT_PARENT) "Split" else "Uncategorized"
                 Text(
                     "${names[transaction.accountId] ?: "Unknown Account"} · $category",
                     style = MaterialTheme.typography.bodySmall,

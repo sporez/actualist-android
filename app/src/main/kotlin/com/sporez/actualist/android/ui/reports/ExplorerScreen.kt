@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +53,8 @@ import androidx.lifecycle.ViewModel
 import com.sporez.actualist.android.ui.Loadable
 import com.sporez.actualist.android.ui.components.ErrorBanner
 import com.sporez.actualist.android.ui.components.LoadingBox
+import com.sporez.actualist.android.ui.components.LocalSampleValues
+import com.sporez.actualist.android.ui.components.LocalValuesProjected
 import com.sporez.actualist.android.ui.components.MoneyText
 import com.sporez.actualist.android.ui.components.SectionCard
 import com.sporez.actualist.android.ui.reloading
@@ -61,6 +64,7 @@ import com.sporez.actualist.core.reports.ExplorerPaging
 import com.sporez.actualist.core.reports.ExplorerPreset
 import com.sporez.actualist.core.reports.ExplorerResult
 import com.sporez.actualist.core.reports.RangePreset
+import com.sporez.actualist.core.reports.ReportSampleValues
 import com.sporez.actualist.core.reports.ReportExplorer
 import com.sporez.actualist.core.reports.ReportInterval
 import com.sporez.actualist.core.reports.ReportMetric
@@ -222,11 +226,14 @@ fun ExplorerScreen(
     var pickingDate by remember { mutableStateOf<String?>(null) }
     // Rows shown so far; a new query or category focus starts again at the first page.
     var shown by remember(query, focusCategory) { mutableStateOf(ExplorerPaging.PAGE_SIZE) }
+    val sample = LocalSampleValues.current
+    // Projected to sample values as a whole (totals add up), so money() must not hash them again.
+    CompositionLocalProvider(LocalValuesProjected provides sample) {
     when (val current = state) {
         Loadable.Loading -> LoadingBox()
         is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
         is Loadable.Ready -> {
-            val explorer = current.value
+            val explorer = if (sample) current.value.projected() else current.value
             val names = (explorer.catalog.accounts.map { it.id to it.name } + explorer.catalog.categories.map { it.id to it.name }).toMap()
             val rows = explorer.result.rows.filter { focusCategory == null || it.categoryId == focusCategory }
             LazyColumn(Modifier.fillMaxSize().testTag("explorer-screen"), contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -413,7 +420,15 @@ fun ExplorerScreen(
             }
         }
     }
+    }
 }
+
+/** The explorer as Actualist shows it under Sample Values; see [ReportSampleValues]. */
+private fun ExplorerState.projected() = copy(
+    snapshot = snapshot?.let { ReportSampleValues.project(it) },
+    catalog = ReportSampleValues.project(catalog),
+    result = ReportSampleValues.project(result),
+)
 
 @Composable
 private fun TotalRow(label: String, value: Long) {

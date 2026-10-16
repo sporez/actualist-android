@@ -22,6 +22,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,8 @@ import com.sporez.actualist.android.ui.Loadable
 import com.sporez.actualist.android.ui.budget.monthTitle
 import com.sporez.actualist.android.ui.components.ErrorBanner
 import com.sporez.actualist.android.ui.components.LoadingBox
+import com.sporez.actualist.android.ui.components.LocalSampleValues
+import com.sporez.actualist.android.ui.components.LocalValuesProjected
 import com.sporez.actualist.android.ui.components.MessageBox
 import com.sporez.actualist.android.ui.components.MoneyText
 import com.sporez.actualist.android.ui.components.SectionCard
@@ -52,6 +55,7 @@ import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.reports.MonthComparisonReport
 import com.sporez.actualist.core.reports.ReportCardOrder
 import com.sporez.actualist.core.reports.ReportCardReads
+import com.sporez.actualist.core.reports.ReportSampleValues
 import com.sporez.actualist.core.reports.ReportTransferFilter
 import com.sporez.actualist.core.reports.ReportsDashboard
 import com.sporez.actualist.core.reports.ThreeMonthAverageReport
@@ -105,10 +109,23 @@ fun ReportsScreen(
     onRefresh: suspend () -> Unit = {},
     onOpenCategory: (String, String) -> Unit = { _, _ -> },
 ) {
+    val sample = LocalSampleValues.current
     val state by viewModel.dashboard.collectAsState()
     val month by viewModel.month.collectAsState()
     val cardsState by viewModel.cards.collectAsState()
-    val cards = (cardsState as? Loadable.Ready)?.value
+    // Projected to sample values as a whole (totals add up), so money() must not hash them again.
+    val cards = (cardsState as? Loadable.Ready)?.value?.let { real ->
+        if (sample) {
+            ReportCards(
+                ReportSampleValues.project(real.comparison),
+                ReportSampleValues.project(real.average),
+                ReportSampleValues.project(real.calendar),
+                real.calendarTransfers,
+            )
+        } else {
+            real
+        }
+    }
     val calendarTransfers = cards?.calendarTransfers ?: ReportTransferFilter.ALL
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val orderStore = remember { ReportOrderStore(context) }
@@ -128,13 +145,14 @@ fun ReportsScreen(
             onDismiss = { editingOrder = false },
         )
     }
+    CompositionLocalProvider(LocalValuesProjected provides sample) {
     com.sporez.actualist.android.ui.components.ScreenPullToRefresh("reports-refresh", onRefresh) {
     Box(Modifier.fillMaxSize().testTag("reports-screen")) {
         when (val current = state) {
             Loadable.Loading -> LoadingBox()
             is Loadable.Failed -> ErrorBanner(current.message, Modifier.padding(16.dp))
             is Loadable.Ready -> {
-                val dashboard = current.value
+                val dashboard = if (sample) ReportSampleValues.project(current.value) else current.value
                 if (!dashboard.hasData) {
                     MessageBox("No report data yet", "Reports fill in once the budget has transactions.")
                 } else {
@@ -171,6 +189,7 @@ fun ReportsScreen(
                 }
             }
         }
+    }
     }
     }
 }
