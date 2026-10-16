@@ -107,6 +107,15 @@ class ReportExplorerFlowTest {
         compose.waitForGone("explorer-filter-sheet")
         compose.waitOrCapture("filters-cleared") { compose.onAllNodes(hasText("Filters (1)")).fetchSemanticsNodes().isEmpty() }
         compose.waitForTag("explorer-totals")
+
+        // Cash Flow's Include transfers switch counts as a filter too.
+        click("explorer-filters")
+        compose.waitForTag("explorer-filter-sheet")
+        click("explorer-filter-transfers")
+        click("filter-apply")
+        compose.waitForGone("explorer-filter-sheet")
+        compose.waitOrCapture("transfers-count") { compose.onAllNodes(hasText("Filters (1)")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitForTag("explorer-totals")
     }
 
     private fun orderedTags(vararg tags: String): List<String> =
