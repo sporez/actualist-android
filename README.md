@@ -8,6 +8,10 @@ Compose, Material 3 and SQLite.
 has no production signing, and must not be pointed at a real budget. All tests and
 the bundled demo budget use synthetic data only.
 
+Debug-signed experimental builds, built and tested by CI, are attached to
+[GitHub pre-releases](https://github.com/sporez/actualist-android/releases) for trying
+the app with the demo budget. The same warnings apply.
+
 ## Layout
 
 | Module | Contents |

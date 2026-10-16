@@ -63,6 +63,7 @@ Details: `KNOWN_DIVERGENCES.md`.
 ## Latest CI
 
 - The repository is public (still an experiment, see the README), so Actions minutes are no longer billed; the billing block of 2026-10-15 is gone.
+- Pre-release `v0.1.0-experimental` (debug-signed APK from build run 38929686886 at `73059a3`, SHA-256 `15318ae7…0f9`): https://github.com/sporez/actualist-android/releases/tag/v0.1.0-experimental
 - Build and unit test: green on `90f3341`, https://github.com/sporez/actualist-android/actions/runs/38926904919 — 3,274 JVM tests on the last core change (`0f0bc5c`, https://github.com/sporez/actualist-android/actions/runs/38923404033), 0 failures; 4 skipped by design (the real-server tests, which run in their own workflow).
 - Real Actual server: green on `0f0bc5c`, https://github.com/sporez/actualist-android/actions/runs/38923403943 — 4/4.
 - Emulator (API 34): 132/132 on `90f3341`, https://github.com/sporez/actualist-android/actions/runs/38927653366; process-death relaunch reopened the selected budget. The round before it (131/132 on `0f0bc5c`) failed only the new Sample Values test, which looked for an amount merged into its card; it now scrolls to the card by key.
