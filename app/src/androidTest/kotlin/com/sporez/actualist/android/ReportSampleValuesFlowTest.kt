@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sporez.actualist.android.data.Settings
@@ -42,7 +43,8 @@ class ReportSampleValuesFlowTest {
             compose.waitForTag("to-budget-banner")
             compose.onNodeWithTag("tab-reports").performClick()
             compose.waitForTag("reports-list")
-            compose.onNodeWithTag("reports-list").performScrollToNode(hasTestTag("cash-flow-income"))
+            // The amount is merged into its clickable card, so scroll to the card's item and read the unmerged tree.
+            compose.onNodeWithTag("reports-list").performScrollToKey("cash-flow")
             compose.waitOrCapture("real-income") { text("cash-flow-income") != null }
             val realIncome = text("cash-flow-income")
 
