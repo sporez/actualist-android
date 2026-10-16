@@ -61,10 +61,10 @@ Details: `KNOWN_DIVERGENCES.md`.
 
 ## Latest CI
 
-- Build and unit test: green on `8f11586` (the last code change), https://github.com/sporez/actualist-android/actions/runs/38719467754 — 3,248 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in their own workflow).
-- Real Actual server: green, https://github.com/sporez/actualist-android/actions/runs/38690838828 — 4/4.
-- Emulator (API 34): https://github.com/sporez/actualist-android/actions/runs/38717929707 — 128/129 on `9c823fb`; process-death relaunch reopened the selected budget. The one failure was test-side (a lower row in the longer grouped category picker); its fix (`0903929`) and the sixth audit's copy-level changes (`8f11586`) have not run on the emulator yet.
-- **Blocked:** since `0903929`, GitHub Actions refuses to start jobs ("recent account payments have failed or your spending limit needs to be increased"). Builds and emulator rounds resume once the account's billing or spending limit is fixed.
+- The repository is public (still an experiment, see the README), so Actions minutes are no longer billed; the billing block of 2026-10-15 is gone.
+- Build and unit test: green on `2de1885` (the last core/app change), https://github.com/sporez/actualist-android/actions/runs/38918798823 — 3,265 JVM tests, 0 failures; 4 skipped by design (the real-server tests, which run in their own workflow).
+- Real Actual server: green on `2de1885`, https://github.com/sporez/actualist-android/actions/runs/38918799091 — 4/4.
+- Emulator (API 34): 131/131 on `2de1885`, https://github.com/sporez/actualist-android/actions/runs/38919207708; process-death relaunch reopened the selected budget. The Report Explorer class with the new transfers-switch step: 2/2, https://github.com/sporez/actualist-android/actions/runs/38922035373.
 
 Parity: six audits against Actualist's source and its own tests; the last estimates about 99% of user-visible features matching, with the copy-level remainder since implemented.
 
