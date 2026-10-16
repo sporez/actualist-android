@@ -7,9 +7,10 @@ behavior is reproducible.
 |---|---|
 | Repository | https://github.com/sporez/actualist |
 | Branch | `actualist-dev` |
-| Commit | `61987e5b727a8775df9da63b3fcc3a03833f2652` |
-| Commit date | 2026-10-13 12:33:28 -0400 |
-| Commit subject | docs(architecture): sync skill with AGENTS and code |
+| Commit | `89a863e706cd50722d9a2086be8598ab94504a40` |
+| Commit date | 2026-10-15 05:19:38 -0400 |
+| Commit subject | test: remove unused helpers and unloaded Portability fixtures |
+| Previous pin | `61987e5` (2026-10-13). Ported since: report filter inclusion, per-report filter defaults (Net Worth counts every account), the cash-flow transfers filter, and card details that open with the card's own filters (`0245d69d`, `fc573326`). Not applicable: Shortcuts logging while locked (`da13cc01`; Android automation is opt-in and already runs on a locked phone) and the Siri phrase (`67ef21b8`). |
 | Parity oracle | Actual `v26.10.0` (`2bebdbaae0b701120a8cad9d56aafd64fa04c577`), pinned by Actualist's `config/parity/oracle-pin.json` |
 
 The reference was read from a fresh read-only clone. No local Actualist checkout

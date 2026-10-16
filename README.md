@@ -4,7 +4,7 @@ An experimental native Android port of [Actualist](https://github.com/sporez/act
 a local-first client for [Actual Budget](https://actualbudget.org). Kotlin, Jetpack
 Compose, Material 3 and SQLite.
 
-**This is a personal engineering experiment, not a release.** It is not published,
+**This is a personal engineering experiment, not a release.** It is not published to any app store,
 has no production signing, and must not be pointed at a real budget. All tests and
 the bundled demo budget use synthetic data only.
 
