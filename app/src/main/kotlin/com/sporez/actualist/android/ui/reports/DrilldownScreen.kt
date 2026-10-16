@@ -46,6 +46,9 @@ import java.time.format.FormatStyle
 /** The route pattern for [DrilldownScreen]; register it with these six string arguments (all default to empty). */
 const val DRILLDOWN_ROUTE_PATTERN = "drilldown?start={start}&end={end}&accounts={accounts}&categories={categories}&title={title}&transfers={transfers}"
 
+/** The `accounts` argument for an empty account selection ("None"); an empty argument means every account. */
+private const val NO_ACCOUNTS = "none"
+
 /** The navigation route that opens [DrilldownScreen] for a report range and filters. */
 fun drilldownRoute(
     start: LocalDate,
@@ -56,7 +59,7 @@ fun drilldownRoute(
     transfers: ReportTransferFilter = ReportTransferFilter.NON_TRANSFERS,
 ): String =
     "drilldown?start=$start&end=$end" +
-        "&accounts=${Uri.encode(accountIds.orEmpty().joinToString(","))}" +
+        "&accounts=${Uri.encode(if (accountIds?.isEmpty() == true) NO_ACCOUNTS else accountIds.orEmpty().joinToString(","))}" +
         "&categories=${Uri.encode(categoryIds.orEmpty().joinToString(","))}" +
         "&title=${Uri.encode(title)}" +
         "&transfers=${transfers.name}"
@@ -94,7 +97,7 @@ fun DrilldownScreen(
             val filter = ExplorerFilter(
                 start = LocalDate.parse(start),
                 end = LocalDate.parse(end),
-                accountIds = accounts.split(',').filter { it.isNotBlank() }.toSet().takeIf { it.isNotEmpty() },
+                accountIds = if (accounts == NO_ACCOUNTS) emptySet() else accounts.split(',').filter { it.isNotBlank() }.toSet().takeIf { it.isNotEmpty() },
                 categoryIds = categories.split(',').filter { it.isNotBlank() }.toSet().takeIf { it.isNotEmpty() },
                 transfers = ReportTransferFilter.entries.firstOrNull { it.name == transfers } ?: ReportTransferFilter.NON_TRANSFERS,
             )

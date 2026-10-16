@@ -1,8 +1,13 @@
 package com.sporez.actualist.core.reports
 
+import com.sporez.actualist.core.TestClock
+import com.sporez.actualist.core.TestDatabases
+import com.sporez.actualist.core.demo.DemoBudget
 import com.sporez.actualist.core.query.QueryTransaction
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 
 class ReportDrilldownTest {
     private fun tx(id: String, date: String, amount: Long, parent: Boolean = false, child: Boolean = false, children: List<QueryTransaction> = emptyList()) =
@@ -36,5 +41,17 @@ class ReportDrilldownTest {
         val parent = tx("p", "2026-03-02", -300, parent = true, children = listOf(child))
         val result = ReportDrilldownProjection.project(listOf(parent, child), setOf("c1"))
         assertEquals(2, result.groups.single().rows.size)
+    }
+
+    @Test
+    fun noAccountsListsNothingAndNullListsEveryAccount() {
+        DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, LocalDate.of(2026, 10, 15), TestClock()).use { db ->
+            val drilldown = ReportDrilldown(db)
+            val start = LocalDate.of(2026, 9, 1)
+            val end = LocalDate.of(2026, 10, 31)
+            assertTrue(drilldown.load(ExplorerFilter(start, end)).countedCount > 0)
+            assertEquals(0, drilldown.load(ExplorerFilter(start, end, accountIds = emptySet())).countedCount)
+            assertTrue(drilldown.load(ExplorerFilter(start, end, accountIds = emptySet())).groups.isEmpty())
+        }
     }
 }

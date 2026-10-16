@@ -52,6 +52,8 @@ object ReportDrilldownProjection {
 /** The transactions behind a report range, run through the same query as [ReportExplorer]. */
 class ReportDrilldown(private val database: BudgetDatabase) {
     fun load(filter: ExplorerFilter): DrilldownResult {
+        // An empty account set is "None" in the filter sheet: nothing is counted, so nothing is listed.
+        if (filter.accountIds?.isEmpty() == true) return DrilldownResult(emptyList(), 0)
         val conditions = buildList {
             add(QueryCondition.Date(QueryDateCondition(QueryDateOperation.IS_ON_OR_AFTER, QueryDay.of(filter.start.toString())!!)))
             add(QueryCondition.Date(QueryDateCondition(QueryDateOperation.IS_ON_OR_BEFORE, QueryDay.of(filter.end.toString())!!)))
