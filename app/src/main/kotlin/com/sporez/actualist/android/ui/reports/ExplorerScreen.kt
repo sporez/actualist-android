@@ -64,9 +64,11 @@ import com.sporez.actualist.core.reports.RangePreset
 import com.sporez.actualist.core.reports.ReportExplorer
 import com.sporez.actualist.core.reports.ReportInterval
 import com.sporez.actualist.core.reports.ReportMetric
+import com.sporez.actualist.core.reports.ReportTransferFilter
 import com.sporez.actualist.core.reports.ReportSeries
 import com.sporez.actualist.core.reports.ReportSeriesException
 import com.sporez.actualist.core.reports.SeriesCatalog
+import com.sporez.actualist.core.reports.SeriesFilterDraft
 import com.sporez.actualist.core.reports.SeriesFilters
 import com.sporez.actualist.core.reports.SeriesPoint
 import com.sporez.actualist.core.reports.SeriesQuery
@@ -86,6 +88,8 @@ data class ExplorerState(
     val catalog: SeriesCatalog,
     /** Matching transactions for the same range and filters, grouped by category. */
     val result: ExplorerResult,
+    /** The accounts the report counts: the selection narrowed to on-budget ones unless off-budget is included. */
+    val accountIds: Set<String>,
 )
 
 /**
@@ -97,32 +101,50 @@ class ExplorerViewModel(
     private val today: LocalDate = LocalDate.now(),
     /** The report, range and interval a tapped Reports card opens with; null opens Cash Flow for the month to date. */
     preset: ExplorerPreset? = null,
+    /** The filters the opening card's numbers use (`ReportExplorerPresets.defaultFilters`); null uses the report's own. */
+    defaultFilters: SeriesFilters? = null,
 ) : ViewModel() {
     private val initialPreset = preset?.range ?: RangePreset.MONTH_TO_DATE
     private val initialRange = initialPreset.range(today)!!
+    private val initialMetric = preset?.metric ?: ReportMetric.CASH_FLOW
+    private val cardDefaults = defaultFilters ?: SeriesFilters.defaults(initialMetric)
     private val _query = MutableStateFlow(
-        SeriesQuery(preset?.metric ?: ReportMetric.CASH_FLOW, initialRange.first, initialRange.second, preset?.interval ?: ReportInterval.MONTH),
+        SeriesQuery(initialMetric, initialRange.first, initialRange.second, preset?.interval ?: ReportInterval.MONTH, cardDefaults),
     )
     val query: StateFlow<SeriesQuery> = _query
     private val _preset = MutableStateFlow(initialPreset)
     val preset: StateFlow<RangePreset> = _preset
+
+    /** What Reset Filters and the filter count compare against: the opening card's filters for its own report, the report's defaults otherwise. */
+    val defaultFilters: SeriesFilters get() = defaultsFor(_query.value.metric)
+
+    private fun defaultsFor(metric: ReportMetric): SeriesFilters =
+        if (metric == initialMetric) cardDefaults else SeriesFilters.defaults(metric)
 
     val state = reloading(session, _query) { q ->
         val catalog = ReportSeries(database).catalog()
         val snapshot = try {
             ReportSeries(database).snapshot(q)
         } catch (failure: ReportSeriesException) {
-            return@reloading ExplorerState(null, failure.message, catalog, emptyExplorerResult())
+            return@reloading ExplorerState(null, failure.message, catalog, emptyExplorerResult(), emptySet())
         }
-        val result = ReportExplorer(database).explore(
-            ExplorerFilter(
-                start = q.start,
-                end = q.end,
-                accountIds = q.filters.accounts?.takeIf { it.isNotEmpty() },
-                categoryIds = q.filters.categories?.takeIf { it.isNotEmpty() },
-            ),
-        )
-        ExplorerState(snapshot, null, catalog, result)
+        val eligible = catalog.accounts.filter { q.filters.includeOffBudget || !it.isOffBudget }.map { it.id }.toSet()
+        val accountIds = q.filters.accounts?.let { it.intersect(eligible) } ?: eligible
+        // No counted account means nothing to list; an empty set would otherwise read as every account.
+        val result = if (accountIds.isEmpty()) {
+            emptyExplorerResult()
+        } else {
+            ReportExplorer(database).explore(
+                ExplorerFilter(
+                    start = q.start,
+                    end = q.end,
+                    accountIds = accountIds,
+                    categoryIds = q.filters.categories?.takeIf { it.isNotEmpty() },
+                    transfers = q.explorerTransfers,
+                ),
+            )
+        }
+        ExplorerState(snapshot, null, catalog, result, accountIds)
     }
 
     /** Actualist opens each report with its own default range and interval. */
@@ -133,7 +155,9 @@ class ExplorerViewModel(
         val interval = if (metric == ReportMetric.NET_WORTH || metric == ReportMetric.CASH_FLOW) ReportInterval.MONTH else ReportInterval.DAY
         val range = preset.range(today)!!
         _preset.value = preset
-        _query.value = SeriesQuery(metric, range.first, range.second, interval, current.filters.normalized(metric))
+        // Filters still at the old report's defaults move to the new report's; edited ones carry over.
+        val filters = if (current.filters == defaultsFor(current.metric)) defaultsFor(metric) else current.filters
+        _query.value = SeriesQuery(metric, range.first, range.second, interval, filters.normalized(metric))
     }
 
     fun selectInterval(interval: ReportInterval) {
@@ -172,6 +196,10 @@ class ExplorerViewModel(
 }
 
 private fun emptyExplorerResult() = ExplorerResult(0L, 0L, emptyList(), emptyList())
+
+/** Only Cash Flow has a transfers filter; the other reports leave transfers out, as Actualist does. */
+private val SeriesQuery.explorerTransfers: ReportTransferFilter
+    get() = if (metric.supportsTransferFilter) filters.transfers else ReportTransferFilter.NON_TRANSFERS
 
 private class ChartSeries(val color: Color, val value: (SeriesPoint) -> Long)
 
@@ -226,7 +254,7 @@ fun ExplorerScreen(
                         }
                         Text("", Modifier.weight(1f))
                         OutlinedButton(onClick = { filtering = true }, modifier = Modifier.testTag("explorer-filters")) {
-                            val count = query.filters.activeCount(query.metric)
+                            val count = query.filters.activeCount(query.metric, viewModel.defaultFilters)
                             Text(if (count > 0) "Filters ($count)" else "Filters")
                         }
                     }
@@ -288,7 +316,7 @@ fun ExplorerScreen(
                 item {
                     // As Actualist: the transactions behind these totals, grouped and labelled.
                     ViewContributingTransactionsButton(onClick = {
-                        onViewTransactions(drilldownRoute(query.start, query.end, query.filters.accounts, query.filters.categories, "Transactions"))
+                        onViewTransactions(drilldownRoute(query.start, query.end, explorer.accountIds, query.filters.categories, "Transactions", query.explorerTransfers))
                     })
                 }
                 item {
@@ -357,6 +385,7 @@ fun ExplorerScreen(
                     metric = query.metric,
                     catalog = explorer.catalog,
                     initial = query.filters,
+                    defaults = viewModel.defaultFilters,
                     onApply = { viewModel.applyFilters(it); filtering = false },
                     onDismiss = { filtering = false },
                 )
@@ -516,58 +545,60 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSeriesBars(poin
     }
 }
 
-/** Actualist's filter sheet: off-budget, hidden and uncategorized switches, account and category lists. */
+/** Actualist's filter sheet: off-budget, hidden, uncategorized and transfer switches, account and category lists. */
 @Composable
 private fun FilterSheet(
     metric: ReportMetric,
     catalog: SeriesCatalog,
     initial: SeriesFilters,
+    defaults: SeriesFilters,
     onApply: (SeriesFilters) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var draft by remember { mutableStateOf(initial) }
-    val accountIds = catalog.accounts.map { it.id }.toSet()
     val categories = catalog.categories(metric)
-    val categoryIds = categories.map { it.id }.toSet()
+    var draft by remember { mutableStateOf(SeriesFilterDraft(initial, defaults, catalog.accounts, categories)) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         LazyColumn(Modifier.fillMaxWidth().testTag("explorer-filter-sheet"), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Filters", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                    TextButton(onClick = { draft = SeriesFilters() }, modifier = Modifier.testTag("filter-reset")) { Text("Reset Filters") }
-                    Button(onClick = { onApply(draft) }, modifier = Modifier.testTag("filter-apply")) { Text("Apply") }
+                    TextButton(onClick = { draft = draft.reset() }, modifier = Modifier.testTag("filter-reset")) { Text("Reset Filters") }
+                    Button(onClick = { onApply(draft.filters) }, modifier = Modifier.testTag("filter-apply")) { Text("Apply") }
                 }
             }
-            item { SwitchRow("Include off-budget accounts", draft.includeOffBudget, "filter-off-budget") { draft = draft.copy(includeOffBudget = it) } }
+            item { SwitchRow("Include off-budget accounts", draft.filters.includeOffBudget, "filter-off-budget") { draft = draft.withIncludesOffBudget(it) } }
             if (metric.supportsCategoryFilters) {
-                item { SwitchRow("Include hidden categories", draft.includeHiddenCategories, "filter-hidden") { draft = draft.copy(includeHiddenCategories = it) } }
-                item { SwitchRow("Include uncategorized", draft.includeUncategorized, "filter-uncategorized") { draft = draft.copy(includeUncategorized = it) } }
+                item { SwitchRow("Include hidden categories", draft.filters.includeHiddenCategories, "filter-hidden") { draft = draft.withIncludesHiddenCategories(it) } }
+                item { SwitchRow("Include uncategorized", draft.filters.includeUncategorized, "filter-uncategorized") { draft = draft.withIncludesUncategorized(it) } }
+            }
+            if (metric.supportsTransferFilter) {
+                item { SwitchRow("Include transfers", draft.includesTransfers, "explorer-filter-transfers") { draft = draft.withIncludesTransfers(it) } }
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Accounts", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { draft = draft.copy(accounts = null) }, modifier = Modifier.testTag("filter-accounts-all")) { Text("All") }
+                    TextButton(onClick = { draft = draft.selectAllAccounts() }, modifier = Modifier.testTag("filter-accounts-all")) { Text("All") }
                     TextButton(onClick = { draft = draft.clearAccounts() }, modifier = Modifier.testTag("filter-accounts-none")) { Text("None") }
                 }
             }
             items(catalog.accounts, key = { "account-${it.id}" }) { account ->
                 val subtitle = listOfNotNull(if (account.isOffBudget) "Off budget" else null, if (account.isClosed) "Closed" else null).joinToString(" · ")
-                CheckRow(account.name, subtitle, draft.isAccountSelected(account.id), "filter-account-${account.id}") {
-                    draft = draft.withAccount(account.id, it, accountIds)
+                CheckRow(account.name, subtitle, draft.isAccountIncluded(account.id), "filter-account-${account.id}") {
+                    draft = draft.withAccount(account.id, it)
                 }
             }
             if (metric.supportsCategoryFilters) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Categories", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = { draft = draft.copy(categories = null) }, modifier = Modifier.testTag("filter-categories-all")) { Text("All") }
+                        TextButton(onClick = { draft = draft.selectAllCategories() }, modifier = Modifier.testTag("filter-categories-all")) { Text("All") }
                         TextButton(onClick = { draft = draft.clearCategories() }, modifier = Modifier.testTag("filter-categories-none")) { Text("None") }
                     }
                 }
                 items(categories, key = { "category-${it.id}" }) { category ->
                     val subtitle = listOfNotNull(category.groupName, if (category.isHidden) "Hidden" else null).joinToString(" · ")
-                    CheckRow(category.name, subtitle, draft.isCategorySelected(category.id), "filter-category-${category.id}") {
-                        draft = draft.withCategory(category.id, it, categoryIds)
+                    CheckRow(category.name, subtitle, draft.isCategoryIncluded(category.id), "filter-category-${category.id}") {
+                        draft = draft.withCategory(category.id, it)
                     }
                 }
             }

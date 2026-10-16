@@ -17,7 +17,7 @@ data class ExplorerFilter(
     val accountIds: Set<String>? = null,
     /** Null means every category; an empty set is never sent. */
     val categoryIds: Set<String>? = null,
-    val includeTransfers: Boolean = false,
+    val transfers: ReportTransferFilter = ReportTransferFilter.NON_TRANSFERS,
 )
 
 data class ExplorerCategoryTotal(val categoryId: String?, val total: Long, val count: Int)
@@ -44,7 +44,11 @@ class ReportExplorer(private val database: BudgetDatabase) {
             add(QueryCondition.Date(QueryDateCondition(QueryDateOperation.IS_ON_OR_BEFORE, QueryDay.of(filter.end.toString())!!)))
             filter.accountIds?.takeIf { it.isNotEmpty() }?.let { add(QueryCondition.Account(QueryIdCondition.oneOf(it.toList()))) }
             filter.categoryIds?.takeIf { it.isNotEmpty() }?.let { add(QueryCondition.Category(QueryIdCondition.oneOf(it.toList()))) }
-            if (!filter.includeTransfers) add(QueryCondition.Transfer(false))
+            when (filter.transfers) {
+                ReportTransferFilter.ALL -> Unit
+                ReportTransferFilter.TRANSFERS -> add(QueryCondition.Transfer(true))
+                ReportTransferFilter.NON_TRANSFERS -> add(QueryCondition.Transfer(false))
+            }
         }
         val page = TransactionQueries(database).query(conditions = conditions)
         val rows = page.contributingTransactions.filter { !it.isParent && it.amount != null }.sortedByDescending { it.date }

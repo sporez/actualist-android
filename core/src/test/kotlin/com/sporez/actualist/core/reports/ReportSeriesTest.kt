@@ -6,10 +6,12 @@ import com.sporez.actualist.core.db.BudgetDatabase
 import com.sporez.actualist.core.demo.DemoBudget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import java.time.YearMonth
 
 class ReportSeriesTest {
     private val sep1 = LocalDate.of(2026, 9, 1)
@@ -20,6 +22,19 @@ class ReportSeriesTest {
         "AND (a.tombstone IS NULL OR a.tombstone = 0)"
     private val onBudget = "AND COALESCE(a.offbudget, 0) = 0"
     private val notIncome = "AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.id = t.category AND c.is_income = 1)"
+
+    private val accountOptions = listOf(
+        SeriesAccountOption("checking", "Checking", isOffBudget = false, isClosed = false),
+        SeriesAccountOption("savings", "Savings", isOffBudget = false, isClosed = false),
+        SeriesAccountOption("ira", "IRA", isOffBudget = true, isClosed = false),
+        SeriesAccountOption("401k", "401k", isOffBudget = true, isClosed = false),
+        SeriesAccountOption("old-brokerage", "Old", isOffBudget = true, isClosed = true),
+    )
+    private val categoryOptions = listOf(
+        SeriesCategoryOption("rent", "Rent", "Needs", isIncome = false, isHidden = false),
+        SeriesCategoryOption("food", "Food", "Needs", isIncome = false, isHidden = false),
+        SeriesCategoryOption("legacy", "Legacy", "Needs", isIncome = false, isHidden = true),
+    )
 
     private fun <T> withDemo(body: (BudgetDatabase) -> T): T =
         DemoBudget.create(TestDatabases.driver, TestDatabases.tempFile().absolutePath, LocalDate.of(2026, 10, 15), TestClock()).use(body)
@@ -85,7 +100,7 @@ class ReportSeriesTest {
 
     @Test
     fun dailyNetWorthHasOnePointPerDay() = withDemo { db ->
-        val snapshot = ReportSeries(db).snapshot(SeriesQuery(ReportMetric.NET_WORTH, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 15), ReportInterval.DAY))
+        val snapshot = ReportSeries(db).snapshot(SeriesQuery(ReportMetric.NET_WORTH, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 15), ReportInterval.DAY, SeriesFilters()))
         assertEquals(15, snapshot.points.size)
         assertEquals(ledger(db, "$onBudget AND t.date <= 20261015"), snapshot.points.last().endingBalance)
     }
@@ -176,20 +191,105 @@ class ReportSeriesTest {
 
     @Test
     fun filterSelectionBecomesAllWhenEverythingIsPicked() {
-        val available = setOf("a", "b", "c")
-        var filters = SeriesFilters()
-        filters = filters.withAccount("b", selected = false, available = available)
-        assertEquals(setOf("a", "c"), filters.accounts)
-        assertFalse(filters.isAccountSelected("b"))
-        filters = filters.withAccount("b", selected = true, available = available)
-        assertNull(filters.accounts)
-        filters = filters.clearCategories()
-        assertEquals(emptySet<String>(), filters.categories)
-        assertFalse(filters.includeUncategorized)
-        assertEquals(2, filters.activeCount(ReportMetric.SPENDING))
-        assertEquals(0, filters.activeCount(ReportMetric.NET_WORTH))
-        assertEquals(SeriesFilters(), filters.normalized(ReportMetric.NET_WORTH))
+        var filters = draft().withAccount("checking", included = false)
+        assertEquals(setOf("savings", "ira", "401k", "old-brokerage"), filters.filters.accounts)
+        assertFalse(filters.isAccountIncluded("checking"))
+        filters = filters.withAccount("checking", included = true)
+        assertNull(filters.filters.accounts)
+
+        filters = filters.clearAccounts().clearCategories()
+        assertEquals(emptySet<String>(), filters.filters.accounts)
+        assertEquals(emptySet<String>(), filters.filters.categories)
+        assertFalse(filters.filters.includeUncategorized)
+        assertEquals(4, filters.filters.activeCount(ReportMetric.SPENDING))
+        assertEquals(2, filters.filters.activeCount(ReportMetric.NET_WORTH))
+        assertEquals(SeriesFilters(accounts = emptySet()), filters.filters.normalized(ReportMetric.NET_WORTH))
     }
+
+    @Test
+    fun netWorthDefaultsToEveryAccountAndTheCountComparesAgainstTheMetricsDefaults() {
+        assertTrue(SeriesFilters.defaults(ReportMetric.NET_WORTH).includeOffBudget)
+        for (metric in ReportMetric.entries.filter { it != ReportMetric.NET_WORTH }) assertFalse(SeriesFilters.defaults(metric).includeOffBudget)
+        assertEquals(SeriesFilters.defaults(ReportMetric.NET_WORTH), SeriesQuery(ReportMetric.NET_WORTH, sep1, oct31, ReportInterval.MONTH).filters)
+        assertEquals(0, SeriesFilters.defaults(ReportMetric.NET_WORTH).activeCount(ReportMetric.NET_WORTH))
+        assertEquals(0, SeriesFilters.defaults(ReportMetric.SPENDING).activeCount(ReportMetric.SPENDING))
+        assertEquals(1, SeriesFilters.defaults(ReportMetric.NET_WORTH).copy(includeOffBudget = false).activeCount(ReportMetric.NET_WORTH))
+    }
+
+    @Test
+    fun calendarDetailStartsFromItsCardsAccountsAndTransfers() {
+        val defaults = ReportExplorerPresets.defaultFilters("transaction-calendar", ReportTransferFilter.TRANSFERS)
+        assertEquals(ReportMetric.CASH_FLOW, ReportExplorerPresets.forCard("transaction-calendar")?.metric)
+        assertTrue(defaults.includeOffBudget)
+        assertEquals(ReportTransferFilter.TRANSFERS, defaults.transfers)
+        assertEquals(0, defaults.activeCount(ReportMetric.CASH_FLOW, defaults))
+        assertEquals(1, defaults.copy(transfers = ReportTransferFilter.ALL).activeCount(ReportMetric.CASH_FLOW, defaults))
+
+        val cashFlow = ReportExplorerPresets.defaultFilters("cash-flow", ReportTransferFilter.TRANSFERS)
+        assertFalse(cashFlow.includeOffBudget)
+        assertEquals(ReportTransferFilter.NON_TRANSFERS, cashFlow.transfers)
+        assertEquals(0, cashFlow.activeCount(ReportMetric.CASH_FLOW))
+        assertTrue(ReportExplorerPresets.defaultFilters("net-worth").includeOffBudget)
+        assertFalse(ReportExplorerPresets.defaultFilters("spending").includeOffBudget)
+    }
+
+    @Test
+    fun netWorthDetailsIncludeOffBudgetAccountsLikeTheDashboardCard() = withDemo { db ->
+        val dashboard = ReportReads(db).dashboard("2026-10", "2026-10-15")
+        val details = ReportSeries(db).snapshot(
+            SeriesQuery(ReportMetric.NET_WORTH, LocalDate.of(2026, 10, 1), oct31, ReportInterval.MONTH, ReportExplorerPresets.defaultFilters("net-worth")),
+        )
+        val onBudgetOnly = ReportSeries(db).snapshot(
+            SeriesQuery(ReportMetric.NET_WORTH, LocalDate.of(2026, 10, 1), oct31, ReportInterval.MONTH, SeriesFilters(includeOffBudget = false)),
+        )
+        assertEquals(dashboard.netWorth.balance, details.totals.endingBalance)
+        assertNotEquals(dashboard.netWorth.balance, onBudgetOnly.totals.endingBalance)
+    }
+
+    @Test
+    fun cashFlowAndCalendarDetailsStartFromTheirCardsNumbers() = withDemo { db ->
+        val dashboard = ReportReads(db).dashboard("2026-10", "2026-10-15")
+        val cards = ReportCardReads(db)
+        val series = ReportSeries(db)
+        val oct1 = LocalDate.of(2026, 10, 1)
+
+        val cashFlow = series.snapshot(SeriesQuery(ReportMetric.CASH_FLOW, oct1, LocalDate.of(2026, 10, 15), ReportInterval.MONTH, ReportExplorerPresets.defaultFilters("cash-flow", cards.calendarTransfers())))
+        assertEquals(dashboard.cashFlow.income, cashFlow.totals.income)
+        assertEquals(dashboard.cashFlow.expenses, cashFlow.totals.expenses)
+
+        // No dashboard row means Actual's calendar default: every account and every transfer.
+        assertEquals(ReportTransferFilter.ALL, cards.calendarTransfers())
+        val calendarDefaults = ReportExplorerPresets.defaultFilters("transaction-calendar", cards.calendarTransfers())
+        for (month in cards.transactionCalendar("2026-10")) {
+            val start = LocalDate.parse("${month.month}-01")
+            val end = YearMonth.from(start).atEndOfMonth()
+            val details = series.snapshot(SeriesQuery(ReportMetric.CASH_FLOW, start, end, ReportInterval.MONTH, calendarDefaults))
+            assertEquals(month.income, details.totals.income)
+            assertEquals(month.expenses, details.totals.expenses)
+            val listed = ReportExplorer(db).explore(ExplorerFilter(start, end, transfers = ReportTransferFilter.ALL))
+            assertTrue(listed.rows.isNotEmpty())
+        }
+
+        val september = cards.transactionCalendar("2026-10").first { it.month == "2026-09" }
+        val cashFlowRules = series.snapshot(SeriesQuery(ReportMetric.CASH_FLOW, sep1, LocalDate.of(2026, 9, 30), ReportInterval.MONTH, SeriesFilters()))
+        assertNotEquals(september.expenses, cashFlowRules.totals.expenses)
+    }
+
+    @Test
+    fun transferFilterChoosesWhichCashFlowTransfersCount() = withDemo { db ->
+        val series = ReportSeries(db)
+        fun expenses(transfers: ReportTransferFilter) = series.snapshot(
+            query(ReportMetric.CASH_FLOW, filters = SeriesFilters(includeOffBudget = true, transfers = transfers)),
+        ).totals.expenses
+        val all = expenses(ReportTransferFilter.ALL)
+        val without = expenses(ReportTransferFilter.NON_TRANSFERS)
+        val only = expenses(ReportTransferFilter.TRANSFERS)
+        assertTrue(only > 0L)
+        assertEquals(all, without + only)
+    }
+
+    private fun draft(filters: SeriesFilters = SeriesFilters.defaults(ReportMetric.SPENDING), defaults: SeriesFilters = SeriesFilters.defaults(ReportMetric.SPENDING)) =
+        SeriesFilterDraft(filters, defaults, accountOptions, categoryOptions)
 
     @Test
     fun scaledRoundsHalfAwayFromZero() {

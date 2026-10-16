@@ -57,7 +57,11 @@ class ReportDrilldown(private val database: BudgetDatabase) {
             add(QueryCondition.Date(QueryDateCondition(QueryDateOperation.IS_ON_OR_BEFORE, QueryDay.of(filter.end.toString())!!)))
             filter.accountIds?.takeIf { it.isNotEmpty() }?.let { add(QueryCondition.Account(QueryIdCondition.oneOf(it.toList()))) }
             filter.categoryIds?.takeIf { it.isNotEmpty() }?.let { add(QueryCondition.Category(QueryIdCondition.oneOf(it.toList()))) }
-            if (!filter.includeTransfers) add(QueryCondition.Transfer(false))
+            when (filter.transfers) {
+                ReportTransferFilter.ALL -> Unit
+                ReportTransferFilter.TRANSFERS -> add(QueryCondition.Transfer(true))
+                ReportTransferFilter.NON_TRANSFERS -> add(QueryCondition.Transfer(false))
+            }
         }
         val page = TransactionQueries(database).query(conditions = conditions)
         return ReportDrilldownProjection.project(page.transactions, page.contributingTransactionIds)

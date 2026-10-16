@@ -52,6 +52,7 @@ import com.sporez.actualist.core.budget.Months
 import com.sporez.actualist.core.reports.MonthComparisonReport
 import com.sporez.actualist.core.reports.ReportCardOrder
 import com.sporez.actualist.core.reports.ReportCardReads
+import com.sporez.actualist.core.reports.ReportTransferFilter
 import com.sporez.actualist.core.reports.ReportsDashboard
 import com.sporez.actualist.core.reports.ThreeMonthAverageReport
 import com.sporez.actualist.core.reports.TransactionCalendarMonth
@@ -63,6 +64,8 @@ class ReportCards(
     val comparison: MonthComparisonReport,
     val average: ThreeMonthAverageReport,
     val calendar: List<TransactionCalendarMonth>,
+    /** The calendar card's transfer setting; its Explorer details open with it. */
+    val calendarTransfers: ReportTransferFilter,
 )
 
 class ReportsViewModel(session: BudgetSession) : ViewModel() {
@@ -81,7 +84,7 @@ class ReportsViewModel(session: BudgetSession) : ViewModel() {
     val cards = reloading(session, _month) { month ->
         val end = if (month == currentMonth) today else java.time.YearMonth.parse(month).atEndOfMonth()
         val reads = ReportCardReads(database)
-        ReportCards(reads.monthComparison(month, end.toString()), reads.threeMonthAverage(month, end.toString()), reads.transactionCalendar(month))
+        ReportCards(reads.monthComparison(month, end.toString()), reads.threeMonthAverage(month, end.toString()), reads.transactionCalendar(month), reads.calendarTransfers())
     }
 
     fun shift(months: Int) {
@@ -97,7 +100,7 @@ fun ReportsScreen(
     viewModel: ReportsViewModel,
     onExplore: () -> Unit = {},
     /** A card was tapped: its [ReportCardOrder] id, so the Explorer can open preset for that report. */
-    onOpenCard: (String) -> Unit = { onExplore() },
+    onOpenCard: (String, ReportTransferFilter) -> Unit = { _, _ -> onExplore() },
     /** Pull-to-refresh: runs the budget sync while the indicator shows. Stays before the trailing [onOpenCategory] lambda. */
     onRefresh: suspend () -> Unit = {},
     onOpenCategory: (String, String) -> Unit = { _, _ -> },
@@ -106,6 +109,7 @@ fun ReportsScreen(
     val month by viewModel.month.collectAsState()
     val cardsState by viewModel.cards.collectAsState()
     val cards = (cardsState as? Loadable.Ready)?.value
+    val calendarTransfers = cards?.calendarTransfers ?: ReportTransferFilter.ALL
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val orderStore = remember { ReportOrderStore(context) }
     var order by remember { mutableStateOf(orderStore.load()) }
@@ -154,13 +158,13 @@ fun ReportsScreen(
                         }
                         for (id in order) {
                             when (id) {
-                                "net-worth" -> item(key = id) { NetWorthCard(dashboard) { onOpenCard(id) } }
-                                "cash-flow" -> item(key = id) { CashFlowCard(dashboard) { onOpenCard(id) } }
-                                "month-comparison" -> if (cards != null) item(key = id) { MonthComparisonCard(cards.comparison) { onOpenCard(id) } }
-                                "spending" -> item(key = id) { SpendingCard(dashboard, onOpenCategory) { onOpenCard(id) } }
-                                "budget-comparison" -> item(key = id) { BudgetComparisonCard(dashboard, onOpenCategory) { onOpenCard(id) } }
-                                "three-month-average" -> if (cards != null) item(key = id) { ThreeMonthAverageCard(cards.average) { onOpenCard(id) } }
-                                "transaction-calendar" -> if (cards != null) item(key = id) { TransactionCalendarCard(cards.calendar) { onOpenCard(id) } }
+                                "net-worth" -> item(key = id) { NetWorthCard(dashboard) { onOpenCard(id, calendarTransfers) } }
+                                "cash-flow" -> item(key = id) { CashFlowCard(dashboard) { onOpenCard(id, calendarTransfers) } }
+                                "month-comparison" -> if (cards != null) item(key = id) { MonthComparisonCard(cards.comparison) { onOpenCard(id, calendarTransfers) } }
+                                "spending" -> item(key = id) { SpendingCard(dashboard, onOpenCategory) { onOpenCard(id, calendarTransfers) } }
+                                "budget-comparison" -> item(key = id) { BudgetComparisonCard(dashboard, onOpenCategory) { onOpenCard(id, calendarTransfers) } }
+                                "three-month-average" -> if (cards != null) item(key = id) { ThreeMonthAverageCard(cards.average) { onOpenCard(id, calendarTransfers) } }
+                                "transaction-calendar" -> if (cards != null) item(key = id) { TransactionCalendarCard(cards.calendar) { onOpenCard(id, calendarTransfers) } }
                             }
                         }
                     }

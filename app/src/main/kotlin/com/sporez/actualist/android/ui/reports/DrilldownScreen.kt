@@ -36,21 +36,30 @@ import com.sporez.actualist.core.reports.DrilldownRow
 import com.sporez.actualist.core.reports.ExplorerFilter
 import com.sporez.actualist.core.reports.ReportDrilldown
 import com.sporez.actualist.core.reports.ReportSeries
+import com.sporez.actualist.core.reports.ReportTransferFilter
 import com.sporez.actualist.core.store.BudgetSession
 import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-/** The route pattern for [DrilldownScreen]; register it with these four string arguments (all default to empty). */
-const val DRILLDOWN_ROUTE_PATTERN = "drilldown?start={start}&end={end}&accounts={accounts}&categories={categories}&title={title}"
+/** The route pattern for [DrilldownScreen]; register it with these six string arguments (all default to empty). */
+const val DRILLDOWN_ROUTE_PATTERN = "drilldown?start={start}&end={end}&accounts={accounts}&categories={categories}&title={title}&transfers={transfers}"
 
 /** The navigation route that opens [DrilldownScreen] for a report range and filters. */
-fun drilldownRoute(start: LocalDate, end: LocalDate, accountIds: Set<String>?, categoryIds: Set<String>?, title: String = "Transactions"): String =
+fun drilldownRoute(
+    start: LocalDate,
+    end: LocalDate,
+    accountIds: Set<String>?,
+    categoryIds: Set<String>?,
+    title: String = "Transactions",
+    transfers: ReportTransferFilter = ReportTransferFilter.NON_TRANSFERS,
+): String =
     "drilldown?start=$start&end=$end" +
         "&accounts=${Uri.encode(accountIds.orEmpty().joinToString(","))}" +
         "&categories=${Uri.encode(categoryIds.orEmpty().joinToString(","))}" +
-        "&title=${Uri.encode(title)}"
+        "&title=${Uri.encode(title)}" +
+        "&transfers=${transfers.name}"
 
 private class DrilldownData(val result: DrilldownResult, val names: Map<String, String>)
 
@@ -74,18 +83,20 @@ fun DrilldownScreen(
     end: String,
     accounts: String,
     categories: String,
+    transfers: String,
     onOpenTransaction: (String) -> Unit,
 ) {
     val revision by session.revision.collectAsState()
     var attempt by remember { mutableStateOf(0) }
     var state by remember { mutableStateOf<Loadable<DrilldownData>>(Loadable.Loading) }
-    LaunchedEffect(start, end, accounts, categories, revision, attempt) {
+    LaunchedEffect(start, end, accounts, categories, transfers, revision, attempt) {
         try {
             val filter = ExplorerFilter(
                 start = LocalDate.parse(start),
                 end = LocalDate.parse(end),
                 accountIds = accounts.split(',').filter { it.isNotBlank() }.toSet().takeIf { it.isNotEmpty() },
                 categoryIds = categories.split(',').filter { it.isNotBlank() }.toSet().takeIf { it.isNotEmpty() },
+                transfers = ReportTransferFilter.entries.firstOrNull { it.name == transfers } ?: ReportTransferFilter.NON_TRANSFERS,
             )
             state = session.read {
                 val result = ReportDrilldown(database).load(filter)

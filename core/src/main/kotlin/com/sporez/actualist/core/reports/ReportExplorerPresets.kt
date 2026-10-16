@@ -15,6 +15,16 @@ object ReportExplorerPresets {
         "transaction-calendar" -> ExplorerPreset(ReportMetric.CASH_FLOW, RangePreset.MONTH_TO_DATE, ReportInterval.DAY)
         else -> null
     }
+
+    /**
+     * The filters a card's details open with, so they show the same numbers the card does. The Calendar card
+     * follows Actual's calendar widget: every account, with transfers as its card conditions choose
+     * ([calendarTransfers]); every other card starts from its report's own defaults.
+     */
+    fun defaultFilters(cardId: String, calendarTransfers: ReportTransferFilter = ReportTransferFilter.ALL): SeriesFilters {
+        val filters = SeriesFilters.defaults(forCard(cardId)?.metric ?: ReportMetric.CASH_FLOW)
+        return if (cardId == "transaction-calendar") filters.copy(includeOffBudget = true, transfers = calendarTransfers) else filters
+    }
 }
 
 /** Shows the matching transactions a page at a time. */

@@ -280,28 +280,35 @@ fun MainScaffold(session: BudgetSession, container: AppContainer, app: AppViewMo
                 ReportsScreen(
                     vm,
                     onExplore = { navController.navigate("explorer") },
-                    onOpenCard = { card -> navController.navigate("explorer?card=${encode(card)}") },
+                    onOpenCard = { card, transfers -> navController.navigate("explorer?card=${encode(card)}&transfers=${transfers.name}") },
                     onRefresh = { syncNow() },
                 ) { id, name -> navController.navigate("category/$id?name=${encode(name)}") }
             }
             composable(
-                "explorer?card={card}",
-                arguments = listOf(navArgument("card") { type = NavType.StringType; defaultValue = "" }),
+                "explorer?card={card}&transfers={transfers}",
+                arguments = listOf("card", "transfers").map { navArgument(it) { type = NavType.StringType; defaultValue = "" } },
             ) { backStack ->
                 val card = backStack.arguments?.getString("card").orEmpty()
+                val transfers = com.sporez.actualist.core.reports.ReportTransferFilter.entries
+                    .firstOrNull { it.name == backStack.arguments?.getString("transfers") }
+                    ?: com.sporez.actualist.core.reports.ReportTransferFilter.ALL
                 val vm = viewModel(key = "explorer-$key-$card") {
-                    com.sporez.actualist.android.ui.reports.ExplorerViewModel(session, preset = com.sporez.actualist.core.reports.ReportExplorerPresets.forCard(card))
+                    com.sporez.actualist.android.ui.reports.ExplorerViewModel(
+                        session,
+                        preset = com.sporez.actualist.core.reports.ReportExplorerPresets.forCard(card),
+                        defaultFilters = com.sporez.actualist.core.reports.ReportExplorerPresets.defaultFilters(card, transfers),
+                    )
                 }
                 com.sporez.actualist.android.ui.reports.ExplorerScreen(vm, onViewTransactions = { navController.navigate(it) }) { id -> navController.navigate("transaction/${encode(id)}") }
             }
             composable(
                 com.sporez.actualist.android.ui.reports.DRILLDOWN_ROUTE_PATTERN,
-                arguments = listOf("start", "end", "accounts", "categories", "title").map {
+                arguments = listOf("start", "end", "accounts", "categories", "title", "transfers").map {
                     navArgument(it) { type = NavType.StringType; defaultValue = "" }
                 },
             ) { entry ->
                 fun arg(name: String) = entry.arguments?.getString(name).orEmpty()
-                com.sporez.actualist.android.ui.reports.DrilldownScreen(session, arg("start"), arg("end"), arg("accounts"), arg("categories")) { id ->
+                com.sporez.actualist.android.ui.reports.DrilldownScreen(session, arg("start"), arg("end"), arg("accounts"), arg("categories"), arg("transfers")) { id ->
                     navController.navigate("transaction/${encode(id)}")
                 }
             }

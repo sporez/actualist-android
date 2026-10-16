@@ -115,6 +115,9 @@ class ReportCardReads(private val database: BudgetDatabase) {
         }
     }
 
+    /** The calendar card's transfer setting, which its Explorer details open with. */
+    fun calendarTransfers(): ReportTransferFilter = sql.locked { calendarTransferFilter() }
+
     private fun dayId(month: String, day: Int) = "$month-${"%02d".format(java.util.Locale.ROOT, day)}"
 
     private fun comparableDay(endDay: String): Int = (endDay.takeLast(2).toIntOrNull() ?: 1).coerceIn(1, 28)
@@ -155,14 +158,14 @@ class ReportCardReads(private val database: BudgetDatabase) {
     }
 
     /** Per day: (income, expenses) with expenses as a positive magnitude. */
-    private fun calendarActivity(startMonth: String, endMonth: String, filter: TransferFilter): Map<String, Pair<Long, Long>> {
+    private fun calendarActivity(startMonth: String, endMonth: String, filter: ReportTransferFilter): Map<String, Pair<Long, Long>> {
         val split = TransactionSplitSql(database.columnSet("transactions"))
         val day = normalizedDateSql(split.date)
         val transferred = split.transferredId
         val transferPredicate = when (filter) {
-            TransferFilter.ALL -> "1"
-            TransferFilter.TRANSFERS -> "$transferred IS NOT NULL AND $transferred != ''"
-            TransferFilter.NON_TRANSFERS -> "$transferred IS NULL OR $transferred = ''"
+            ReportTransferFilter.ALL -> "1"
+            ReportTransferFilter.TRANSFERS -> "$transferred IS NOT NULL AND $transferred != ''"
+            ReportTransferFilter.NON_TRANSFERS -> "$transferred IS NULL OR $transferred = ''"
         }
         val rows = sql.query(
             """
@@ -193,23 +196,21 @@ class ReportCardReads(private val database: BudgetDatabase) {
         return result
     }
 
-    private enum class TransferFilter { ALL, TRANSFERS, NON_TRANSFERS }
-
     /** Reads the first live `calendar-card` of the dashboard for its `transfer is` condition. */
-    private fun calendarTransferFilter(): TransferFilter = runCatching {
+    private fun calendarTransferFilter(): ReportTransferFilter = runCatching {
         val columns = database.columnSet("dashboard")
-        if ("type" !in columns || "meta" !in columns) return@runCatching TransferFilter.ALL
+        if ("type" !in columns || "meta" !in columns) return@runCatching ReportTransferFilter.ALL
         val order = listOf("y", "x").filter { it in columns }.joinToString(", ")
         val orderClause = if (order.isEmpty()) "" else "ORDER BY $order"
         val meta = sql.queryString(
             "SELECT meta FROM dashboard WHERE ${BudgetDatabase.livePredicate(columns)} AND type = 'calendar-card' $orderClause LIMIT 1",
-        ) ?: return@runCatching TransferFilter.ALL
+        ) ?: return@runCatching ReportTransferFilter.ALL
         val condition = Regex("""\{[^{}]*"field"\s*:\s*"transfer"[^{}]*\}""").findAll(meta)
             .map { it.value }
             .firstOrNull { Regex(""""op"\s*:\s*"is"""").containsMatchIn(it) }
-            ?: return@runCatching TransferFilter.ALL
+            ?: return@runCatching ReportTransferFilter.ALL
         val value = Regex(""""value"\s*:\s*(true|false|1|0)""").find(condition)?.groupValues?.get(1)
-            ?: return@runCatching TransferFilter.ALL
-        if (value == "true" || value == "1") TransferFilter.TRANSFERS else TransferFilter.NON_TRANSFERS
-    }.getOrDefault(TransferFilter.ALL)
+            ?: return@runCatching ReportTransferFilter.ALL
+        if (value == "true" || value == "1") ReportTransferFilter.TRANSFERS else ReportTransferFilter.NON_TRANSFERS
+    }.getOrDefault(ReportTransferFilter.ALL)
 }

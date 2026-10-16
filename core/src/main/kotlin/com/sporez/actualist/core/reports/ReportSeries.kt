@@ -25,6 +25,8 @@ enum class ReportMetric(val title: String) {
     ;
 
     val supportsCategoryFilters: Boolean get() = this != NET_WORTH
+
+    val supportsTransferFilter: Boolean get() = this == CASH_FLOW
 }
 
 /** Actualist `ReportInterval`. */
@@ -63,8 +65,15 @@ enum class SeriesError(val message: String) {
 class ReportSeriesException(val error: SeriesError) : Exception(error.message)
 
 /**
- * Actualist `ReportExplorerFilters`. A null selection means everything; defaults are Actualist's:
- * on-budget accounts only, hidden categories and uncategorized activity included.
+ * Which transfers a cash-flow read counts (Actualist `ReportTransferFilter`). [TRANSFERS] (transfers
+ * only) comes from an Actual Calendar card whose conditions say `transfer is true`.
+ */
+enum class ReportTransferFilter { ALL, TRANSFERS, NON_TRANSFERS }
+
+/**
+ * Actualist `ReportExplorerFilters`. A null selection means everything. The constructor defaults are the
+ * activity reports' ([defaults] for each metric): on-budget accounts only, hidden categories and
+ * uncategorized activity included, transfers left out of cash flow.
  */
 data class SeriesFilters(
     val accounts: Set<String>? = null,
@@ -72,39 +81,27 @@ data class SeriesFilters(
     val includeOffBudget: Boolean = false,
     val includeHiddenCategories: Boolean = true,
     val includeUncategorized: Boolean = true,
+    val transfers: ReportTransferFilter = ReportTransferFilter.NON_TRANSFERS,
 ) {
-    fun isAccountSelected(id: String): Boolean = accounts?.contains(id) ?: true
-    fun isCategorySelected(id: String): Boolean = categories?.contains(id) ?: true
-
-    fun withAccount(id: String, selected: Boolean, available: Set<String>): SeriesFilters =
-        copy(accounts = updated(accounts, id, selected, available))
-
-    fun withCategory(id: String, selected: Boolean, available: Set<String>): SeriesFilters =
-        copy(categories = updated(categories, id, selected, available))
-
-    fun clearAccounts(): SeriesFilters = copy(accounts = emptySet())
-
-    fun clearCategories(): SeriesFilters = copy(categories = emptySet(), includeUncategorized = false)
-
     /** Net Worth ignores category filters. */
     fun normalized(metric: ReportMetric): SeriesFilters =
         if (metric == ReportMetric.NET_WORTH) copy(categories = null, includeHiddenCategories = true, includeUncategorized = true) else this
 
-    /** How many filters differ from the defaults (Actualist's badge on the filter button). */
-    fun activeCount(metric: ReportMetric): Int {
+    /** How many filters differ from [baseline] (Actualist's badge on the filter button). */
+    fun activeCount(metric: ReportMetric, baseline: SeriesFilters = defaults(metric)): Int {
         var count = 0
-        if (accounts != null) count++
-        if (metric.supportsCategoryFilters && categories != null) count++
-        if (includeOffBudget) count++
-        if (metric.supportsCategoryFilters && !includeHiddenCategories) count++
-        if (metric.supportsCategoryFilters && !includeUncategorized) count++
+        if (accounts != baseline.accounts) count++
+        if (metric.supportsCategoryFilters && categories != baseline.categories) count++
+        if (includeOffBudget != baseline.includeOffBudget) count++
+        if (metric.supportsCategoryFilters && includeHiddenCategories != baseline.includeHiddenCategories) count++
+        if (metric.supportsCategoryFilters && includeUncategorized != baseline.includeUncategorized) count++
+        if (metric.supportsTransferFilter && transfers != baseline.transfers) count++
         return count
     }
 
-    private fun updated(current: Set<String>?, id: String, selected: Boolean, available: Set<String>): Set<String>? {
-        val ids = (current ?: available).toMutableSet()
-        if (selected) ids.add(id) else ids.remove(id)
-        return if (ids == available) null else ids
+    companion object {
+        /** Net worth counts every account, matching the Reports dashboard card; activity reports start from on-budget accounts. */
+        fun defaults(metric: ReportMetric): SeriesFilters = SeriesFilters(includeOffBudget = metric == ReportMetric.NET_WORTH)
     }
 }
 
@@ -116,7 +113,7 @@ data class SeriesQuery(
     val start: LocalDate,
     val end: LocalDate,
     val interval: ReportInterval,
-    val filters: SeriesFilters = SeriesFilters(),
+    val filters: SeriesFilters = SeriesFilters.defaults(metric),
 ) {
     val validationError: SeriesError?
         get() {
@@ -454,7 +451,13 @@ class ReportSeries(private val database: BudgetDatabase) {
             add(QueryCondition.Date(QueryDateCondition(QueryDateOperation.IS_ON_OR_BEFORE, QueryDay.of(end.toString())!!)))
             add(QueryCondition.Account(QueryIdCondition.oneOf(accountIds.toList())))
             categoryCondition(query, catalog)?.let { add(QueryCondition.Category(it)) }
-            if (query.metric == ReportMetric.CASH_FLOW) add(QueryCondition.Transfer(false))
+            if (query.metric == ReportMetric.CASH_FLOW) {
+                when (query.filters.transfers) {
+                    ReportTransferFilter.ALL -> Unit
+                    ReportTransferFilter.TRANSFERS -> add(QueryCondition.Transfer(true))
+                    ReportTransferFilter.NON_TRANSFERS -> add(QueryCondition.Transfer(false))
+                }
+            }
         }
         val page = TransactionQueries(database).query(conditions = conditions)
         return page.contributingTransactions.mapNotNull { row ->
